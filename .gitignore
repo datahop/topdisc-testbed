@@ -1,4 +1,6 @@
-simnet
+/simnet
+/simnet-vanilla
 *.json
+!go.sum
 __pycache__/
 figs/
