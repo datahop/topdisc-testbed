@@ -1,0 +1,4 @@
+simnet
+*.json
+__pycache__/
+figs/
