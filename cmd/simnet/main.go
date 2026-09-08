@@ -59,6 +59,8 @@ func main() {
 	adLifetime := flag.Duration("ad-lifetime", 0, "topic ad lifetime (0 = discv5 default of 15m); also drives RegAttemptTimeout = 1.5x this")
 	allRegister := flag.Bool("all-register", false, "single shared topic where every node both registers and searches it (uniform membership, no Zipf); routes through the multi-topic engine with 1 topic")
 	snapshotDirFlag := flag.String("snapshot-dir", "", "if set, write periodic per-registrant find-count snapshots + registrant manifest (id+logdist) here for offline spatial analysis")
+	topicNodesLimit := flag.Int("topic-nodes-limit", 0, "topic nodes returned in a TOPICQUERY reply (0 = default 16)")
+	auxNodesLimit := flag.Int("aux-nodes-limit", 0, "closest-to-topic nodes attached to TOPICQUERY and REGTOPIC replies (0 = default 8)")
 	adCacheSize := flag.Int("ad-cache-size", 0, "per-node topic ad cache capacity (0 = default 5000); drives the waiting-time occupancy term")
 	searchBucketSize := flag.Int("search-bucket-size", 0, "topic search bucket size per distance bucket (0 = spec default 16); raises the depth*size per-search registrar ceiling")
 	nodesPerSourceBucket := flag.Int("nodes-per-source-bucket", 0, "max nodes accepted per source per bucket in search+registration tables (0 = default 1)")
@@ -87,6 +89,8 @@ func main() {
 	snapshotDir = *snapshotDirFlag
 	nodeSearchBucketSize = *searchBucketSize
 	nodeAdCacheSize = *adCacheSize
+	nodeTopicNodesLimit = *topicNodesLimit
+	nodeAuxNodesLimit = *auxNodesLimit
 	nodeRegAttemptTimeout = *regAttemptTimeout
 	nodeNodesPerSourceBucket = *nodesPerSourceBucket
 

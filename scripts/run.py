@@ -58,6 +58,8 @@ SCHEMA = [
   ("topic.ad_cache_size",       "ad-cache-size",  "int",   0,     "ads a registrar holds; 0 = default 5000"),
   ("topic.reg_attempt_timeout", "reg-attempt-timeout","dur","0s", "give up on a registrar after this; 0 = 1.5 x ad_lifetime"),
   ("topic.search_bucket_size",  "search-bucket-size","int",0,     "search table entries per distance bucket; 0 = spec default 16"),
+  ("topic.topic_nodes_limit",   "topic-nodes-limit","int", 0,     "topic nodes in a TOPICQUERY reply; 0 = default 16"),
+  ("topic.aux_nodes_limit",     "aux-nodes-limit",  "int", 0,     "closest-to-topic nodes attached to TOPICQUERY and REGTOPIC replies; 0 = default 8"),
   ("topic.nodes_per_source_bucket","nodes-per-source-bucket","int",0,"cap per source per bucket; 0 = default 1 (inert on topdisc)"),
   ("topic.remove_on_expiry",    "remove-on-expiry","bool", False, "drop ads at expiry instead of renewing (inert on topdisc)"),
   ("topic.reg_probe_period",    "reg-probe-period","dur",  "500ms","how often the harness polls for registration admission"),

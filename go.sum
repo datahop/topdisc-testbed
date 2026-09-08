@@ -2,8 +2,8 @@ github.com/ProjectZKM/Ziren/crates/go-runtime/zkvm_runtime v0.0.0-20251001021608
 github.com/ProjectZKM/Ziren/crates/go-runtime/zkvm_runtime v0.0.0-20251001021608-1fe7b43fc4d6/go.mod h1:ioLG6R+5bUSO1oeGSDxOV3FADARuMoytZCSX6MEMQkI=
 github.com/StackExchange/wmi v1.2.1 h1:VIkavFPXSjcnS+O8yTq7NI32k0R5Aj+v39y29VYDOSA=
 github.com/StackExchange/wmi v1.2.1/go.mod h1:rcmrprowKIVzvc+NUiLncP2uuArMWLCbu9SBzvHz7e8=
-github.com/datahop/go-ethereum v1.15.7-0.20260908070608-330814a0b3f4 h1:SuYYbUyONYy/LyB5rV2fgO2g4XNPLDTx5jznjLfh5h4=
-github.com/datahop/go-ethereum v1.15.7-0.20260908070608-330814a0b3f4/go.mod h1:f2EhRwqewIZkGoQekywI2Y2RZAMTSavLNkD9qItFy1A=
+github.com/datahop/go-ethereum v1.15.7-0.20260908134844-149245c8fb0e h1:JpOJAOTmhLVKg/agR/a0sh+w/Vv2F9+3Ci5eZdcMPTo=
+github.com/datahop/go-ethereum v1.15.7-0.20260908134844-149245c8fb0e/go.mod h1:f2EhRwqewIZkGoQekywI2Y2RZAMTSavLNkD9qItFy1A=
 github.com/datahop/simnet v0.0.0-20260904122752-904836695aaa h1:Fw2HWHSVpIfnK2+c2Vqk3K6xgyKwzKueJL/zUuhmuPw=
 github.com/datahop/simnet v0.0.0-20260904122752-904836695aaa/go.mod h1:tfQF1u2DmaB6WHODMtQaLtClEf3a296CKQLq5gAsIS0=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=

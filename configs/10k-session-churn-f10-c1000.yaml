@@ -1,0 +1,37 @@
+# 10k-session-churn with the plan's F_return=10 on both reply types and cache C=1000.
+name: 10k-session-churn-f10-c1000
+population:
+  nodes: 10000
+  topics: 1
+  all_register: true
+  seed: 1
+network:
+  latency_ms: 30
+  bandwidth_mibps: 1000
+  link_buf: 8192
+  router_buf: 32768
+  router_shards: 16
+phases:
+  bootstrap_wait: 180s
+  register_wait: 22m30s
+  register_stagger: 30ms
+  search_stagger: 10ms
+  search_timeout: 10m
+topic:
+  ad_cache_size: 1000
+  topic_nodes_limit: 10
+  aux_nodes_limit: 10
+conn_model:
+  enabled: true
+  max_peers: 50
+  dial_ratio: 3
+  redial_wait: 35s
+session_churn:
+  enabled: true
+  gap: 30s
+traces:
+  metrics: m.json
+  overhead: oh.json
+  overhead_series: series.json
+  overhead_series_period: 30s
+  checkpoint_interval: 60s

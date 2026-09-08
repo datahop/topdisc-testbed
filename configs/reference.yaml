@@ -39,6 +39,8 @@ topic:
   ad_cache_size: 0                   # ads a registrar holds; 0 = default 5000
   reg_attempt_timeout: 0s            # give up on a registrar after this; 0 = 1.5 x ad_lifetime
   search_bucket_size: 0              # search table entries per distance bucket; 0 = spec default 16
+  topic_nodes_limit: 0               # topic nodes in a TOPICQUERY reply; 0 = default 16
+  aux_nodes_limit: 0                 # closest-to-topic nodes attached to TOPICQUERY and REGTOPIC replies; 0 = default 8
   nodes_per_source_bucket: 0         # cap per source per bucket; 0 = default 1 (inert on topdisc)
   remove_on_expiry: false            # drop ads at expiry instead of renewing (inert on topdisc)
   reg_probe_period: 500ms            # how often the harness polls for registration admission
