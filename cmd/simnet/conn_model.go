@@ -36,6 +36,7 @@ type connTable struct {
 	rejectedFull  int // dials refused because the target had no inbound slot
 	dupDropped    int // discovered peers skipped because already connected either way
 	disconnects   int // connections dropped by the disconnect driver
+	departs       int // session-churn departures (nodes going offline)
 	refills       int // outbound slots refilled after a disconnect
 	refillTotalMs int64
 }
@@ -250,8 +251,8 @@ func (c *connTable) report() {
 		if c.refills > 0 {
 			mean = float64(c.refillTotalMs) / float64(c.refills) / 1000
 		}
-		fmt.Printf("disconnects=%d refilled=%d (%.1f%%) mean-refill=%.1fs\n",
-			c.disconnects, c.refills, 100*float64(c.refills)/float64(c.disconnects), mean)
+		fmt.Printf("disconnects=%d refilled=%d (%.1f%%) mean-refill=%.1fs departs=%d\n",
+			c.disconnects, c.refills, 100*float64(c.refills)/float64(c.disconnects), mean, c.departs)
 	}
 
 	buckets := make([]int, overheadBuckets)
@@ -344,6 +345,7 @@ func (c *connTable) depart(i int) {
 		}
 	}
 	c.offline[i] = true
+	c.departs++
 	c.lostAt[i] = nil // a returning node fills from empty; that is not a refill
 	c.mu.Unlock()
 

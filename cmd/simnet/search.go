@@ -409,6 +409,12 @@ sessions:
 			// return a node it has returned before, and the dialer retries it once
 			// its redial cooldown expires. connTable rejects peers already
 			// connected in either direction.
+			// A stale wake can reopen a search on a node that is already full
+			// (a departure that fired before its searcher started, say). Park
+			// again rather than walk the whole network for nothing.
+			if pacing.Conns != nil && pacing.Conns.shouldPark(n.idx) {
+				break consume
+			}
 			if isReg && pacing.Conns != nil && !recentlyDialed(lastDial, id, pacing.RedialWait) {
 				lastDial[id] = time.Now()
 				dialAttempts++
