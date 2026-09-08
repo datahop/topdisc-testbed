@@ -29,8 +29,15 @@ go build -o simnet ./cmd/simnet
 python3 scripts/run.py configs/10k-baseline.yaml
 ```
 
-`--dry-run` prints the command instead of running it. Every flag is also
-settable directly; the config is only a convenience.
+`--dry-run` prints the command instead of running it.
+
+A config is the complete description of a test: every parameter the binary
+accepts has a documented YAML field. `configs/reference.yaml` lists all of
+them with their defaults (`scripts/run.py --reference` regenerates it). Each
+run directory gets a `run.yaml` with every parameter filled in from what the
+binary reported it actually ran with, so that file alone reproduces the run —
+nothing about the machine or the checkout is recorded, because those are
+given by where you run it and what you check out.
 
 Figures, once a run has finished:
 
