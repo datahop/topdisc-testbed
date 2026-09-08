@@ -308,12 +308,17 @@ var sessionCDF = [][2]float64{
 	{0.9716, 0.42857}, {0.9902, 0.59524}, {1.0000, 0.95238},
 }
 
-// sessionLength samples a session length as a fraction of the window, or
-// returns false for a node that stays for the whole run.
+// sessionLength decides once whether a node churns at all, and if so samples
+// its first session length as a fraction of the window.
 func sessionLength(rng *rand.Rand) (float64, bool) {
 	if rng.Float64() < sessionAlwaysOnFrac {
 		return 0, false
 	}
+	return churnerSession(rng), true
+}
+
+// churnerSession samples a session length for a node already known to churn.
+func churnerSession(rng *rand.Rand) float64 {
 	u := rng.Float64()
 	prev := 0.0
 	for i, p := range sessionCDF {
@@ -324,13 +329,13 @@ func sessionLength(rng *rand.Rand) (float64, bool) {
 			}
 			span := p[0] - prev
 			if span <= 0 {
-				return p[1], true
+				return p[1]
 			}
-			return lo + (p[1]-lo)*(u-prev)/span, true
+			return lo + (p[1]-lo)*(u-prev)/span
 		}
 		prev = p[0]
 	}
-	return sessionCDF[len(sessionCDF)-1][1], true
+	return sessionCDF[len(sessionCDF)-1][1]
 }
 
 // depart drops every connection the node holds in either direction and marks it
@@ -375,6 +380,44 @@ func (c *connTable) rejoin(i int) {
 // back for the duration of the run.
 func runSessionChurn(c *connTable, window time.Duration, gap time.Duration, seed int64, stop <-chan struct{}, done chan<- struct{}) {
 	defer close(done)
+
+	// Sessions are a fraction of the search window, so they must not start
+	// ticking until searches do. Registration runs for minutes beforehand and
+	// holds no connections; timers started then all expire on an empty
+	// topology. Wait for the first connection instead of guessing the offset.
+	t0 := time.Now()
+	for {
+		c.mu.Lock()
+		live := 0
+		for _, v := range c.out {
+			live += v
+		}
+		c.mu.Unlock()
+		if live > 0 {
+			break
+		}
+		select {
+		case <-stop:
+			return
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	fmt.Printf("[session-churn] started %.0fs after driver launch; window=%s gap=%s\n", time.Since(t0).Seconds(), window, gap)
+	go func() {
+		tick := time.NewTicker(60 * time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-tick.C:
+				c.mu.Lock()
+				fmt.Printf("[session-churn] departs=%d disconnects=%d slots-lost=%d refilled=%d\n", c.departs, c.disconnects, c.losses, c.refills)
+				c.mu.Unlock()
+			}
+		}
+	}()
+
 	rng := rand.New(rand.NewSource(seed))
 	var wg sync.WaitGroup
 	for i := range c.out {
@@ -402,11 +445,7 @@ func runSessionChurn(c *connTable, window time.Duration, gap time.Duration, seed
 				case <-g.C:
 				}
 				c.rejoin(idx)
-				f, again := sessionLength(r)
-				if !again {
-					return
-				}
-				t.Reset(time.Duration(f * float64(window)))
+				t.Reset(time.Duration(churnerSession(r) * float64(window)))
 			}
 		}(i, time.Duration(frac*float64(window)), rand.New(rand.NewSource(seed+int64(i)*2654435761)))
 	}
