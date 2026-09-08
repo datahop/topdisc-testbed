@@ -37,6 +37,7 @@ type connTable struct {
 	dupDropped    int // discovered peers skipped because already connected either way
 	disconnects   int // connections dropped by the disconnect driver
 	departs       int // session-churn departures (nodes going offline)
+	losses        int // outbound slots lost by a node that stays online, i.e. ones it must refill
 	refills       int // outbound slots refilled after a disconnect
 	refillTotalMs int64
 }
@@ -98,6 +99,7 @@ func (c *connTable) dropConn(from, to int, wakeDialer bool) bool {
 	c.in[to]--
 	c.disconnects++
 	if wakeDialer {
+		c.losses++
 		c.lostAt[from] = append(c.lostAt[from], time.Now())
 	}
 	ch := c.wake[from]
@@ -251,8 +253,8 @@ func (c *connTable) report() {
 		if c.refills > 0 {
 			mean = float64(c.refillTotalMs) / float64(c.refills) / 1000
 		}
-		fmt.Printf("disconnects=%d refilled=%d (%.1f%%) mean-refill=%.1fs departs=%d\n",
-			c.disconnects, c.refills, 100*float64(c.refills)/float64(c.disconnects), mean, c.departs)
+		fmt.Printf("disconnects=%d departs=%d slots-lost=%d refilled=%d (%.1f%%) mean-refill=%.1fs\n",
+			c.disconnects, c.departs, c.losses, c.refills, 100*float64(c.refills)/float64(max(c.losses, 1)), mean)
 	}
 
 	buckets := make([]int, overheadBuckets)
