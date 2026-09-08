@@ -15,7 +15,7 @@ network:
 
 phases:
   bootstrap_wait: 180s
-  register_wait: 5m
+  register_wait: 22m30s  # 1.5 x AdLifetime (15m), the registration attempt timeout
   register_stagger: 30ms
   search_stagger: 10ms
   search_timeout: 10m

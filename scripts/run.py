@@ -85,6 +85,10 @@ def main():
         return
 
     outdir.mkdir(parents=True, exist_ok=True)
+    # Snapshot what was run next to its traces, so a result directory is
+    # reproducible on its own: the config as given, and the exact command.
+    (outdir / "config.yaml").write_text(Path(a.config).read_text())
+    (outdir / "command.txt").write_text(" ".join(shlex.quote(c) for c in cmd) + "\n")
     log = outdir / "run.log"
     print(f"{outdir}\n{' '.join(shlex.quote(c) for c in cmd)}", flush=True)
     with log.open("w") as f:
