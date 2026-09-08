@@ -29,6 +29,7 @@ type connTable struct {
 	outPeers []map[int]struct{} // directed: nodes this one dialed
 	wake     []chan struct{}    // signalled when this node loses an outbound slot
 	offline  []bool             // node is away for a churn session gap
+	lostAt   [][]time.Time      // when each still-unfilled outbound slot was lost
 	maxOut   int
 	maxIn    int
 
@@ -56,6 +57,7 @@ func newConnTable(all []nodeRec, maxPeers, dialRatio int) *connTable {
 		outPeers: make([]map[int]struct{}, len(all)),
 		wake:     make([]chan struct{}, len(all)),
 		offline:  make([]bool, len(all)),
+		lostAt:   make([][]time.Time, len(all)),
 		maxOut:   maxOut,
 		maxIn:    maxPeers - maxOut,
 	}
@@ -94,6 +96,9 @@ func (c *connTable) dropConn(from, to int, wakeDialer bool) bool {
 	c.out[from]--
 	c.in[to]--
 	c.disconnects++
+	if wakeDialer {
+		c.lostAt[from] = append(c.lostAt[from], time.Now())
+	}
 	ch := c.wake[from]
 	c.mu.Unlock()
 
@@ -134,15 +139,6 @@ func (c *connTable) dropRandom(rng *rand.Rand, count int) int {
 		}
 	}
 	return dropped
-}
-
-// recordRefill notes that a searcher refilled an outbound slot, and how long
-// it took from noticing the loss.
-func (c *connTable) recordRefill(d time.Duration) {
-	c.mu.Lock()
-	c.refills++
-	c.refillTotalMs += d.Milliseconds()
-	c.mu.Unlock()
 }
 
 // runDisconnectDriver drops frac of all live connections every interval,
@@ -203,6 +199,11 @@ func (c *connTable) dial(from int, to enode.ID) (ok, targetFull bool) {
 	c.peers[from][j] = struct{}{}
 	c.peers[j][from] = struct{}{}
 	c.outPeers[from][j] = struct{}{}
+	if q := c.lostAt[from]; len(q) > 0 {
+		c.refills++
+		c.refillTotalMs += time.Since(q[0]).Milliseconds()
+		c.lostAt[from] = q[1:]
+	}
 	return true, false
 }
 
@@ -343,6 +344,7 @@ func (c *connTable) depart(i int) {
 		}
 	}
 	c.offline[i] = true
+	c.lostAt[i] = nil // a returning node fills from empty; that is not a refill
 	c.mu.Unlock()
 
 	for _, j := range dialed {

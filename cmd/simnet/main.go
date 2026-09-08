@@ -39,6 +39,7 @@ func main() {
 	maxBootnodes := flag.Int("max-bootnodes", 20, "max bootnodes each newly-spawned node uses to discover the network; smaller = less startup traffic, slower routing-table convergence")
 	searchStagger := flag.Duration("search-stagger", 0, "per-slot delay before each searcher starts its TopicSearch; spreads search activity across a window")
 	searchPauseMax := flag.Duration("search-pause-max", 0, "upper bound for random sleep between iter.Next() calls per searcher; models paced consumption instead of full-speed polling")
+	abortOnDrop := flag.Bool("abort-on-drop", true, "exit as soon as any simulated link drops a packet; a run with drops has queueing bias in every timing")
 	connModel := flag.Bool("conn-model", false, "model geth peer slots: a searcher stops consuming discovery once its outbound slots are full, so a churn-free run reaches a steady state")
 	connMaxPeers := flag.Int("conn-max-peers", 50, "total peer slots per node (geth default)")
 	connDialRatio := flag.Int("conn-dial-ratio", 3, "1/N of the slots are outbound, the rest inbound (geth default 3)")
@@ -202,7 +203,7 @@ func main() {
 	if *vanillaFrac > 0 {
 		monitorStop := make(chan struct{})
 		monitorDone := make(chan struct{})
-		go monitorBuffers(sim, monitorStop, monitorDone)
+		go monitorBuffers(sim, *abortOnDrop, monitorStop, monitorDone)
 		pacing := searchPacing{Stagger: *searchStagger, MaxPause: *searchPauseMax, PauseNovelOnly: *searchPauseNovelOnly, TargetCount: *searchTargetCount, Checkpoint: *checkpointInterval, RedialWait: *connRedialWait}
 		runVanillaInterop(sim, settings, *nodes, *vanillaFrac, *numTopics, *zipfS, *seed,
 			*bootstrapWait, *registerWait, *searchTimeout, *regProbePeriod, *registerStagger, *refreshInterval,
@@ -238,7 +239,7 @@ func main() {
 	// buffer fix is being overwhelmed and senders are about to block.
 	monitorStop := make(chan struct{})
 	monitorDone := make(chan struct{})
-	go monitorBuffers(sim, monitorStop, monitorDone)
+	go monitorBuffers(sim, *abortOnDrop, monitorStop, monitorDone)
 	defer func() {
 		close(monitorStop)
 		<-monitorDone

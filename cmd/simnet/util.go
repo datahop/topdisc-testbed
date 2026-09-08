@@ -57,7 +57,7 @@ func maxOrZero(xs []int) int {
 // well under capacity in practice. If max occupancy approaches the cap,
 // senders are being backpressured and we'd see the same symptoms as the
 // pre-fix simnet — just delayed by the buffer's worth of packets.
-func monitorBuffers(sim *simnet.Simnet, stop <-chan struct{}, done chan<- struct{}) {
+func monitorBuffers(sim *simnet.Simnet, abortOnDrop bool, stop <-chan struct{}, done chan<- struct{}) {
 	defer close(done)
 
 	const sampleEvery = 1 * time.Second
@@ -85,6 +85,14 @@ func monitorBuffers(sim *simnet.Simnet, stop <-chan struct{}, done chan<- struct
 
 		case <-tickSample.C:
 			s := sim.Stats()
+			if abortOnDrop && s.LinkDropped > 0 {
+				// A saturated link has started discarding packets; everything
+				// measured from here on includes loss and queueing the
+				// protocol never saw. Stop rather than report biased numbers.
+				fmt.Printf("[buf] ABORT: %d packets dropped (links max %d/%d); results would be biased\n",
+					s.LinkDropped, s.LinkMax, s.LinkCap)
+				os.Exit(2)
+			}
 			routerCap = s.RouterShardCap
 			linkCap = s.LinkCap
 			routerShards = s.RouterShardCount

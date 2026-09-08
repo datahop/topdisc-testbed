@@ -356,7 +356,6 @@ func runOneSearcher(n nodeRec, topicIdx int, topic topicindex.TopicID, deadlineA
 		lastDial        = make(map[enode.ID]time.Time)
 	)
 	selfID := n.ln.ID()
-	var refillSince time.Time
 sessions:
 	for {
 		openSearch()
@@ -415,10 +414,6 @@ sessions:
 				dialAttempts++
 				if ok, targetFull := pacing.Conns.dial(n.idx, id); ok {
 					outboundConns++
-					if !refillSince.IsZero() {
-						pacing.Conns.recordRefill(time.Since(refillSince))
-						refillSince = time.Time{}
-					}
 					if pacing.Conns.outboundFull(n.idx) {
 						if slotsFilledAtMs == 0 {
 							slotsFilledAtMs = time.Since(start).Milliseconds()
@@ -449,7 +444,6 @@ sessions:
 		}
 		select {
 		case <-pacing.Conns.wakeCh(n.idx):
-			refillSince = time.Now()
 		case <-deadline:
 			hitDeadline = true
 			break sessions
