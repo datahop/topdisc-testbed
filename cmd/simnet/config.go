@@ -1,5 +1,5 @@
-// Generated from the schema in scripts/gen_config.py's source table; a run's
-// run.yaml is this struct fully resolved.
+// Config is a run: a testbed-agnostic scenario plus how this testbed executes
+// it. A run directory's run.yaml is this struct fully resolved.
 package main
 
 import (
@@ -15,7 +15,13 @@ import (
 )
 
 type Config struct {
-	Name         string             `yaml:"name"`
+	Name     string         `yaml:"name"`
+	Scenario ScenarioConfig `yaml:"scenario"`
+	Testbed  TestbedConfig  `yaml:"testbed"`
+}
+
+// ScenarioConfig describes the experiment; it means the same on any testbed.
+type ScenarioConfig struct {
 	Population   PopulationConfig   `yaml:"population"`
 	Network      NetworkConfig      `yaml:"network"`
 	Phases       PhasesConfig       `yaml:"phases"`
@@ -25,8 +31,14 @@ type Config struct {
 	SessionChurn SessionChurnConfig `yaml:"session_churn"`
 	Disconnect   DisconnectConfig   `yaml:"disconnect"`
 	Churn        ChurnConfig        `yaml:"churn"`
-	Traces       TracesConfig       `yaml:"traces"`
-	Safety       SafetyConfig       `yaml:"safety"`
+}
+
+// TestbedConfig is how this harness executes a scenario.
+type TestbedConfig struct {
+	Simulator SimulatorConfig `yaml:"simulator"`
+	Harness   HarnessConfig   `yaml:"harness"`
+	Traces    TracesConfig    `yaml:"traces"`
+	Safety    SafetyConfig    `yaml:"safety"`
 }
 
 // PopulationConfig: who is in the network.
@@ -42,20 +54,14 @@ type PopulationConfig struct {
 	VanillaFrac  float64 `yaml:"vanilla_frac"`
 }
 
-// NetworkConfig: the simulated links and router.
+// NetworkConfig: the emulated WAN conditions.
 type NetworkConfig struct {
-	LatencyMs      int  `yaml:"latency_ms"`
-	BandwidthMibps int  `yaml:"bandwidth_mibps"`
-	LinkBuf        int  `yaml:"link_buf"`
-	LinkNoAqm      bool `yaml:"link_no_aqm"`
-	RouterBuf      int  `yaml:"router_buf"`
-	RouterShards   int  `yaml:"router_shards"`
+	LatencyMs      int `yaml:"latency_ms"`
+	BandwidthMibps int `yaml:"bandwidth_mibps"`
 }
 
 // PhasesConfig: how the run is paced.
 type PhasesConfig struct {
-	SpawnDelay      time.Duration `yaml:"spawn_delay"`
-	MaxBootnodes    int           `yaml:"max_bootnodes"`
 	BootstrapWait   time.Duration `yaml:"bootstrap_wait"`
 	RegisterStagger time.Duration `yaml:"register_stagger"`
 	RegisterWait    time.Duration `yaml:"register_wait"`
@@ -74,16 +80,13 @@ type TopicConfig struct {
 	AuxNodesLimit        int           `yaml:"aux_nodes_limit"`
 	NodesPerSourceBucket int           `yaml:"nodes_per_source_bucket"`
 	RemoveOnExpiry       bool          `yaml:"remove_on_expiry"`
-	RegProbePeriod       time.Duration `yaml:"reg_probe_period"`
 }
 
-// SearchConfig: how searchers consume results.
+// SearchConfig: how nodes search.
 type SearchConfig struct {
 	Model          string        `yaml:"model"`
 	RequestDelay   time.Duration `yaml:"request_delay"`
 	RequestTimeout time.Duration `yaml:"request_timeout"`
-	PauseMax       time.Duration `yaml:"pause_max"`
-	PauseNovelOnly bool          `yaml:"pause_novel_only"`
 	TargetCount    int           `yaml:"target_count"`
 }
 
@@ -114,6 +117,23 @@ type ChurnConfig struct {
 	Mode     string        `yaml:"mode"`
 }
 
+// SimulatorConfig: simnet internals; no equivalent on real hosts.
+type SimulatorConfig struct {
+	LinkBuf      int  `yaml:"link_buf"`
+	LinkNoAqm    bool `yaml:"link_no_aqm"`
+	RouterBuf    int  `yaml:"router_buf"`
+	RouterShards int  `yaml:"router_shards"`
+}
+
+// HarnessConfig: how this harness drives the nodes.
+type HarnessConfig struct {
+	SpawnDelay           time.Duration `yaml:"spawn_delay"`
+	MaxBootnodes         int           `yaml:"max_bootnodes"`
+	RegProbePeriod       time.Duration `yaml:"reg_probe_period"`
+	SearchPauseMax       time.Duration `yaml:"search_pause_max"`
+	SearchPauseNovelOnly bool          `yaml:"search_pause_novel_only"`
+}
+
 // TracesConfig: what to record; files are written into the run directory.
 type TracesConfig struct {
 	Metrics              string        `yaml:"metrics"`
@@ -132,88 +152,88 @@ type SafetyConfig struct {
 type paramDoc struct{ path, doc string }
 
 var paramDocs = []paramDoc{
-	{"population.nodes", "discv5 nodes to spawn"},
-	{"population.topics", "distinct topics; >1 assigns one per node by Zipf"},
-	{"population.all_register", "one shared topic that every node registers and searches"},
-	{"population.register_frac", "single-topic mode: fraction that register, the rest search"},
-	{"population.zipf_s", "Zipf skew for topic assignment when topics > 1"},
-	{"population.common_topic", "topics > 1: everyone also registers and searches topic 0"},
-	{"population.seed", "RNG seed for every random draw; 0 = time"},
-	{"population.legacy_frac", "fraction of nodes without the topic-discovery ENR flag"},
-	{"population.vanilla_frac", "fraction running stock upstream geth (needs -tags vanilla)"},
-	{"network.latency_ms", "per-pair one-way latency, ms"},
-	{"network.bandwidth_mibps", "per-direction link bandwidth"},
-	{"network.link_buf", "link input queue depth; 0 = simnet default 1024"},
-	{"network.link_no_aqm", "skip fq_codel and rate limiting on links"},
-	{"network.router_buf", "router per-shard queue; 0 = simnet default 8192"},
-	{"network.router_shards", "router shards; 0 = simnet default 16"},
-	{"phases.spawn_delay", "gap between spawning consecutive nodes"},
-	{"phases.max_bootnodes", "bootnodes each new node contacts"},
-	{"phases.bootstrap_wait", "after spawning, before registrations start"},
-	{"phases.register_stagger", "gap between consecutive nodes starting to register"},
-	{"phases.register_wait", "after the last node starts registering, before searches start"},
-	{"phases.search_stagger", "gap between consecutive searchers starting"},
-	{"phases.search_timeout", "length of the search phase"},
-	{"phases.refresh_interval", "discv5 table refresh; 0 = default 30m"},
-	{"topic.ad_lifetime", "ad lifetime; 0 = default 15m. Also sets reg_attempt_timeout"},
-	{"topic.ad_cache_size", "ads a registrar holds; 0 = default 5000"},
-	{"topic.reg_attempt_timeout", "give up on a registrar after this; 0 = 1.5 x ad_lifetime"},
-	{"topic.search_bucket_size", "search table entries per distance bucket; 0 = spec default 16"},
-	{"topic.topic_nodes_limit", "topic nodes in a TOPICQUERY reply; 0 = default 16"},
-	{"topic.aux_nodes_limit", "closest-to-topic nodes attached to TOPICQUERY and REGTOPIC replies; 0 = default 8"},
-	{"topic.nodes_per_source_bucket", "cap per source per bucket; 0 = default 1 (inert on topdisc)"},
-	{"topic.remove_on_expiry", "drop ads at expiry instead of renewing (inert on topdisc)"},
-	{"topic.reg_probe_period", "how often the harness polls for registration admission"},
-	{"search.model", "conn: search only while outbound slots are empty; continuous: lookups back to back"},
-	{"search.request_delay", "continuous: pause between lookups"},
-	{"search.request_timeout", "continuous: give up on a lookup after this; 0 = only target_count ends it"},
-	{"search.pause_max", "random sleep up to this between results; 0 with conn_model"},
-	{"search.pause_novel_only", "only pause on registrants not seen before"},
-	{"search.target_count", "conn: stop a searcher after this many distinct registrants; continuous: end each lookup at this many. 0 = never"},
-	{"conn_model.enabled", ""},
-	{"conn_model.max_peers", "total slots per node"},
-	{"conn_model.dial_ratio", "1/N of slots are outbound"},
-	{"conn_model.redial_wait", "cooldown before re-dialing the same node"},
-	{"session_churn.enabled", "42.3% stay all run; the rest fall off geometrically from a short mode"},
-	{"session_churn.gap", "how long a departed node is unreachable"},
-	{"disconnect.interval", "drop a fraction of live connections this often; 0 = off"},
-	{"disconnect.frac", "fraction dropped per interval"},
-	{"churn.interval", "churn round period; 0 = off"},
-	{"churn.frac", "fraction of nodes acted on per round"},
-	{"churn.mode", "steadystate (50/50 leave/join) or killonly"},
-	{"traces.metrics", "search and registration record (JSON)"},
-	{"traces.overhead", "per-node traffic totals by message type (JSON)"},
-	{"traces.overhead_series", "traffic and ad-cache samples over time (JSON)"},
-	{"traces.overhead_series_period", "sampling period for overhead_series"},
-	{"traces.reach", "per-searcher registrar reach sets (JSON)"},
-	{"traces.snapshot_dir", "periodic find-count snapshots"},
-	{"traces.checkpoint_interval", "print coverage this often during search; 0 = off"},
-	{"safety.abort_on_drop", "exit on the first dropped packet: drops bias every timing"},
+	{"scenario.population.nodes", "discv5 nodes to spawn"},
+	{"scenario.population.topics", "distinct topics; >1 assigns one per node by Zipf"},
+	{"scenario.population.all_register", "one shared topic that every node registers and searches"},
+	{"scenario.population.register_frac", "single-topic mode: fraction that register, the rest search"},
+	{"scenario.population.zipf_s", "Zipf skew for topic assignment when topics > 1"},
+	{"scenario.population.common_topic", "topics > 1: everyone also registers and searches topic 0"},
+	{"scenario.population.seed", "RNG seed for every random draw; 0 = time"},
+	{"scenario.population.legacy_frac", "fraction of nodes without the topic-discovery ENR flag"},
+	{"scenario.population.vanilla_frac", "fraction running stock upstream geth (needs -tags vanilla)"},
+	{"scenario.network.latency_ms", "per-pair one-way latency, ms"},
+	{"scenario.network.bandwidth_mibps", "per-direction link bandwidth"},
+	{"scenario.phases.bootstrap_wait", "after spawning, before registrations start"},
+	{"scenario.phases.register_stagger", "gap between consecutive nodes starting to register"},
+	{"scenario.phases.register_wait", "after the last node starts registering, before searches start"},
+	{"scenario.phases.search_stagger", "gap between consecutive searchers starting"},
+	{"scenario.phases.search_timeout", "length of the search phase"},
+	{"scenario.phases.refresh_interval", "discv5 table refresh; 0 = default 30m"},
+	{"scenario.topic.ad_lifetime", "ad lifetime; 0 = default 15m. Also sets reg_attempt_timeout"},
+	{"scenario.topic.ad_cache_size", "ads a registrar holds; 0 = default 5000"},
+	{"scenario.topic.reg_attempt_timeout", "give up on a registrar after this; 0 = 1.5 x ad_lifetime"},
+	{"scenario.topic.search_bucket_size", "search table entries per distance bucket; 0 = spec default 16"},
+	{"scenario.topic.topic_nodes_limit", "topic nodes in a TOPICQUERY reply; 0 = default 16"},
+	{"scenario.topic.aux_nodes_limit", "closest-to-topic nodes attached to TOPICQUERY and REGTOPIC replies; 0 = default 8"},
+	{"scenario.topic.nodes_per_source_bucket", "cap per source per bucket; 0 = default 1 (inert on topdisc)"},
+	{"scenario.topic.remove_on_expiry", "drop ads at expiry instead of renewing (inert on topdisc)"},
+	{"scenario.search.model", "conn: search only while outbound slots are empty; continuous: lookups back to back"},
+	{"scenario.search.request_delay", "continuous: pause between lookups"},
+	{"scenario.search.request_timeout", "continuous: give up on a lookup after this; 0 = only target_count ends it"},
+	{"scenario.search.target_count", "conn: stop a searcher after this many distinct registrants; continuous: end each lookup at this many. 0 = never"},
+	{"scenario.conn_model.enabled", ""},
+	{"scenario.conn_model.max_peers", "total slots per node"},
+	{"scenario.conn_model.dial_ratio", "1/N of slots are outbound"},
+	{"scenario.conn_model.redial_wait", "cooldown before re-dialing the same node"},
+	{"scenario.session_churn.enabled", "42.3% stay all run; the rest fall off geometrically from a short mode"},
+	{"scenario.session_churn.gap", "how long a departed node is unreachable"},
+	{"scenario.disconnect.interval", "drop a fraction of live connections this often; 0 = off"},
+	{"scenario.disconnect.frac", "fraction dropped per interval"},
+	{"scenario.churn.interval", "churn round period; 0 = off"},
+	{"scenario.churn.frac", "fraction of nodes acted on per round"},
+	{"scenario.churn.mode", "steadystate (50/50 leave/join) or killonly"},
+	{"testbed.simulator.link_buf", "link input queue depth; 0 = simnet default 1024"},
+	{"testbed.simulator.link_no_aqm", "skip fq_codel and rate limiting on links"},
+	{"testbed.simulator.router_buf", "router per-shard queue; 0 = simnet default 8192"},
+	{"testbed.simulator.router_shards", "router shards; 0 = simnet default 16"},
+	{"testbed.harness.spawn_delay", "gap between spawning consecutive nodes"},
+	{"testbed.harness.max_bootnodes", "bootnodes each new node contacts"},
+	{"testbed.harness.reg_probe_period", "how often the harness polls for registration admission"},
+	{"testbed.harness.search_pause_max", "random sleep up to this between results; 0 with conn_model"},
+	{"testbed.harness.search_pause_novel_only", "only pause on registrants not seen before"},
+	{"testbed.traces.metrics", "search and registration record (JSON)"},
+	{"testbed.traces.overhead", "per-node traffic totals by message type (JSON)"},
+	{"testbed.traces.overhead_series", "traffic and ad-cache samples over time (JSON)"},
+	{"testbed.traces.overhead_series_period", "sampling period for overhead_series"},
+	{"testbed.traces.reach", "per-searcher registrar reach sets (JSON)"},
+	{"testbed.traces.snapshot_dir", "periodic find-count snapshots"},
+	{"testbed.traces.checkpoint_interval", "print coverage this often during search; 0 = off"},
+	{"testbed.safety.abort_on_drop", "exit on the first dropped packet: drops bias every timing"},
 }
 
 func defaultConfig() Config {
 	var c Config
-	c.Population.Nodes = 5
-	c.Population.Topics = 1
-	c.Population.RegisterFrac = 0.5
-	c.Population.ZipfS = 1.07
-	c.Network.LatencyMs = 30
-	c.Network.BandwidthMibps = 100
-	c.Phases.MaxBootnodes = 20
-	c.Phases.BootstrapWait = mustDur("3s")
-	c.Phases.RegisterWait = mustDur("5s")
-	c.Phases.SearchTimeout = mustDur("30s")
-	c.Topic.RegProbePeriod = mustDur("500ms")
-	c.Search.Model = "conn"
-	c.ConnModel.MaxPeers = 50
-	c.ConnModel.DialRatio = 3
-	c.ConnModel.RedialWait = mustDur("35s")
-	c.SessionChurn.Gap = mustDur("30s")
-	c.Disconnect.Frac = 0.01
-	c.Churn.Frac = 0.1
-	c.Churn.Mode = "steadystate"
-	c.Traces.OverheadSeriesPeriod = mustDur("30s")
-	c.Safety.AbortOnDrop = true
+	c.Scenario.Population.Nodes = 5
+	c.Scenario.Population.Topics = 1
+	c.Scenario.Population.RegisterFrac = 0.5
+	c.Scenario.Population.ZipfS = 1.07
+	c.Scenario.Network.LatencyMs = 30
+	c.Scenario.Network.BandwidthMibps = 100
+	c.Testbed.Harness.MaxBootnodes = 20
+	c.Scenario.Phases.BootstrapWait = mustDur("3s")
+	c.Scenario.Phases.RegisterWait = mustDur("5s")
+	c.Scenario.Phases.SearchTimeout = mustDur("30s")
+	c.Testbed.Harness.RegProbePeriod = mustDur("500ms")
+	c.Scenario.Search.Model = "conn"
+	c.Scenario.ConnModel.MaxPeers = 50
+	c.Scenario.ConnModel.DialRatio = 3
+	c.Scenario.ConnModel.RedialWait = mustDur("35s")
+	c.Scenario.SessionChurn.Gap = mustDur("30s")
+	c.Scenario.Disconnect.Frac = 0.01
+	c.Scenario.Churn.Frac = 0.1
+	c.Scenario.Churn.Mode = "steadystate"
+	c.Testbed.Traces.OverheadSeriesPeriod = mustDur("30s")
+	c.Testbed.Safety.AbortOnDrop = true
 	return c
 }
 
@@ -245,23 +265,24 @@ func loadConfig(path string) (Config, error) {
 // flatten walks the struct as yaml-path -> value, in declaration order.
 func (c Config) flatten() (keys []string, vals map[string]any) {
 	vals = map[string]any{}
-	rv := reflect.ValueOf(c)
-	rt := rv.Type()
-	for i := 0; i < rt.NumField(); i++ {
-		sf := rt.Field(i)
-		tag := sf.Tag.Get("yaml")
-		if sf.Type.Kind() != reflect.Struct {
-			keys = append(keys, tag)
-			vals[tag] = rv.Field(i).Interface()
-			continue
-		}
-		sv := rv.Field(i)
-		for j := 0; j < sv.NumField(); j++ {
-			k := tag + "." + sf.Type.Field(j).Tag.Get("yaml")
+	var walk func(prefix string, rv reflect.Value)
+	walk = func(prefix string, rv reflect.Value) {
+		rt := rv.Type()
+		for i := 0; i < rt.NumField(); i++ {
+			sf := rt.Field(i)
+			k := sf.Tag.Get("yaml")
+			if prefix != "" {
+				k = prefix + "." + k
+			}
+			if sf.Type.Kind() == reflect.Struct {
+				walk(k, rv.Field(i))
+				continue
+			}
 			keys = append(keys, k)
-			vals[k] = sv.Field(j).Interface()
+			vals[k] = rv.Field(i).Interface()
 		}
 	}
+	walk("", reflect.ValueOf(c))
 	return
 }
 
@@ -287,19 +308,24 @@ func printReference() {
 	_, vals := defaultConfig().flatten()
 	fmt.Println("# Every parameter, with its default and meaning. Copy and edit.")
 	fmt.Println("name: my-run")
-	last := ""
+	lastTop, lastSec := "", ""
 	for _, d := range paramDocs {
-		sec, key, _ := strings.Cut(d.path, ".")
-		if sec != last {
-			fmt.Printf("\n%s:\n", sec)
-			last = sec
+		top, rest, _ := strings.Cut(d.path, ".")
+		sec, key, _ := strings.Cut(rest, ".")
+		if top != lastTop {
+			fmt.Printf("\n%s:\n", top)
+			lastTop, lastSec = top, ""
+		}
+		if sec != lastSec {
+			fmt.Printf("  %s:\n", sec)
+			lastSec = sec
 		}
 		v := vals[d.path]
 		s := fmtVal(v)
 		if str, ok := v.(string); ok && str == "" {
 			s = `""`
 		}
-		kv := fmt.Sprintf("  %s: %s", key, s)
+		kv := fmt.Sprintf("    %s: %s", key, s)
 		if d.doc != "" {
 			fmt.Printf("%-38s # %s\n", kv, d.doc)
 		} else {
@@ -318,7 +344,7 @@ func prepareRun(c *Config) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	for _, p := range []*string{&c.Traces.Metrics, &c.Traces.Overhead, &c.Traces.OverheadSeries, &c.Traces.Reach, &c.Traces.SnapshotDir} {
+	for _, p := range []*string{&c.Testbed.Traces.Metrics, &c.Testbed.Traces.Overhead, &c.Testbed.Traces.OverheadSeries, &c.Testbed.Traces.Reach, &c.Testbed.Traces.SnapshotDir} {
 		if *p != "" && !filepath.IsAbs(*p) {
 			*p = filepath.Join(dir, *p)
 		}

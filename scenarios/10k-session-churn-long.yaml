@@ -1,0 +1,40 @@
+# 10k nodes with node churn drawn from a measured discv5 crawl: 42.3% of
+# sessions outlast the run, the rest fall off geometrically from a very short mode.
+# Peer slots, as geth: MaxPeers 50 split by DialRatio 3 -> 16 out / 34 in.
+name: 10k-session-churn-long
+scenario:
+  population:
+    nodes: 10000
+    topics: 1
+    all_register: true
+    seed: 1
+  network:
+    latency_ms: 30
+    bandwidth_mibps: 1000
+  phases:
+    bootstrap_wait: 180s
+    register_wait: 22m30s  # 1.5 x ad_lifetime (15m)
+    register_stagger: 30ms
+    search_stagger: 10ms
+    search_timeout: 30m
+  topic:
+    ad_cache_size: 5000
+  conn_model:
+    enabled: true
+    max_peers: 50
+    dial_ratio: 3
+    redial_wait: 35s
+  session_churn:
+    enabled: true
+    gap: 30s
+testbed:
+  simulator:
+    link_buf: 8192
+    router_buf: 32768
+    router_shards: 16
+  traces:
+    metrics: m.json
+    overhead: oh.json
+    overhead_series: series.json
+    overhead_series_period: 30s
+    checkpoint_interval: 60s

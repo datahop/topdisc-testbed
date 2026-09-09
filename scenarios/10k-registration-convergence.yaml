@@ -1,0 +1,37 @@
+# How long until registration is stable: total ads held stops growing and every
+# node has placed at least one. Long register wait, fine sampling, no churn,
+# and a token search phase. Sets the register_wait the other configs need.
+name: 10k-registration-convergence
+scenario:
+  population:
+    nodes: 10000
+    topics: 1
+    all_register: true
+    seed: 1
+  network:
+    latency_ms: 30
+    bandwidth_mibps: 1000
+  phases:
+    bootstrap_wait: 180s
+    register_wait: 30m
+    register_stagger: 30ms
+    search_stagger: 10ms
+    search_timeout: 30s
+  topic:
+    ad_cache_size: 5000
+  conn_model:
+    enabled: true
+    max_peers: 50
+    dial_ratio: 3
+    redial_wait: 35s
+testbed:
+  simulator:
+    link_buf: 8192
+    router_buf: 32768
+    router_shards: 16
+  traces:
+    metrics: m.json
+    overhead: oh.json
+    overhead_series: series.json
+    overhead_series_period: 10s
+    checkpoint_interval: 60s

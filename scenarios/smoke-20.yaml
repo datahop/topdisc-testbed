@@ -1,0 +1,37 @@
+# Laptop-sized end-to-end check: 20 nodes, under a minute.
+name: smoke-20
+scenario:
+  population:
+    nodes: 20
+    topics: 1
+    all_register: true
+    seed: 1
+  network:
+    latency_ms: 30
+    bandwidth_mibps: 100
+  phases:
+    bootstrap_wait: 5s
+    register_stagger: 5ms
+    register_wait: 20s
+    search_stagger: 2ms
+    search_timeout: 20s
+  topic:
+    ad_cache_size: 5000
+  search:
+    model: conn
+  conn_model:
+    enabled: true
+    max_peers: 50
+    dial_ratio: 3
+    redial_wait: 35s
+testbed:
+  simulator:
+    link_buf: 8192
+    router_buf: 32768
+    router_shards: 16
+  traces:
+    metrics: m.json
+    overhead: oh.json
+    overhead_series: series.json
+    overhead_series_period: 30s
+    checkpoint_interval: 10s

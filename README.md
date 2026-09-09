@@ -5,7 +5,7 @@ thousands of real discv5 nodes in one process over a simulated network, and
 turns the traces into figures.
 
 - `cmd/simnet` — the testbed binary: workloads, connection model, churn drivers
-- `configs/` — run configurations (YAML)
+- `scenarios/` — scenarios (YAML): a testbed-agnostic `scenario:` plus a `testbed:` section for how this harness runs it
 - `figures/` — trace processing and figure generation
 - `docs/TRACES.md` — every trace field and which figure it drives
 
@@ -25,7 +25,7 @@ Two forks, both pinned in `go.mod`:
 
 ```sh
 go build -o simnet ./cmd/simnet
-./simnet configs/default.yaml
+./simnet scenarios/default.yaml
 ```
 
 The binary takes exactly one argument, the config. It creates
@@ -34,7 +34,7 @@ and puts the traces next to them. `./simnet reference` prints every
 parameter with its default and meaning.
 
 A config is the complete description of a test: every parameter the binary
-accepts has a documented YAML field. `configs/reference.yaml` lists all of
+accepts has a documented YAML field. `scenarios/reference.yaml` lists all of
 them with their defaults (`./simnet reference` regenerates it). Each
 run directory gets a `run.yaml` with every parameter filled in from what the
 binary reported it actually ran with, so that file alone reproduces the run —

@@ -1,0 +1,40 @@
+# smoke-500 with the continuous search model: F_lookup=30 per lookup, 5s between lookups.
+name: smoke-500-continuous
+scenario:
+  population:
+    nodes: 500
+    topics: 1
+    all_register: true
+    seed: 1
+  network:
+    latency_ms: 30
+    bandwidth_mibps: 1000
+  phases:
+    bootstrap_wait: 45s
+    register_wait: 90s
+    register_stagger: 5ms
+    search_stagger: 2ms
+    search_timeout: 3m
+  topic:
+    ad_cache_size: 5000
+  conn_model:
+    enabled: true
+    max_peers: 50
+    dial_ratio: 3
+    redial_wait: 35s
+  search:
+    model: continuous
+    target_count: 30
+    request_delay: 5s
+    request_timeout: 20s
+testbed:
+  simulator:
+    link_buf: 8192
+    router_buf: 32768
+    router_shards: 16
+  traces:
+    metrics: m.json
+    overhead: oh.json
+    overhead_series: series.json
+    overhead_series_period: 30s
+    checkpoint_interval: 60s
