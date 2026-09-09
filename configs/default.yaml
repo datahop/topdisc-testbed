@@ -1,0 +1,35 @@
+# The baseline run. Everything not listed here takes the reference default
+# (see reference.yaml). Copy this file to derive an experiment.
+name: default
+population:
+  nodes: 10000
+  topics: 1
+  all_register: true
+  seed: 1
+network:
+  latency_ms: 30
+  bandwidth_mibps: 100
+  link_buf: 8192
+  router_buf: 32768
+  router_shards: 16
+phases:
+  bootstrap_wait: 3m
+  register_stagger: 30ms
+  register_wait: 22m30s   # 1.5 x ad_lifetime (15m), the registration attempt timeout
+  search_stagger: 10ms
+  search_timeout: 10m
+topic:
+  ad_cache_size: 5000
+search:
+  model: conn             # or continuous, with target_count / request_delay
+conn_model:
+  enabled: true
+  max_peers: 50
+  dial_ratio: 3
+  redial_wait: 35s
+traces:
+  metrics: m.json
+  overhead: oh.json
+  overhead_series: series.json
+  overhead_series_period: 30s
+  checkpoint_interval: 1m

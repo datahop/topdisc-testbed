@@ -3,12 +3,9 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"log/slog"
 	"os"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -17,64 +14,81 @@ import (
 )
 
 func main() {
-	nodes := flag.Int("nodes", 5, "number of discv5 nodes to spawn")
-	latencyMs := flag.Int("latency", 30, "static per-pair latency in milliseconds")
-	bandwidthMibps := flag.Int("bandwidth-mibps", 100, "per-direction bandwidth (Mibps)")
-	bootstrapWait := flag.Duration("bootstrap-wait", 3*time.Second, "wait after spawning before starting workload")
-	registerWait := flag.Duration("register-wait", 5*time.Second, "wait after starting registrations before starting searches")
-	searchTimeout := flag.Duration("search-timeout", 30*time.Second, "max time per search before giving up")
-	registerFrac := flag.Float64("register-frac", 0.5, "fraction of nodes that register the test topic; rest search for it (single-topic mode only)")
-	numTopics := flag.Int("topics", 1, "number of distinct topics; if > 1 each node draws one via Zipf and both registers and searches it")
-	zipfS := flag.Float64("zipf-s", 1.07, "Zipf skew parameter for topic assignment when -topics > 1")
-	seed := flag.Int64("seed", 0, "RNG seed for Zipf draws (0 = use current time)")
-	legacyFrac := flag.Float64("legacy-frac", 0.0, "fraction of nodes that are 'legacy' (no DISC-NG ENR flag); enables incremental-deployment validation workload — see issue #6")
-	regProbePeriod := flag.Duration("reg-probe-period", 500*time.Millisecond, "polling period for the registration probe; smaller = finer-grained timing, more CPU")
-	registerStagger := flag.Duration("register-stagger", 0, "per-slot delay before each registrant calls RegisterTopic; spreads initial admission times so AdLifetime expiries don't synchronize and cause a renewal storm")
-	metricsOut := flag.String("metrics-out", "", "if set, write workload metrics to this JSON file")
-	routerShards := flag.Int("router-shards", 0, "VariableLatencyRouter shard count (0 = simnet default of 16)")
-	routerBuf := flag.Int("router-buf", 0, "VariableLatencyRouter per-shard buffer (0 = simnet default of 8192)")
-	linkBuf := flag.Int("link-buf", 0, "Simlink per-direction buffer size (0 = simnet default of 1024)")
-	linkNoAQM := flag.Bool("link-no-aqm", false, "disable fq_codel + rate limiting on Simlink (~5-10x per-packet drain rate; useful at high node counts where AQM modeling is noise)")
-	spawnDelay := flag.Duration("spawn-delay", 0, "delay between spawning each node; staggers when each node starts pinging bootnodes (e.g. 1ms × N nodes spreads bootstrap burst)")
-	maxBootnodes := flag.Int("max-bootnodes", 20, "max bootnodes each newly-spawned node uses to discover the network; smaller = less startup traffic, slower routing-table convergence")
-	searchStagger := flag.Duration("search-stagger", 0, "per-slot delay before each searcher starts its TopicSearch; spreads search activity across a window")
-	searchModel := flag.String("search-model", "conn", "conn: search only while outbound slots are empty; continuous: lookups back to back, each ending at -search-target-count or -search-request-timeout")
-	searchRequestDelay := flag.Duration("search-request-delay", 0, "continuous model: pause between one lookup ending and the next starting")
-	searchRequestTimeout := flag.Duration("search-request-timeout", 0, "continuous model: give up on a lookup after this (0 = only the target ends it)")
-	searchPauseMax := flag.Duration("search-pause-max", 0, "upper bound for random sleep between iter.Next() calls per searcher; models paced consumption instead of full-speed polling")
-	abortOnDrop := flag.Bool("abort-on-drop", true, "exit as soon as any simulated link drops a packet; a run with drops has queueing bias in every timing")
-	connModel := flag.Bool("conn-model", false, "model geth peer slots: a searcher stops consuming discovery once its outbound slots are full, so a churn-free run reaches a steady state")
-	connMaxPeers := flag.Int("conn-max-peers", 50, "total peer slots per node (geth default)")
-	connDialRatio := flag.Int("conn-dial-ratio", 3, "1/N of the slots are outbound, the rest inbound (geth default 3)")
-	sessionChurn := flag.Bool("session-churn", false, "give each node a session length drawn from a measured discv5 crawl (42.3% stay for the whole run, the rest fall off geometrically from a very short mode); on expiry a node drops all its connections and stops accepting dials for -session-churn-gap, then returns and refills")
-	sessionChurnGap := flag.Duration("session-churn-gap", 30*time.Second, "how long a departed node stays unreachable before rejoining")
-	disconnectInterval := flag.Duration("disconnect-interval", 0, "if > 0, drop -disconnect-frac of live connections every interval; models transient network failure with no node leaving (requires -conn-model)")
-	disconnectFrac := flag.Float64("disconnect-frac", 0.01, "fraction of live connections dropped each -disconnect-interval")
-	connRedialWait := flag.Duration("conn-redial-wait", 35*time.Second, "cooldown before a searcher re-dials the same node (geth dialHistoryExpiration = 35s)")
-	searchPauseNovelOnly := flag.Bool("search-pause-novel-only", false, "apply -search-pause-max only to yields of not-yet-seen registrants; rollover re-yields known ones and pausing on those consumes the searcher's iteration budget without new information")
-	searchTargetCount := flag.Int("search-target-count", 0, "stop each searcher once it has seen this many distinct registrants (0 = no limit, run for full search-timeout)")
-	checkpointInterval := flag.Duration("checkpoint-interval", 0, "if > 0, print per-topic coverage snapshot at this cadence during the search phase; useful for long continuous runs to see progress without waiting for the final report")
-	refreshInterval := flag.Duration("refresh-interval", 0, "discv5 routing table refresh interval (0 = use discv5 default of 30 min). Lower values run more background random lookups; useful for long-running simnets where coverage plateaus if routing tables freeze")
-	churnInterval := flag.Duration("churn-interval", 0, "if > 0, run the churn workload: kill -churn-frac of the active nodes every interval during the search phase, exercising failure-driven blacklist/eviction (#71)")
-	churnFrac := flag.Float64("churn-frac", 0.1, "fraction of the active population churned each round (only used when -churn-interval > 0)")
-	churnMode := flag.String("churn-mode", "steadystate", "churn model when -churn-interval > 0: 'steadystate' (each action is 50/50 leave/join, keeping population ~constant) or 'killonly' (kill -churn-frac each round; population decays to zero)")
-	vanillaFrac := flag.Float64("vanilla-frac", 0, "if > 0, run the mixed-binary interop workload: this fraction of nodes run stock upstream geth v1.17.3 discv5 as routing substrate (real separate stack), the rest run TopDisc; measures whether TopDisc discovery interoperates with real upstream geth. TopDisc penetration = 1 - vanilla-frac")
-	adLifetime := flag.Duration("ad-lifetime", 0, "topic ad lifetime (0 = discv5 default of 15m); also drives RegAttemptTimeout = 1.5x this")
-	allRegister := flag.Bool("all-register", false, "single shared topic where every node both registers and searches it (uniform membership, no Zipf); routes through the multi-topic engine with 1 topic")
-	snapshotDirFlag := flag.String("snapshot-dir", "", "if set, write periodic per-registrant find-count snapshots + registrant manifest (id+logdist) here for offline spatial analysis")
-	topicNodesLimit := flag.Int("topic-nodes-limit", 0, "topic nodes returned in a TOPICQUERY reply (0 = default 16)")
-	auxNodesLimit := flag.Int("aux-nodes-limit", 0, "closest-to-topic nodes attached to TOPICQUERY and REGTOPIC replies (0 = default 8)")
-	adCacheSize := flag.Int("ad-cache-size", 0, "per-node topic ad cache capacity (0 = default 5000); drives the waiting-time occupancy term")
-	searchBucketSize := flag.Int("search-bucket-size", 0, "topic search bucket size per distance bucket (0 = spec default 16); raises the depth*size per-search registrar ceiling")
-	nodesPerSourceBucket := flag.Int("nodes-per-source-bucket", 0, "max nodes accepted per source per bucket in search+registration tables (0 = default 1)")
-	regAttemptTimeout := flag.Duration("reg-attempt-timeout", 0, "max time a registrant waits on one registrar before giving up (0 = default 1.5x ad-lifetime)")
-	overheadOutFlag := flag.String("overhead-out", "", "if set, write per-node sent/received packet+byte counts to this JSON file")
-	reachOutFlag := flag.String("reach-out", "", "if set, write per-searcher queried-registrar sets + every registrar's topic-table contents here (bottleneck analysis)")
-	overheadSeriesOutFlag := flag.String("overhead-series-out", "", "if set, sample tx/rx bytes+msgs per ID-space bucket and per message type over time (plus registrar wait-time quotes) into this JSON file")
-	overheadSeriesPeriod := flag.Duration("overhead-series-period", 30*time.Second, "sampling period for -overhead-series-out")
-	removeOnExpiryFlag := flag.Bool("remove-on-expiry", false, "on ad expiry, remove the registration instead of renewing (rotation experiment)")
-	commonTopicFlag := flag.Bool("common-topic", false, "with -topics N>1: every node registers+searches universal topic 0 plus one Zipf-drawn topic from 1..N-1")
-	flag.Parse()
+	if len(os.Args) < 2 {
+		fmt.Fprintln(os.Stderr, "usage: simnet <config.yaml> | simnet reference")
+		os.Exit(2)
+	}
+	if os.Args[1] == "reference" {
+		printReference()
+		return
+	}
+	cfg, err := loadConfig(os.Args[1])
+	if err != nil {
+		fatalf("%v", err)
+	}
+	runDir, err := prepareRun(&cfg)
+	if err != nil {
+		fatalf("%v", err)
+	}
+	fmt.Printf("run directory: %s\n", runDir)
+	defer flushLog()
+	nodes := &cfg.Population.Nodes
+	numTopics := &cfg.Population.Topics
+	allRegister := &cfg.Population.AllRegister
+	registerFrac := &cfg.Population.RegisterFrac
+	zipfS := &cfg.Population.ZipfS
+	commonTopicFlag := &cfg.Population.CommonTopic
+	seed := &cfg.Population.Seed
+	legacyFrac := &cfg.Population.LegacyFrac
+	vanillaFrac := &cfg.Population.VanillaFrac
+	latencyMs := &cfg.Network.LatencyMs
+	bandwidthMibps := &cfg.Network.BandwidthMibps
+	linkBuf := &cfg.Network.LinkBuf
+	linkNoAQM := &cfg.Network.LinkNoAqm
+	routerBuf := &cfg.Network.RouterBuf
+	routerShards := &cfg.Network.RouterShards
+	spawnDelay := &cfg.Phases.SpawnDelay
+	maxBootnodes := &cfg.Phases.MaxBootnodes
+	bootstrapWait := &cfg.Phases.BootstrapWait
+	registerStagger := &cfg.Phases.RegisterStagger
+	registerWait := &cfg.Phases.RegisterWait
+	searchStagger := &cfg.Phases.SearchStagger
+	searchTimeout := &cfg.Phases.SearchTimeout
+	refreshInterval := &cfg.Phases.RefreshInterval
+	adLifetime := &cfg.Topic.AdLifetime
+	adCacheSize := &cfg.Topic.AdCacheSize
+	regAttemptTimeout := &cfg.Topic.RegAttemptTimeout
+	searchBucketSize := &cfg.Topic.SearchBucketSize
+	topicNodesLimit := &cfg.Topic.TopicNodesLimit
+	auxNodesLimit := &cfg.Topic.AuxNodesLimit
+	nodesPerSourceBucket := &cfg.Topic.NodesPerSourceBucket
+	removeOnExpiryFlag := &cfg.Topic.RemoveOnExpiry
+	regProbePeriod := &cfg.Topic.RegProbePeriod
+	searchModel := &cfg.Search.Model
+	searchRequestDelay := &cfg.Search.RequestDelay
+	searchRequestTimeout := &cfg.Search.RequestTimeout
+	searchPauseMax := &cfg.Search.PauseMax
+	searchPauseNovelOnly := &cfg.Search.PauseNovelOnly
+	searchTargetCount := &cfg.Search.TargetCount
+	connModel := &cfg.ConnModel.Enabled
+	connMaxPeers := &cfg.ConnModel.MaxPeers
+	connDialRatio := &cfg.ConnModel.DialRatio
+	connRedialWait := &cfg.ConnModel.RedialWait
+	sessionChurn := &cfg.SessionChurn.Enabled
+	sessionChurnGap := &cfg.SessionChurn.Gap
+	disconnectInterval := &cfg.Disconnect.Interval
+	disconnectFrac := &cfg.Disconnect.Frac
+	churnInterval := &cfg.Churn.Interval
+	churnFrac := &cfg.Churn.Frac
+	churnMode := &cfg.Churn.Mode
+	metricsOut := &cfg.Traces.Metrics
+	overheadOutFlag := &cfg.Traces.Overhead
+	overheadSeriesOutFlag := &cfg.Traces.OverheadSeries
+	overheadSeriesPeriod := &cfg.Traces.OverheadSeriesPeriod
+	reachOutFlag := &cfg.Traces.Reach
+	snapshotDirFlag := &cfg.Traces.SnapshotDir
+	checkpointInterval := &cfg.Traces.CheckpointInterval
+	abortOnDrop := &cfg.Safety.AbortOnDrop
 	commonTopicMode = *commonTopicFlag
 	nodeRemoveOnExpiry = *removeOnExpiryFlag
 	reachOut = *reachOutFlag
@@ -132,7 +146,7 @@ func main() {
 
 	fmt.Printf("simnet-testbed: spawning %d nodes (latency=%dms, bw=%dMibps)\n",
 		*nodes, *latencyMs, *bandwidthMibps)
-	printParams()
+	fmt.Println(cfg.paramsLine())
 
 	sim := &simnet.Simnet{
 		LatencyFunc:      simnet.StaticLatency(time.Duration(*latencyMs) * time.Millisecond),
@@ -319,18 +333,6 @@ func main() {
 		fmt.Println("teardown grace expired (30s); force-exiting")
 		os.Exit(0)
 	}()
-}
-
-// printParams emits every flag value as a single machine-readable PARAMS line,
-// so a report can state the configuration it actually ran under instead of a
-// hard-coded table.
-func printParams() {
-	var parts []string
-	flag.VisitAll(func(f *flag.Flag) {
-		parts = append(parts, fmt.Sprintf("%s=%s", f.Name, f.Value.String()))
-	})
-	sort.Strings(parts)
-	fmt.Printf("PARAMS: %s\n", strings.Join(parts, " "))
 }
 
 // watchdogDump, when set, flushes the overhead series before the absolute

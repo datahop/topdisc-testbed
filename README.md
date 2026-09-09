@@ -6,7 +6,6 @@ turns the traces into figures.
 
 - `cmd/simnet` — the testbed binary: workloads, connection model, churn drivers
 - `configs/` — run configurations (YAML)
-- `scripts/run.py` — turns a config into a run
 - `figures/` — trace processing and figure generation
 - `docs/TRACES.md` — every trace field and which figure it drives
 
@@ -26,14 +25,17 @@ Two forks, both pinned in `go.mod`:
 
 ```sh
 go build -o simnet ./cmd/simnet
-python3 scripts/run.py configs/10k-baseline.yaml
+./simnet configs/default.yaml
 ```
 
-`--dry-run` prints the command instead of running it.
+The binary takes exactly one argument, the config. It creates
+`<name>-<timestamp>/`, writes the resolved `run.yaml` and `run.log` there,
+and puts the traces next to them. `./simnet reference` prints every
+parameter with its default and meaning.
 
 A config is the complete description of a test: every parameter the binary
 accepts has a documented YAML field. `configs/reference.yaml` lists all of
-them with their defaults (`scripts/run.py --reference` regenerates it). Each
+them with their defaults (`./simnet reference` regenerates it). Each
 run directory gets a `run.yaml` with every parameter filled in from what the
 binary reported it actually ran with, so that file alone reproduces the run —
 nothing about the machine or the checkout is recorded, because those are

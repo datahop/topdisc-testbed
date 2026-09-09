@@ -5,6 +5,7 @@ go 1.25.1
 require (
 	github.com/ethereum/go-ethereum v1.17.2
 	github.com/marcopolo/simnet v0.0.7
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
