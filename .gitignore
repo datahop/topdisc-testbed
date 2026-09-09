@@ -4,3 +4,4 @@
 !go.sum
 __pycache__/
 figs/
+!scenarios/models/*.json
