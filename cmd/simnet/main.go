@@ -38,6 +38,9 @@ func main() {
 	spawnDelay := flag.Duration("spawn-delay", 0, "delay between spawning each node; staggers when each node starts pinging bootnodes (e.g. 1ms × N nodes spreads bootstrap burst)")
 	maxBootnodes := flag.Int("max-bootnodes", 20, "max bootnodes each newly-spawned node uses to discover the network; smaller = less startup traffic, slower routing-table convergence")
 	searchStagger := flag.Duration("search-stagger", 0, "per-slot delay before each searcher starts its TopicSearch; spreads search activity across a window")
+	searchModel := flag.String("search-model", "conn", "conn: search only while outbound slots are empty; continuous: lookups back to back, each ending at -search-target-count or -search-request-timeout")
+	searchRequestDelay := flag.Duration("search-request-delay", 0, "continuous model: pause between one lookup ending and the next starting")
+	searchRequestTimeout := flag.Duration("search-request-timeout", 0, "continuous model: give up on a lookup after this (0 = only the target ends it)")
 	searchPauseMax := flag.Duration("search-pause-max", 0, "upper bound for random sleep between iter.Next() calls per searcher; models paced consumption instead of full-speed polling")
 	abortOnDrop := flag.Bool("abort-on-drop", true, "exit as soon as any simulated link drops a packet; a run with drops has queueing bias in every timing")
 	connModel := flag.Bool("conn-model", false, "model geth peer slots: a searcher stops consuming discovery once its outbound slots are full, so a churn-free run reaches a steady state")
@@ -208,7 +211,7 @@ func main() {
 		monitorStop := make(chan struct{})
 		monitorDone := make(chan struct{})
 		go monitorBuffers(sim, *abortOnDrop, monitorStop, monitorDone)
-		pacing := searchPacing{Stagger: *searchStagger, MaxPause: *searchPauseMax, PauseNovelOnly: *searchPauseNovelOnly, TargetCount: *searchTargetCount, Checkpoint: *checkpointInterval, RedialWait: *connRedialWait}
+		pacing := searchPacing{Stagger: *searchStagger, MaxPause: *searchPauseMax, PauseNovelOnly: *searchPauseNovelOnly, TargetCount: *searchTargetCount, Checkpoint: *checkpointInterval, RedialWait: *connRedialWait, Model: *searchModel, RequestDelay: *searchRequestDelay, RequestTimeout: *searchRequestTimeout}
 		runVanillaInterop(sim, settings, *nodes, *vanillaFrac, *numTopics, *zipfS, *seed,
 			*bootstrapWait, *registerWait, *searchTimeout, *regProbePeriod, *registerStagger, *refreshInterval,
 			*maxBootnodes, *spawnDelay, *metricsOut, pacing)
@@ -259,6 +262,9 @@ func main() {
 		TargetCount:    *searchTargetCount,
 		Checkpoint:     *checkpointInterval,
 		RedialWait:     *connRedialWait,
+		Model:          *searchModel,
+		RequestDelay:   *searchRequestDelay,
+		RequestTimeout: *searchRequestTimeout,
 	}
 	if *connModel {
 		pacing.Conns = newConnTable(all, *connMaxPeers, *connDialRatio)

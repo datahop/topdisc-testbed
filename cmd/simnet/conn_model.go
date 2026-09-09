@@ -117,6 +117,12 @@ func (c *connTable) dropConn(from, to int, wakeDialer bool) bool {
 
 // shouldPark reports whether the node has nothing to do: either it is away for a
 // churn gap, or its outbound slots are full.
+func (c *connTable) isOffline(idx int) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.offline[idx]
+}
+
 func (c *connTable) shouldPark(idx int) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()

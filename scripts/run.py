@@ -65,9 +65,12 @@ SCHEMA = [
   ("topic.reg_probe_period",    "reg-probe-period","dur",  "500ms","how often the harness polls for registration admission"),
 
   ("search", None, None, None, "how searchers consume results"),
+  ("search.model",              "search-model",   "str",   "conn","conn: search only while outbound slots are empty; continuous: lookups back to back"),
+  ("search.request_delay",      "search-request-delay","dur","0s","continuous: pause between lookups"),
+  ("search.request_timeout",    "search-request-timeout","dur","0s","continuous: give up on a lookup after this; 0 = only target_count ends it"),
   ("search.pause_max",          "search-pause-max","dur",  "0s",  "random sleep up to this between results; 0 with conn_model"),
   ("search.pause_novel_only",   "search-pause-novel-only","bool",False,"only pause on registrants not seen before"),
-  ("search.target_count",       "search-target-count","int",0,    "stop a searcher after this many distinct registrants; 0 = never"),
+  ("search.target_count",       "search-target-count","int",0,    "conn: stop a searcher after this many distinct registrants; continuous: end each lookup at this many. 0 = never"),
 
   ("conn_model", None, None, None, "geth peer slots: a node stops searching once its outbound slots are full"),
   ("conn_model.enabled",        "conn-model",     "bool",  False, ""),

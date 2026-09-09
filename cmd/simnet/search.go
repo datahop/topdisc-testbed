@@ -51,6 +51,14 @@ type searchPacing struct {
 	// once its outbound peer slots are full, the way geth's dialer does.
 	Conns *connTable
 
+	// Model selects when a node searches. "conn": only while it has empty
+	// outbound slots, parking when full. "continuous": lookups back to back
+	// for the whole phase, each ending at TargetCount distinct registrants or
+	// RequestTimeout, with RequestDelay between them.
+	Model          string
+	RequestDelay   time.Duration
+	RequestTimeout time.Duration
+
 	// TargetCount, if > 0, causes a searcher to close its iterator as
 	// soon as it has seen this many *distinct* registrants. Stops the
 	// search early — a real application typically needs a handful of
@@ -99,6 +107,12 @@ type searchResult struct {
 	DialAttempts    int   `json:"dialAttempts"`    // novel registrants this searcher tried to dial
 	DialRefused     int   `json:"dialRefused"`     // refused because the target's inbound slots were full
 	SlotsFilledAtMs int64 `json:"slotsFilledAtMs"` // ms from search start until outbound was full (0 = never)
+
+	// Continuous search model: one entry per lookup this node ran.
+	Lookups          int     `json:"lookups"`
+	LookupsHitTarget int     `json:"lookupsHitTarget"`
+	LookupLatencyMs  []int64 `json:"lookupLatencyMs"`
+	LookupResults    []int   `json:"lookupResults"`
 
 	// SearchStartMs is this searcher's start offset from the run's common
 	// epoch (registration start). UniqueFoundAtMs is relative to this
@@ -267,7 +281,33 @@ func runMultiTopicSearches(all []nodeRec, nodeTopics [][]int, topics []topicinde
 	wg.Wait()
 	close(checkpointStop)
 	<-checkpointDone
+	if pacing.Model == "continuous" {
+		printLookupSummary(results, pacing)
+	}
 	return results
+}
+
+func printLookupSummary(results []searchResult, pacing searchPacing) {
+	var lat []int64
+	var per []int
+	hit, total := 0, 0
+	for _, r := range results {
+		per = append(per, r.Lookups)
+		total += r.Lookups
+		hit += r.LookupsHitTarget
+		lat = append(lat, r.LookupLatencyMs...)
+	}
+	sort.Slice(lat, func(i, j int) bool { return lat[i] < lat[j] })
+	sort.Ints(per)
+	pct := func(v []int64, p int) int64 {
+		if len(v) == 0 {
+			return 0
+		}
+		return v[(p*(len(v)-1))/100]
+	}
+	fmt.Printf("=== continuous lookups (target=%d delay=%s timeout=%s) ===\n", pacing.TargetCount, pacing.RequestDelay, pacing.RequestTimeout)
+	fmt.Printf("lookups=%d per node p50=%d hit-target=%d (%.1f%%) latency ms p50=%d p95=%d max=%d\n",
+		total, medOrZero(per), hit, 100*float64(hit)/float64(max(total, 1)), pct(lat, 50), pct(lat, 95), pct(lat, 100))
 }
 
 // runOneSearcher executes a single node's TopicSearch until the absolute
@@ -354,11 +394,28 @@ func runOneSearcher(n nodeRec, topicIdx int, topic topicindex.TopicID, deadlineA
 		dialRefused     int
 		slotsFilledAtMs int64
 		lastDial        = make(map[enode.ID]time.Time)
+
+		continuous       = pacing.Model == "continuous"
+		lookupStart      time.Time
+		lookupSeen       map[enode.ID]struct{}
+		lookupTimer      <-chan time.Time
+		lookups          int
+		lookupsHitTarget int
+		lookupLatencyMs  []int64
+		lookupResults    []int
 	)
 	selfID := n.ln.ID()
 sessions:
 	for {
 		openSearch()
+		if continuous {
+			lookupStart = time.Now()
+			lookupSeen = make(map[enode.ID]struct{})
+			lookupTimer = nil
+			if pacing.RequestTimeout > 0 {
+				lookupTimer = time.After(pacing.RequestTimeout)
+			}
+		}
 	consume:
 		for {
 			var nd *enode.Node
@@ -367,6 +424,8 @@ sessions:
 			case <-deadline:
 				hitDeadline = true
 				break sessions
+			case <-lookupTimer:
+				break consume
 			case nd, ok = <-nodeCh:
 				if !ok {
 					break consume
@@ -383,6 +442,9 @@ sessions:
 			novel := false
 			isReg := has(id, topicIdx)
 			if isReg {
+				if continuous {
+					lookupSeen[id] = struct{}{}
+				}
 				if _, dup := seenReg[id]; !dup {
 					novel = true
 					seenReg[id] = struct{}{}
@@ -412,7 +474,7 @@ sessions:
 			// A stale wake can reopen a search on a node that is already full
 			// (a departure that fired before its searcher started, say). Park
 			// again rather than walk the whole network for nothing.
-			if pacing.Conns != nil && pacing.Conns.shouldPark(n.idx) {
+			if pacing.Conns != nil && (continuous && pacing.Conns.isOffline(n.idx) || !continuous && pacing.Conns.shouldPark(n.idx)) {
 				break consume
 			}
 			if isReg && pacing.Conns != nil && !recentlyDialed(lastDial, id, pacing.RedialWait) {
@@ -424,13 +486,19 @@ sessions:
 						if slotsFilledAtMs == 0 {
 							slotsFilledAtMs = time.Since(start).Milliseconds()
 						}
-						break consume
+						if !continuous {
+							break consume
+						}
 					}
 				} else if targetFull {
 					dialRefused++
 				}
 			}
-			if pacing.TargetCount > 0 && len(seenReg) >= pacing.TargetCount {
+			if continuous {
+				if pacing.TargetCount > 0 && len(lookupSeen) >= pacing.TargetCount {
+					break consume
+				}
+			} else if pacing.TargetCount > 0 && len(seenReg) >= pacing.TargetCount {
 				break sessions
 			}
 			if pacing.MaxPause > 0 && (novel || !pacing.PauseNovelOnly) {
@@ -445,6 +513,33 @@ sessions:
 		// Slots are full (or discovery ended): stop searching, which is what
 		// makes a churn-free run go quiet, then wait for a peer to drop.
 		closeIter()
+		if continuous {
+			lookups++
+			hit := pacing.TargetCount > 0 && len(lookupSeen) >= pacing.TargetCount
+			if hit {
+				lookupsHitTarget++
+			}
+			lookupLatencyMs = append(lookupLatencyMs, time.Since(lookupStart).Milliseconds())
+			lookupResults = append(lookupResults, len(lookupSeen))
+			if pacing.RequestDelay > 0 {
+				select {
+				case <-deadline:
+					hitDeadline = true
+					break sessions
+				case <-time.After(pacing.RequestDelay):
+				}
+			}
+			// A departed node waits for its rejoin before looking up again.
+			for pacing.Conns != nil && pacing.Conns.isOffline(n.idx) {
+				select {
+				case <-deadline:
+					hitDeadline = true
+					break sessions
+				case <-pacing.Conns.wakeCh(n.idx):
+				}
+			}
+			continue sessions
+		}
 		if pacing.Conns == nil || !pacing.Resumable || !pacing.Conns.shouldPark(n.idx) {
 			break sessions
 		}
@@ -478,6 +573,10 @@ sessions:
 		UniqueFoundAtMs:     uniqueAtMs,
 		UniqueFoundIDs:      uniqueIDs,
 		SearchStartMs:       searchStartOffsetMs(start),
+		Lookups:             lookups,
+		LookupsHitTarget:    lookupsHitTarget,
+		LookupLatencyMs:     lookupLatencyMs,
+		LookupResults:       lookupResults,
 		OutboundConns:       outboundConns,
 		DialAttempts:        dialAttempts,
 		DialRefused:         dialRefused,
