@@ -100,8 +100,10 @@ type ConnModelConfig struct {
 
 // SessionChurnConfig: nodes leave and return with session lengths from a measured discv5 crawl.
 type SessionChurnConfig struct {
-	Enabled bool          `yaml:"enabled"`
-	Gap     time.Duration `yaml:"gap"`
+	Enabled      bool          `yaml:"enabled"`
+	Gap          time.Duration `yaml:"gap"`
+	AlwaysOnFrac float64       `yaml:"always_on_frac"`
+	Scale        float64       `yaml:"scale"`
 }
 
 // DisconnectConfig: link failure without any node leaving.
@@ -187,6 +189,8 @@ var paramDocs = []paramDoc{
 	{"scenario.conn_model.redial_wait", "cooldown before re-dialing the same node"},
 	{"scenario.session_churn.enabled", "42.3% stay all run; the rest fall off geometrically from a short mode"},
 	{"scenario.session_churn.gap", "how long a departed node is unreachable"},
+	{"scenario.session_churn.always_on_frac", "share of nodes that never leave (crawl: 0.423)"},
+	{"scenario.session_churn.scale", "multiplier on every session length; 0.5 doubles the churn rate, 2 halves it"},
 	{"scenario.disconnect.interval", "drop a fraction of live connections this often; 0 = off"},
 	{"scenario.disconnect.frac", "fraction dropped per interval"},
 	{"scenario.churn.interval", "churn round period; 0 = off"},
@@ -229,6 +233,8 @@ func defaultConfig() Config {
 	c.Scenario.ConnModel.DialRatio = 3
 	c.Scenario.ConnModel.RedialWait = mustDur("35s")
 	c.Scenario.SessionChurn.Gap = mustDur("30s")
+	c.Scenario.SessionChurn.AlwaysOnFrac = 0.423
+	c.Scenario.SessionChurn.Scale = 1.0
 	c.Scenario.Disconnect.Frac = 0.01
 	c.Scenario.Churn.Frac = 0.1
 	c.Scenario.Churn.Mode = "steadystate"

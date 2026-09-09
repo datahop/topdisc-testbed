@@ -287,7 +287,7 @@ func main() {
 		if *sessionChurn {
 			scStop := make(chan struct{})
 			scDone := make(chan struct{})
-			go runSessionChurn(pacing.Conns, *searchTimeout, *sessionChurnGap, *seed, scStop, scDone)
+			go runSessionChurn(pacing.Conns, *searchTimeout, *sessionChurnGap, cfg.Scenario.SessionChurn.AlwaysOnFrac, cfg.Scenario.SessionChurn.Scale, *seed, scStop, scDone)
 			defer func() { close(scStop); <-scDone }()
 		}
 		if *disconnectInterval > 0 {

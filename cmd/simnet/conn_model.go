@@ -304,7 +304,6 @@ func pctInt(sorted []int, p int) int {
 // topology-level — a node drops every connection and stops accepting dials for
 // a gap, then returns and refills — so peers must rediscover rather than the
 // discv5 node itself being torn down.
-const sessionAlwaysOnFrac = 0.423
 
 var sessionCDF = [][2]float64{
 	{0.3214, 0.01190}, {0.5142, 0.03571}, {0.5684, 0.04762}, {0.6096, 0.05952},
@@ -316,11 +315,11 @@ var sessionCDF = [][2]float64{
 
 // sessionLength decides once whether a node churns at all, and if so samples
 // its first session length as a fraction of the window.
-func sessionLength(rng *rand.Rand) (float64, bool) {
-	if rng.Float64() < sessionAlwaysOnFrac {
+func sessionLength(rng *rand.Rand, alwaysOn, scale float64) (float64, bool) {
+	if rng.Float64() < alwaysOn {
 		return 0, false
 	}
-	return churnerSession(rng), true
+	return churnerSession(rng) * scale, true
 }
 
 // churnerSession samples a session length for a node already known to churn.
@@ -384,7 +383,7 @@ func (c *connTable) rejoin(i int) {
 
 // runSessionChurn gives every node a session length and cycles it offline and
 // back for the duration of the run.
-func runSessionChurn(c *connTable, window time.Duration, gap time.Duration, seed int64, stop <-chan struct{}, done chan<- struct{}) {
+func runSessionChurn(c *connTable, window, gap time.Duration, alwaysOn, scale float64, seed int64, stop <-chan struct{}, done chan<- struct{}) {
 	defer close(done)
 
 	// Sessions are a fraction of the search window, so they must not start
@@ -408,7 +407,7 @@ func runSessionChurn(c *connTable, window time.Duration, gap time.Duration, seed
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
-	fmt.Printf("[session-churn] started %.0fs after driver launch; window=%s gap=%s\n", time.Since(t0).Seconds(), window, gap)
+	fmt.Printf("[session-churn] started %.0fs after driver launch; window=%s gap=%s always-on=%.3f scale=%.2f\n", time.Since(t0).Seconds(), window, gap, alwaysOn, scale)
 	go func() {
 		tick := time.NewTicker(60 * time.Second)
 		defer tick.Stop()
@@ -427,7 +426,7 @@ func runSessionChurn(c *connTable, window time.Duration, gap time.Duration, seed
 	rng := rand.New(rand.NewSource(seed))
 	var wg sync.WaitGroup
 	for i := range c.out {
-		frac, churns := sessionLength(rng)
+		frac, churns := sessionLength(rng, alwaysOn, scale)
 		if !churns {
 			continue
 		}
@@ -451,7 +450,7 @@ func runSessionChurn(c *connTable, window time.Duration, gap time.Duration, seed
 				case <-g.C:
 				}
 				c.rejoin(idx)
-				t.Reset(time.Duration(churnerSession(r) * float64(window)))
+				t.Reset(time.Duration(churnerSession(r) * scale * float64(window)))
 			}
 		}(i, time.Duration(frac*float64(window)), rand.New(rand.NewSource(seed+int64(i)*2654435761)))
 	}

@@ -44,6 +44,8 @@ scenario:
   session_churn:
     enabled: false                     # 42.3% stay all run; the rest fall off geometrically from a short mode
     gap: 30s                           # how long a departed node is unreachable
+    always_on_frac: 0.423              # share of nodes that never leave (crawl: 0.423)
+    scale: 1                           # multiplier on every session length; 0.5 doubles the churn rate, 2 halves it
   disconnect:
     interval: 0s                       # drop a fraction of live connections this often; 0 = off
     frac: 0.01                         # fraction dropped per interval
