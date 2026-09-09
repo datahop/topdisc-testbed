@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/datahop/topdisc-testbed/pkg/churn"
 	"github.com/datahop/topdisc-testbed/pkg/scenario"
 	"log/slog"
 	"os"
@@ -293,7 +294,7 @@ func main() {
 				if !filepath.IsAbs(mp) {
 					mp = filepath.Join(filepath.Dir(os.Args[1]), mp)
 				}
-				m, err := loadChurnModel(mp)
+				m, err := churn.Load(mp)
 				if err != nil {
 					fatalf("%v", err)
 				}

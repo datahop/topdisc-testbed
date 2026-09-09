@@ -4,6 +4,7 @@
 package main
 
 import (
+	"crypto/ecdsa"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/datahop/topdisc-testbed/pkg/assign"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p"
@@ -52,13 +54,35 @@ func main() {
 	dialRatio := flag.Int("dialratio", 3, "1/N of slots are dialed")
 	ip := flag.String("ip", "127.0.0.1", "address to listen on and advertise")
 	verbosity := flag.Int("v", 2, "log verbosity")
+	assignment := flag.String("assignment", "", "assignment JSON from the coordinator; overrides the other flags")
 	flag.Parse()
 	if *statusPort == 0 {
 		*statusPort = *port + 10000
 	}
 	log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, log.FromLegacyLevel(*verbosity), false)))
 
-	key, err := crypto.GenerateKey()
+	var (
+		key  *ecdsa.PrivateKey
+		err  error
+		asg  assign.Assignment
+		wait = func(int64) {}
+	)
+	if *assignment != "" {
+		if asg, err = assign.Read(*assignment); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		key, err = crypto.HexToECDSA(asg.Key)
+		*ip, *port, *statusPort, *maxPeers, *dialRatio = asg.IP, asg.Port, asg.StatusPort, asg.MaxPeers, asg.DialRatio
+		*topicName, *boot = asg.Topics[0], strings.Join(asg.Bootnodes, ",")
+		wait = func(atMs int64) {
+			if d := time.Until(time.UnixMilli(atMs)); d > 0 {
+				time.Sleep(d)
+			}
+		}
+	} else {
+		key, err = crypto.GenerateKey()
+	}
 	if err != nil {
 		panic(err)
 	}
@@ -102,8 +126,13 @@ func main() {
 		os.Exit(1)
 	}
 	srv.LocalNode().SetFallbackIP(net.ParseIP(*ip))
+	wait(asg.Phases.RegisterAt)
 	srv.DiscoveryV5().RegisterTopic(topic, uint64(*port))
+	wait(asg.Phases.SearchAt)
 	close(ready)
+	if asg.Phases.StopAt > 0 {
+		go func() { wait(asg.Phases.StopAt); srv.Stop(); os.Exit(0) }()
+	}
 	log.Info("node up", "enode", srv.Self().URLv4(), "status", *statusPort)
 
 	status := func() map[string]any {
