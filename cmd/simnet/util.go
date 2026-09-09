@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/datahop/topdisc-testbed/pkg/scenario"
 	"os"
 	"sort"
 	"time"
@@ -22,7 +23,7 @@ func percentile(d []time.Duration, p int) time.Duration {
 
 func fatalf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "fatal: "+format+"\n", args...)
-	flushLog()
+	scenario.FlushLog()
 	os.Exit(1)
 }
 
@@ -92,7 +93,7 @@ func monitorBuffers(sim *simnet.Simnet, abortOnDrop bool, stop <-chan struct{}, 
 				// protocol never saw. Stop rather than report biased numbers.
 				fmt.Printf("[buf] ABORT: %d packets dropped (links max %d/%d); results would be biased\n",
 					s.LinkDropped, s.LinkMax, s.LinkCap)
-				flushLog()
+				scenario.FlushLog()
 				os.Exit(2)
 			}
 			routerCap = s.RouterShardCap

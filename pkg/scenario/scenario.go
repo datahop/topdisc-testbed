@@ -1,6 +1,6 @@
 // Config is a run: a testbed-agnostic scenario plus how this testbed executes
 // it. A run directory's run.yaml is this struct fully resolved.
-package main
+package scenario
 
 import (
 	"fmt"
@@ -219,7 +219,7 @@ var paramDocs = []paramDoc{
 	{"testbed.safety.abort_on_drop", "exit on the first dropped packet: drops bias every timing"},
 }
 
-func defaultConfig() Config {
+func Default() Config {
 	var c Config
 	c.Scenario.Population.Nodes = 5
 	c.Scenario.Population.Topics = 1
@@ -256,8 +256,8 @@ func mustDur(s string) time.Duration {
 	return d
 }
 
-func loadConfig(path string) (Config, error) {
-	c := defaultConfig()
+func Load(path string) (Config, error) {
+	c := Default()
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return c, err
@@ -304,8 +304,8 @@ func fmtVal(v any) string {
 	return fmt.Sprint(v)
 }
 
-// paramsLine is the one-liner the figure scripts parse.
-func (c Config) paramsLine() string {
+// ParamsLine is the one-liner the figure scripts parse.
+func (c Config) ParamsLine() string {
 	keys, vals := c.flatten()
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
@@ -315,8 +315,8 @@ func (c Config) paramsLine() string {
 	return "PARAMS: " + strings.Join(parts, " ")
 }
 
-func printReference() {
-	_, vals := defaultConfig().flatten()
+func PrintReference() {
+	_, vals := Default().flatten()
 	fmt.Println("# Every parameter, with its default and meaning. Copy and edit.")
 	fmt.Println("name: my-run")
 	lastTop, lastSec := "", ""
@@ -345,12 +345,12 @@ func printReference() {
 	}
 }
 
-// prepareRun creates <name>-<timestamp>/, points relative trace paths into
+// PrepareRun creates <name>-<timestamp>/, points relative trace paths into
 // it, writes the resolved run.yaml, and tees stdout into run.log.
-// flushLog drains the stdout tee into run.log; call it before any exit.
-var flushLog = func() {}
+// FlushLog drains the stdout tee into run.log; call it before any exit.
+var FlushLog = func() {}
 
-func prepareRun(c *Config) (string, error) {
+func PrepareRun(c *Config) (string, error) {
 	dir := fmt.Sprintf("%s-%s", c.Name, time.Now().Format("20060102-150405"))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
@@ -392,12 +392,12 @@ func prepareRun(c *Config) (string, error) {
 			}
 		}
 	}()
-	flushLog = func() {
+	FlushLog = func() {
 		w.Close()
 		<-done
 		logf.Close()
 		os.Stdout = real
-		flushLog = func() {}
+		FlushLog = func() {}
 	}
 	return dir, nil
 }
