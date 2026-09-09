@@ -386,42 +386,11 @@ func (c *connTable) rejoin(i int) {
 func runSessionChurn(c *connTable, window, gap time.Duration, alwaysOn, scale float64, seed int64, stop <-chan struct{}, done chan<- struct{}) {
 	defer close(done)
 
-	// Sessions are a fraction of the search window, so they must not start
-	// ticking until searches do. Registration runs for minutes beforehand and
-	// holds no connections; timers started then all expire on an empty
-	// topology. Wait for the first connection instead of guessing the offset.
-	t0 := time.Now()
-	for {
-		c.mu.Lock()
-		live := 0
-		for _, v := range c.out {
-			live += v
-		}
-		c.mu.Unlock()
-		if live > 0 {
-			break
-		}
-		select {
-		case <-stop:
-			return
-		case <-time.After(250 * time.Millisecond):
-		}
+	if !waitForTopology(c, stop) {
+		return
 	}
-	fmt.Printf("[session-churn] started %.0fs after driver launch; window=%s gap=%s always-on=%.3f scale=%.2f\n", time.Since(t0).Seconds(), window, gap, alwaysOn, scale)
-	go func() {
-		tick := time.NewTicker(60 * time.Second)
-		defer tick.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-tick.C:
-				c.mu.Lock()
-				fmt.Printf("[session-churn] departs=%d disconnects=%d slots-lost=%d refilled=%d\n", c.departs, c.disconnects, c.losses, c.refills)
-				c.mu.Unlock()
-			}
-		}
-	}()
+	fmt.Printf("[session-churn] started; window=%s gap=%s always-on=%.3f scale=%.2f\n", window, gap, alwaysOn, scale)
+	go logChurnProgress(c, stop)
 
 	rng := rand.New(rand.NewSource(seed))
 	var wg sync.WaitGroup
@@ -456,4 +425,40 @@ func runSessionChurn(c *connTable, window, gap time.Duration, alwaysOn, scale fl
 	}
 	<-stop
 	wg.Wait()
+}
+
+// waitForTopology blocks until the first connection exists, so churn timers
+// do not start ticking during registration on an empty topology.
+func waitForTopology(c *connTable, stop <-chan struct{}) bool {
+	for {
+		c.mu.Lock()
+		live := 0
+		for _, v := range c.out {
+			live += v
+		}
+		c.mu.Unlock()
+		if live > 0 {
+			return true
+		}
+		select {
+		case <-stop:
+			return false
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+}
+
+func logChurnProgress(c *connTable, stop <-chan struct{}) {
+	tick := time.NewTicker(60 * time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-tick.C:
+			c.mu.Lock()
+			fmt.Printf("[session-churn] departs=%d disconnects=%d slots-lost=%d refilled=%d\n", c.departs, c.disconnects, c.losses, c.refills)
+			c.mu.Unlock()
+		}
+	}
 }

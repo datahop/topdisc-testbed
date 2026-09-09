@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -287,7 +288,18 @@ func main() {
 		if *sessionChurn {
 			scStop := make(chan struct{})
 			scDone := make(chan struct{})
-			go runSessionChurn(pacing.Conns, *searchTimeout, *sessionChurnGap, cfg.Scenario.SessionChurn.AlwaysOnFrac, cfg.Scenario.SessionChurn.Scale, *seed, scStop, scDone)
+			if mp := cfg.Scenario.SessionChurn.Model; mp != "" {
+				if !filepath.IsAbs(mp) {
+					mp = filepath.Join(filepath.Dir(os.Args[1]), mp)
+				}
+				m, err := loadChurnModel(mp)
+				if err != nil {
+					fatalf("%v", err)
+				}
+				go runModelChurn(pacing.Conns, m, *searchTimeout, cfg.Scenario.SessionChurn.WindowHours, *seed, scStop, scDone)
+			} else {
+				go runSessionChurn(pacing.Conns, *searchTimeout, *sessionChurnGap, cfg.Scenario.SessionChurn.AlwaysOnFrac, cfg.Scenario.SessionChurn.Scale, *seed, scStop, scDone)
+			}
 			defer func() { close(scStop); <-scDone }()
 		}
 		if *disconnectInterval > 0 {

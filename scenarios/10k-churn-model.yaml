@@ -1,0 +1,40 @@
+# 10k with churn from the fitted August 2026 discv5 model; the 10-minute window
+# stands for one real day (one 2h crawl unit = 50s).
+name: 10k-churn-model
+scenario:
+  population:
+    nodes: 10000
+    topics: 1
+    all_register: true
+    seed: 1
+  network:
+    latency_ms: 30
+    bandwidth_mibps: 1000
+  phases:
+    bootstrap_wait: 180s
+    register_wait: 22m30s
+    register_stagger: 30ms
+    search_stagger: 10ms
+    search_timeout: 10m
+  topic:
+    ad_cache_size: 5000
+  conn_model:
+    enabled: true
+    max_peers: 50
+    dial_ratio: 3
+    redial_wait: 35s
+  session_churn:
+    enabled: true
+    model: models/nebula-discv5-2026-08.json
+    window_real_hours: 24
+testbed:
+  simulator:
+    link_buf: 8192
+    router_buf: 32768
+    router_shards: 16
+  traces:
+    metrics: m.json
+    overhead: oh.json
+    overhead_series: series.json
+    overhead_series_period: 30s
+    checkpoint_interval: 60s

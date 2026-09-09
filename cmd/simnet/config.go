@@ -104,6 +104,8 @@ type SessionChurnConfig struct {
 	Gap          time.Duration `yaml:"gap"`
 	AlwaysOnFrac float64       `yaml:"always_on_frac"`
 	Scale        float64       `yaml:"scale"`
+	Model        string        `yaml:"model"`
+	WindowHours  float64       `yaml:"window_real_hours"`
 }
 
 // DisconnectConfig: link failure without any node leaving.
@@ -191,6 +193,8 @@ var paramDocs = []paramDoc{
 	{"scenario.session_churn.gap", "how long a departed node is unreachable"},
 	{"scenario.session_churn.always_on_frac", "share of nodes that never leave (crawl: 0.423)"},
 	{"scenario.session_churn.scale", "multiplier on every session length; 0.5 doubles the churn rate, 2 halves it"},
+	{"scenario.session_churn.model", "fitted hazard model JSON (see scenarios/models); when set, replaces the builtin distribution and always_on_frac/scale"},
+	{"scenario.session_churn.window_real_hours", "with a model: the search window stands for this many real hours"},
 	{"scenario.disconnect.interval", "drop a fraction of live connections this often; 0 = off"},
 	{"scenario.disconnect.frac", "fraction dropped per interval"},
 	{"scenario.churn.interval", "churn round period; 0 = off"},
@@ -235,6 +239,7 @@ func defaultConfig() Config {
 	c.Scenario.SessionChurn.Gap = mustDur("30s")
 	c.Scenario.SessionChurn.AlwaysOnFrac = 0.423
 	c.Scenario.SessionChurn.Scale = 1.0
+	c.Scenario.SessionChurn.WindowHours = 24
 	c.Scenario.Disconnect.Frac = 0.01
 	c.Scenario.Churn.Frac = 0.1
 	c.Scenario.Churn.Mode = "steadystate"

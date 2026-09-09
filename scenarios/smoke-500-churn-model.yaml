@@ -1,0 +1,40 @@
+# smoke-500 with churn driven by the fitted August 2026 discv5 model: the 3-minute
+# window stands for one real day, so one 2h crawl unit is 15s.
+name: smoke-500-churn-model
+scenario:
+  population:
+    nodes: 500
+    topics: 1
+    all_register: true
+    seed: 1
+  network:
+    latency_ms: 30
+    bandwidth_mibps: 1000
+  phases:
+    bootstrap_wait: 45s
+    register_wait: 90s
+    register_stagger: 5ms
+    search_stagger: 2ms
+    search_timeout: 3m
+  topic:
+    ad_cache_size: 5000
+  conn_model:
+    enabled: true
+    max_peers: 50
+    dial_ratio: 3
+    redial_wait: 35s
+  session_churn:
+    enabled: true
+    model: models/nebula-discv5-2026-08.json
+    window_real_hours: 24
+testbed:
+  simulator:
+    link_buf: 8192
+    router_buf: 32768
+    router_shards: 16
+  traces:
+    metrics: m.json
+    overhead: oh.json
+    overhead_series: series.json
+    overhead_series_period: 30s
+    checkpoint_interval: 60s
