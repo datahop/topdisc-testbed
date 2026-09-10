@@ -51,9 +51,16 @@ ssm_run() {
 
 case "$1" in
   up)
+    sc=$2; shift 2
+    go build -o testbed ./cmd/testbed
+    fleet=$(./testbed fleet "$sc")
+    regions=$(echo "$fleet" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["regions"]))')
+    home=$(echo "$fleet" | python3 -c 'import json,sys; print(json.load(sys.stdin)["home_region"])')
+    echo "fleet: $regions, home $home"
+    cost_guard "$regions"
     terraform -chdir=$TF init -input=false >/dev/null
-    n=$2; [ $# -ge 2 ] && shift 2 || shift
-    terraform -chdir=$TF apply -auto-approve -input=false ${n:+-var nodes=$n} "$@"
+    terraform -chdir=$TF apply -auto-approve -input=false -var "regions=$regions" -var "home_region=$home" \
+      -var "max_hours=$MAX_HOURS" "$@"
     build_push ;;
   push) build_push ;;
   run)
