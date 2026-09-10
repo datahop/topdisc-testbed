@@ -11,3 +11,5 @@ figs/
 /hostagent
 /out/
 /runs/
+.terraform/
+*.tfstate*

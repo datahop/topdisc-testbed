@@ -1,6 +1,7 @@
 # One node per instance on Hetzner Cloud: N small servers on a private network.
 # Hetzner has no private-only instances, so hosts keep a public IPv4 and the
-# firewall allows only SSH from var.admin_cidr; testbed traffic stays private.
+# firewall allows only SSH from var.admin_cidr
+testbed traffic stays private.
 terraform {
   required_providers { hcloud = { source = "hetznercloud/hcloud", version = "~> 1.45" } }
 }
@@ -35,8 +36,13 @@ locals {
 }
 
 resource "hcloud_server" "coordinator" {
-  name = "topdisc-coordinator"; server_type = var.coordinator_type; image = "debian-12"; location = var.location
-  ssh_keys = [hcloud_ssh_key.admin.id]; firewall_ids = [hcloud_firewall.admin.id]; user_data = local.cloud_init
+  name = "topdisc-coordinator"
+  server_type = var.coordinator_type
+  image = "debian-12"
+  location = var.location
+  ssh_keys = [hcloud_ssh_key.admin.id]
+  firewall_ids = [hcloud_firewall.admin.id]
+  user_data = local.cloud_init
   network { network_id = hcloud_network.tb.id }
   labels = { role = "coordinator" }
   depends_on = [hcloud_network_subnet.nodes]
@@ -45,7 +51,9 @@ resource "hcloud_server" "coordinator" {
 resource "hcloud_server" "host" {
   count = var.nodes
   name = "topdisc-node-${count.index}"; server_type = var.instance_type; image = "debian-12"; location = var.location
-  ssh_keys = [hcloud_ssh_key.admin.id]; firewall_ids = [hcloud_firewall.admin.id]; user_data = local.cloud_init
+  ssh_keys = [hcloud_ssh_key.admin.id]
+  firewall_ids = [hcloud_firewall.admin.id]
+  user_data = local.cloud_init
   network { network_id = hcloud_network.tb.id }
   labels = { role = "host", index = count.index }
   depends_on = [hcloud_network_subnet.nodes]
