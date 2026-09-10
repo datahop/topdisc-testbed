@@ -18,9 +18,11 @@ import (
 	"time"
 
 	"github.com/datahop/topdisc-testbed/pkg/assign"
+	"github.com/datahop/topdisc-testbed/pkg/workload"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p"
+	"github.com/ethereum/go-ethereum/p2p/discover"
 	"github.com/ethereum/go-ethereum/p2p/discover/topicindex"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 )
@@ -121,17 +123,84 @@ func main() {
 		ListenAddr: fmt.Sprintf("%s:%d", *ip, *port), DiscoveryV4: false, DiscoveryV5: true,
 		BootstrapNodesV5: bootnodes, Protocols: []p2p.Protocol{proto}, Logger: log.Root(),
 	}}
+	discover.EnableWireStats()
 	if err := srv.Start(); err != nil {
 		fmt.Fprintln(os.Stderr, "start:", err)
 		os.Exit(1)
 	}
 	srv.LocalNode().SetFallbackIP(net.ParseIP(*ip))
+
+	// Refill latency from the server's own peer events: an outbound drop
+	// starts a clock, the next outbound add stops it.
+	var (
+		mu      sync.Mutex
+		lostAt  []time.Time
+		refills []int64
+		drops   int
+		lookups []workload.Lookup
+	)
+	events := make(chan *p2p.PeerEvent, 64)
+	sub := srv.SubscribeEvents(events)
+	defer sub.Unsubscribe()
+	go func() {
+		for ev := range events {
+			if ev.Type == p2p.PeerEventTypeDrop && ev.Peer != enode.ID(srv.Self().ID()) {
+				mu.Lock()
+				drops++
+				lostAt = append(lostAt, time.Now())
+				mu.Unlock()
+			} else if ev.Type == p2p.PeerEventTypeAdd {
+				mu.Lock()
+				if len(lostAt) > 0 {
+					refills = append(refills, time.Since(lostAt[0]).Milliseconds())
+					lostAt = lostAt[1:]
+				}
+				mu.Unlock()
+			}
+		}
+	}()
 	wait(asg.Phases.RegisterAt)
 	srv.DiscoveryV5().RegisterTopic(topic, uint64(*port))
 	wait(asg.Phases.SearchAt)
 	close(ready)
+	if asg.Search.Model == "continuous" {
+		deadline := time.UnixMilli(asg.Phases.StopAt)
+		if asg.Phases.StopAt == 0 {
+			deadline = time.Now().Add(24 * time.Hour)
+		}
+		go workload.Continuous(
+			func() enode.Iterator { return srv.DiscoveryV5().TopicSearch(topic, uint64(*port)+1) },
+			nil, asg.Search.TargetCount, time.Duration(asg.Search.RequestDelayMs)*time.Millisecond,
+			time.Duration(asg.Search.RequestTimeout)*time.Millisecond, deadline,
+			func(l workload.Lookup) { mu.Lock(); lookups = append(lookups, l); mu.Unlock() })
+	}
+	writeTrace := func() {
+		if asg.TraceFile == "" {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		out, in := 0, 0
+		for _, p := range srv.Peers() {
+			if p.Inbound() {
+				in++
+			} else {
+				out++
+			}
+		}
+		var wire map[string]discover.WireCounter
+		if ws := srv.DiscoveryV5().WireStats(); len(ws) > 0 {
+			wire = ws
+		}
+		b, _ := json.MarshalIndent(map[string]any{
+			"idx": asg.Idx, "id": srv.Self().ID().String(), "outbound": out, "inbound": in,
+			"peer_drops": drops, "refill_ms": refills, "lookups": lookups,
+			"ads_held": len(srv.DiscoveryV5().LocalTopicNodes(topic)), "wire": wire,
+		}, "", " ")
+		os.WriteFile(asg.TraceFile, b, 0o644)
+	}
 	if asg.Phases.StopAt > 0 {
-		go func() { wait(asg.Phases.StopAt); srv.Stop(); os.Exit(0) }()
+		go func() { wait(asg.Phases.StopAt); writeTrace(); srv.Stop(); os.Exit(0) }()
 	}
 	log.Info("node up", "enode", srv.Self().URLv4(), "status", *statusPort)
 
@@ -148,6 +217,8 @@ func main() {
 		return map[string]any{
 			"enode": srv.Self().URLv4(), "peers": out + in, "outbound": out, "inbound": in,
 			"table": len(d.AllNodes()), "ads_held": len(d.LocalTopicNodes(topic)),
+			"lookups": func() int { mu.Lock(); defer mu.Unlock(); return len(lookups) }(),
+			"refills": func() int { mu.Lock(); defer mu.Unlock(); return len(refills) }(),
 		}
 	}
 	http.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) { json.NewEncoder(w).Encode(status()) })

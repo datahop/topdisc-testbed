@@ -41,14 +41,16 @@ type Assignment struct {
 	DialRatio  int           `json:"dial_ratio"`
 	Phases     Phases        `json:"phases"`
 	Search     Search        `json:"search"`
-	Churn      []churn.Event `json:"churn"` // seconds from search start
+	Churn      []churn.Event `json:"churn"`      // seconds from search start
+	TraceFile  string        `json:"trace_file"` // where the node writes its trace at StopAt
 }
 
 // Host describes where a node runs; the backend supplies one per node.
 type Host struct {
 	IP        string
 	BasePort  int
-	StatusOff int // status port = port + StatusOff
+	StatusOff int    // status port = port + StatusOff
+	TraceFile string // per-node trace path
 }
 
 // Generate derives every node's assignment. Keys come from the seed, topics
@@ -104,7 +106,7 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 	for i := range out {
 		h := hosts(i)
 		a := Assignment{
-			Idx: i, Key: hex.EncodeToString(crypto.FromECDSA(keys[i])), IP: h.IP, Port: h.BasePort, StatusPort: h.BasePort + h.StatusOff,
+			Idx: i, Key: hex.EncodeToString(crypto.FromECDSA(keys[i])), IP: h.IP, Port: h.BasePort, StatusPort: h.BasePort + h.StatusOff, TraceFile: h.TraceFile,
 			Topics: topics[i], MaxPeers: sc.ConnModel.MaxPeers, DialRatio: sc.ConnModel.DialRatio,
 			Phases: Phases{RegisterAt: registerAt + int64(i)*ph.RegisterStagger.Milliseconds(), SearchAt: searchAt + int64(i)*ph.SearchStagger.Milliseconds(), StopAt: stopAt},
 			Search: Search{Model: sc.Search.Model, TargetCount: sc.Search.TargetCount, RequestDelayMs: sc.Search.RequestDelay.Milliseconds(), RequestTimeout: sc.Search.RequestTimeout.Milliseconds()},
