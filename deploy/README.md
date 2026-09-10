@@ -2,7 +2,8 @@
 
 One node per instance, no network emulation: the cloud's own network is the
 WAN, so a scenario says where nodes live instead of what latency to emulate.
-`scenario.network.regions` maps regions to weights; `testbed fleet
+`scenario.network.regions` maps regions to weights and
+`scenario.network.node_regions` pins individual node indices to a region; `testbed fleet
 <scenario>` turns that into instance counts and `deploy/aws.sh up` provisions
 one autoscaling group per region, VPC-peered in a full mesh, plus a
 coordinator in `testbed.cloud.home_region`. Every instance boots the

@@ -65,6 +65,7 @@ type NetworkConfig struct {
 	LatencyMs      int                `yaml:"latency_ms"`
 	BandwidthMibps int                `yaml:"bandwidth_mibps"`
 	Regions        map[string]float64 `yaml:"regions"`
+	NodeRegions    map[int]string     `yaml:"node_regions"`
 }
 
 // PhasesConfig: how the run is paced.
@@ -217,6 +218,7 @@ var paramDocs = []paramDoc{
 	{"scenario.network.latency_ms", "simnet: per-pair one-way latency, ms (cloud: given by regions)"},
 	{"scenario.network.bandwidth_mibps", "simnet: per-direction link bandwidth (cloud: given by the instance type)"},
 	{"scenario.network.regions", "cloud: node placement, region -> weight, e.g. {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}; empty = all in the home region"},
+	{"scenario.network.node_regions", "cloud: pin nodes, index -> region, e.g. {0: us-east-1, 7: sa-east-1}; the rest follow regions"},
 	{"scenario.phases.bootstrap_wait", "after spawning, before registrations start"},
 	{"scenario.phases.register_stagger", "gap between consecutive nodes starting to register"},
 	{"scenario.phases.register_wait", "after the last node starts registering, before searches start"},
@@ -370,6 +372,17 @@ func fmtVal(v any) string {
 			parts[i] = fmt.Sprintf("%s:%g", k, x[k])
 		}
 		return "{" + strings.Join(parts, ",") + "}"
+	case map[int]string:
+		keys := make([]int, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Ints(keys)
+		parts := make([]string, len(keys))
+		for i, k := range keys {
+			parts[i] = fmt.Sprintf("%d:%s", k, x[k])
+		}
+		return "{" + strings.Join(parts, ",") + "}"
 	}
 	return fmt.Sprint(v)
 }
@@ -480,14 +493,22 @@ func (w WanConfig) Star() *wan.Star {
 	return &wan.Star{MinMs: w.DelayMinMs, MaxMs: w.DelayMaxMs, JitterMs: w.JitterMs, RateKbps: w.RateKbps}
 }
 
-// Fleet turns the region weights into instance counts for the cloud backend
-// (largest remainder; the home region, first in sorted order when no weights
-// are given, holds the bootnode).
+// Fleet turns the placement into instance counts per region for the cloud
+// backend: pinned nodes first, the rest by weight (largest remainder), or
+// all in the home region when no weights are given.
 func (c Config) Fleet() map[string]int {
 	n := c.Scenario.Population.Nodes
 	w := c.Scenario.Network.Regions
+	out := map[string]int{}
+	for idx, r := range c.Scenario.Network.NodeRegions {
+		if idx >= 0 && idx < n {
+			out[r]++
+			n--
+		}
+	}
 	if len(w) == 0 {
-		return map[string]int{c.Testbed.Cloud.HomeRegion: n}
+		out[c.Testbed.Cloud.HomeRegion] += n
+		return out
 	}
 	keys := make([]string, 0, len(w))
 	total := 0.0
@@ -496,13 +517,13 @@ func (c Config) Fleet() map[string]int {
 		total += v
 	}
 	sort.Strings(keys)
-	out, given := map[string]int{}, 0
+	given := 0
 	rem := make([]float64, len(keys))
 	for i, k := range keys {
 		exact := float64(n) * w[k] / total
-		out[k] = int(exact)
-		rem[i] = exact - float64(out[k])
-		given += out[k]
+		out[k] += int(exact)
+		rem[i] = exact - float64(int(exact))
+		given += int(exact)
 	}
 	for given < n {
 		best := 0

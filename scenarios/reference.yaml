@@ -37,6 +37,7 @@ scenario:
     latency_ms: 30                     # simnet: per-pair one-way latency, ms (cloud: given by regions)
     bandwidth_mibps: 100               # simnet: per-direction link bandwidth (cloud: given by the instance type)
     regions: {}                        # cloud: node placement, region -> weight, e.g. {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}; empty = all in the home region
+    node_regions: {}                   # cloud: pin nodes, index -> region, e.g. {0: us-east-1, 7: sa-east-1}; the rest follow regions
   phases:
     bootstrap_wait: 3s                 # after spawning, before registrations start
     register_stagger: 0s               # gap between consecutive nodes starting to register

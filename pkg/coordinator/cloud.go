@@ -27,6 +27,7 @@ type Inventory struct {
 		IP     string `json:"ip"`
 		Nodes  int    `json:"nodes"`
 		Region string `json:"region"`
+		Port   int    `json:"port"` // hostagent port; 0 = testbed.cloud.agent_port
 	} `json:"hosts"`
 }
 
@@ -51,30 +52,9 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 	if n := sc.Population.Nodes; n > capacity {
 		return fmt.Errorf("%d nodes but the inventory holds %d", n, capacity)
 	}
-	// Placement: the fleet was sized from scenario.network.regions; the first
-	// host of the home region gets the bootnode, the rest are packed in
-	// inventory order (region-sorted), which is fine because node indices are
-	// random keys.
-	if len(inv.Hosts) > 0 && inv.Hosts[0].Region != "" {
-		want, have := cfg.Fleet(), map[string]int{}
-		for _, h := range inv.Hosts {
-			have[h.Region] += h.Nodes
-		}
-		for r, n := range want {
-			if have[r] < n {
-				return fmt.Errorf("region %s: scenario wants %d nodes, inventory has %d", r, n, have[r])
-			}
-		}
-		home := cc.HomeRegion
-		sort.SliceStable(inv.Hosts, func(i, j int) bool { return (inv.Hosts[i].Region == home) && (inv.Hosts[j].Region != home) })
-	}
-	hostOf, local := make([]int, sc.Population.Nodes), make([]int, sc.Population.Nodes)
-	for i, h, k := 0, 0, 0; i < len(hostOf); i++ {
-		if k == inv.Hosts[h].Nodes {
-			h, k = h+1, 0
-		}
-		hostOf[i], local[i] = h, k
-		k++
+	hostOf, local, err := place(cfg, inv)
+	if err != nil {
+		return err
 	}
 	star := cfg.Testbed.Wan.Star()
 	t0 := time.Now().Add(20 * time.Second).UnixMilli()
@@ -101,7 +81,11 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 	agents := make([]agent, len(inv.Hosts))
 	peers := map[int]string{}
 	for i, h := range inv.Hosts {
-		agents[i] = agent{fmt.Sprintf("http://%s:%d", h.IP, cc.AgentPort)}
+		port := cc.AgentPort
+		if h.Port != 0 {
+			port = h.Port
+		}
+		agents[i] = agent{fmt.Sprintf("http://%s:%d", h.IP, port)}
 		peers[h.Index] = h.IP
 	}
 	mine := make([][]assign.Assignment, len(agents))
@@ -228,4 +212,68 @@ func each(n int, f func(i int) error) error {
 	}
 	wg.Wait()
 	return first
+}
+
+// place maps every node to a host slot. Pinned nodes (scenario.network.node_regions)
+// go to a host in their region; the bootnode (node 0) to the home region
+// unless pinned; the rest fill the remaining slots in inventory order, which
+// is region-sorted, and that is fine because node indices are random keys.
+// Inventories without regions are packed in order.
+func place(cfg scenario.Config, inv Inventory) (hostOf, local []int, err error) {
+	n := cfg.Scenario.Population.Nodes
+	hostOf, local = make([]int, n), make([]int, n)
+	type slot struct{ host, k int }
+	free := map[string][]slot{}
+	order := []string{}
+	for h, host := range inv.Hosts {
+		if _, ok := free[host.Region]; !ok {
+			order = append(order, host.Region)
+		}
+		for k := 0; k < host.Nodes; k++ {
+			free[host.Region] = append(free[host.Region], slot{h, k})
+		}
+	}
+	take := func(region string) (slot, bool) {
+		if len(free[region]) == 0 {
+			return slot{}, false
+		}
+		s := free[region][0]
+		free[region] = free[region][1:]
+		return s, true
+	}
+	pinned := map[int]string{}
+	for idx, r := range cfg.Scenario.Network.NodeRegions {
+		if idx >= 0 && idx < n {
+			pinned[idx] = r
+		}
+	}
+	if _, ok := pinned[0]; !ok && inv.Hosts[0].Region != "" {
+		pinned[0] = cfg.Testbed.Cloud.HomeRegion
+	}
+	for idx, r := range pinned {
+		s, ok := take(r)
+		if !ok {
+			return nil, nil, fmt.Errorf("node %d pinned to %s but no free instance there", idx, r)
+		}
+		hostOf[idx], local[idx] = s.host, s.k
+	}
+	// Home region first so the bootnode's neighbours in index order are not
+	// all remote; then the others.
+	home := cfg.Testbed.Cloud.HomeRegion
+	sort.SliceStable(order, func(i, j int) bool { return order[i] == home && order[j] != home })
+	ri := 0
+	for idx := 0; idx < n; idx++ {
+		if _, ok := pinned[idx]; ok {
+			continue
+		}
+		for ri < len(order) && len(free[order[ri]]) == 0 {
+			ri++
+		}
+		if ri == len(order) {
+			return nil, nil, fmt.Errorf("inventory has fewer free instances than nodes")
+		}
+		s, _ := take(order[ri])
+		hostOf[idx], local[idx] = s.host, s.k
+	}
+	return hostOf, local, nil
 }
