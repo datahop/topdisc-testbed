@@ -10,7 +10,7 @@ module "us_east_1" {
   nodes            = lookup(var.regions, "us-east-1", 0)
   coordinator      = var.home_region == "us-east-1"
   cidr             = "10.1.0.0/16"
-  instance_type    = var.instance_type
+  instance_types   = var.instance_types
   coordinator_type = var.coordinator_type
   spot             = var.spot
   instance_profile = aws_iam_instance_profile.ssm.name
@@ -27,7 +27,7 @@ module "us_west_2" {
   nodes            = lookup(var.regions, "us-west-2", 0)
   coordinator      = var.home_region == "us-west-2"
   cidr             = "10.2.0.0/16"
-  instance_type    = var.instance_type
+  instance_types   = var.instance_types
   coordinator_type = var.coordinator_type
   spot             = var.spot
   instance_profile = aws_iam_instance_profile.ssm.name
@@ -44,7 +44,7 @@ module "eu_central_1" {
   nodes            = lookup(var.regions, "eu-central-1", 0)
   coordinator      = var.home_region == "eu-central-1"
   cidr             = "10.3.0.0/16"
-  instance_type    = var.instance_type
+  instance_types   = var.instance_types
   coordinator_type = var.coordinator_type
   spot             = var.spot
   instance_profile = aws_iam_instance_profile.ssm.name
@@ -61,7 +61,7 @@ module "ap_southeast_1" {
   nodes            = lookup(var.regions, "ap-southeast-1", 0)
   coordinator      = var.home_region == "ap-southeast-1"
   cidr             = "10.4.0.0/16"
-  instance_type    = var.instance_type
+  instance_types   = var.instance_types
   coordinator_type = var.coordinator_type
   spot             = var.spot
   instance_profile = aws_iam_instance_profile.ssm.name
@@ -78,7 +78,7 @@ module "sa_east_1" {
   nodes            = lookup(var.regions, "sa-east-1", 0)
   coordinator      = var.home_region == "sa-east-1"
   cidr             = "10.5.0.0/16"
-  instance_type    = var.instance_type
+  instance_types   = var.instance_types
   coordinator_type = var.coordinator_type
   spot             = var.spot
   instance_profile = aws_iam_instance_profile.ssm.name

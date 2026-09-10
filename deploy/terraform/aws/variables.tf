@@ -11,9 +11,9 @@ variable "home_region" {
   description = "coordinator, bootnode and binaries bucket"
   default     = "us-east-1"
 }
-variable "instance_type" {
-  description = "one node per instance; t4g.nano (2 vCPU, 0.5 GB) is enough for a discv5+RLPx node"
-  default     = "t4g.nano"
+variable "instance_types" {
+  description = "one node per instance, cheapest first; several sizes so spot can fill across pools (all arm64)"
+  default     = ["t4g.nano", "t4g.micro", "t4g.small"]
 }
 variable "coordinator_type" {
   default = "m7g.large"

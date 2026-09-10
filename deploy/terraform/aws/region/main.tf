@@ -14,7 +14,7 @@ terraform {
 variable "nodes" { type = number }
 variable "coordinator" { type = bool }
 variable "cidr" { type = string }
-variable "instance_type" { type = string }
+variable "instance_types" { type = list(string) }
 variable "coordinator_type" { type = string }
 variable "spot" { type = bool }
 variable "instance_profile" { type = string }
@@ -32,7 +32,7 @@ data "aws_ami" "al2023_arm" {
   owners      = ["amazon"]
   filter {
     name   = "name"
-    values = ["al2023-ami-*-arm64"]
+    values = ["al2023-ami-2023*-kernel-*-arm64"] # not the minimal image: it has no SSM agent
   }
 }
 data "aws_region" "r" {}
@@ -42,10 +42,12 @@ resource "aws_vpc" "tb" {
   enable_dns_hostnames = true
   tags                 = { Name = "topdisc-testbed" }
 }
+# One node subnet per AZ (/20 each), so spot can draw on the whole region.
 resource "aws_subnet" "nodes" {
+  count             = min(length(data.aws_availability_zones.az.names), 8)
   vpc_id            = aws_vpc.tb.id
-  cidr_block        = cidrsubnet(var.cidr, 2, 0) # /18: 16k addresses
-  availability_zone = data.aws_availability_zones.az.names[0]
+  cidr_block        = cidrsubnet(var.cidr, 4, count.index)
+  availability_zone = data.aws_availability_zones.az.names[count.index]
 }
 resource "aws_subnet" "public" {
   vpc_id            = aws_vpc.tb.id
@@ -111,7 +113,7 @@ resource "aws_instance" "coordinator" {
   count                  = var.coordinator ? 1 : 0
   ami                    = data.aws_ami.al2023_arm.id
   instance_type          = var.coordinator_type
-  subnet_id              = aws_subnet.nodes.id
+  subnet_id              = aws_subnet.nodes[0].id
   vpc_security_group_ids = [aws_security_group.intra.id]
   iam_instance_profile   = var.instance_profile
   user_data              = var.cloud_init
@@ -123,28 +125,17 @@ resource "aws_instance" "coordinator" {
 }
 
 resource "aws_launch_template" "node" {
-  count         = var.nodes > 0 ? 1 : 0
-  name_prefix   = "topdisc-node-"
-  image_id      = data.aws_ami.al2023_arm.id
-  instance_type = var.instance_type
-  user_data     = base64encode(var.cloud_init)
+  count       = var.nodes > 0 ? 1 : 0
+  name_prefix = "topdisc-node-"
+  image_id    = data.aws_ami.al2023_arm.id
+  user_data   = base64encode(var.cloud_init)
   iam_instance_profile { name = var.instance_profile }
-  network_interfaces {
-    subnet_id       = aws_subnet.nodes.id
-    security_groups = [aws_security_group.intra.id]
-  }
+  vpc_security_group_ids = [aws_security_group.intra.id]
   block_device_mappings {
     device_name = "/dev/xvda"
     ebs {
       volume_size = 4
       volume_type = "gp3"
-    }
-  }
-  dynamic "instance_market_options" {
-    for_each = var.spot ? [1] : []
-    content {
-      market_type = "spot"
-      spot_options { spot_instance_type = "one-time" }
     }
   }
   tag_specifications {
@@ -158,10 +149,23 @@ resource "aws_autoscaling_group" "nodes" {
   desired_capacity    = var.nodes
   min_size            = 0
   max_size            = var.nodes
-  vpc_zone_identifier = [aws_subnet.nodes.id]
-  launch_template {
-    id      = aws_launch_template.node[0].id
-    version = "$Latest"
+  vpc_zone_identifier = aws_subnet.nodes[*].id
+  mixed_instances_policy {
+    launch_template {
+      launch_template_specification {
+        launch_template_id = aws_launch_template.node[0].id
+        version            = "$Latest"
+      }
+      dynamic "override" {
+        for_each = var.instance_types
+        content { instance_type = override.value }
+      }
+    }
+    instances_distribution {
+      on_demand_base_capacity                  = 0
+      on_demand_percentage_above_base_capacity = var.spot ? 0 : 100
+      spot_allocation_strategy                 = "price-capacity-optimized"
+    }
   }
   wait_for_capacity_timeout = "0"
 }

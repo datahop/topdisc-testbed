@@ -17,7 +17,7 @@ module "{al(r)}" {{
   nodes            = lookup(var.regions, "{r}", 0)
   coordinator      = var.home_region == "{r}"
   cidr             = "10.{i + 1}.0.0/16"
-  instance_type    = var.instance_type
+  instance_types   = var.instance_types
   coordinator_type = var.coordinator_type
   spot             = var.spot
   instance_profile = aws_iam_instance_profile.ssm.name
