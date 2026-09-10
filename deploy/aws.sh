@@ -1,6 +1,7 @@
 #!/bin/sh
 # AWS driver: build the binaries, provision, push, run, collect, tear down.
 #   deploy/aws.sh up <scenario> [tf args]  terraform apply sized from the scenario + build + push to S3 (e.g. -var spot=true)
+#                                          refuses if nodes x on-demand price x MAX_HOURS (6) > MAX_SPEND ($200)
 #   deploy/aws.sh push                  rebuild and re-push the binaries only
 #   deploy/aws.sh run scenarios/x.yaml  copy scenario + inventory to the coordinator and run it there
 #   deploy/aws.sh pull                  fetch the latest run directory from the coordinator into runs/
@@ -19,6 +20,20 @@ build_push() {
   cp deploy/inventory-aws.sh out/
   tar czf out/topdisc-linux-arm64.tgz -C out topdisc-node hostagent testbed inventory-aws.sh
   aws s3 cp out/topdisc-linux-arm64.tgz "s3://$(tfout binaries_bucket)/topdisc-linux-arm64.tgz"
+}
+
+MAX_SPEND=${MAX_SPEND:-200}
+MAX_HOURS=${MAX_HOURS:-6}
+# On-demand us-east-1 prices, $/h: nodes on t4g.nano, coordinator m7g.large,
+# one NAT gateway per active region. Spot is cheaper, so this is conservative.
+cost_guard() {
+  est=$(echo "$1" | python3 -c '
+import json,sys
+f=json.load(sys.stdin); n=sum(f.values()); active=sum(1 for v in f.values() if v>0)
+print(round(n*0.0042 + 0.0816 + active*0.045, 2))')
+  total=$(python3 -c "print(round($est*$MAX_HOURS,2))")
+  echo "estimated: \$$est/h on-demand, \$$total over MAX_HOURS=$MAX_HOURS (cap \$$MAX_SPEND); the coordinator scales the fleet to zero after $MAX_HOURS h"
+  python3 -c "import sys; sys.exit(0 if $total <= $MAX_SPEND else 1)" || { echo "refusing: over MAX_SPEND; lower MAX_HOURS or the fleet"; exit 1; }
 }
 
 # Runs a command on the coordinator through SSM and prints its output.

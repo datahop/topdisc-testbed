@@ -49,6 +49,13 @@ the bootnode, on the first instance), posts each instance its assignment,
 starts everything, applies churn by killing and restarting over HTTP, and
 fetches the traces at the end.
 
+Spending cap: `deploy/aws.sh up` refuses a fleet whose on-demand cost over
+`MAX_HOURS` (6) exceeds `MAX_SPEND` ($200); Terraform creates a $200 monthly
+budget with e-mail alerts; and the coordinator scales every region's
+autoscaling group to zero `max_hours` after boot, so a forgotten fleet stops
+costing on its own. `deploy/aws.sh down` still has to remove the rest (NAT
+gateways, coordinator, bucket).
+
 Quotas: 10k instances need the account's vCPU (AWS, GCP) or server (Hetzner)
 limit raised first. Spot/preemptible is fine for short runs; for 24 h churn
 runs use on-demand, because a reclaimed instance is indistinguishable from

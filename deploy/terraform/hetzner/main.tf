@@ -39,7 +39,7 @@ resource "hcloud_ssh_key" "admin" {
 }
 
 locals {
-  cloud_init = templatefile("${path.module}/../../cloud-init.yaml.tftpl", { binaries_url = var.binaries_url, binaries_s3 = "", region = "", regions = "" })
+  cloud_init = templatefile("${path.module}/../../cloud-init.yaml.tftpl", { binaries_url = var.binaries_url, binaries_s3 = "", region = "", regions = "", max_hours = 0 })
 }
 
 resource "hcloud_server" "coordinator" {

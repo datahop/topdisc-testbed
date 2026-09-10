@@ -46,7 +46,7 @@ resource "google_compute_router_nat" "nat" {
 }
 
 locals {
-  cloud_init = templatefile("${path.module}/../../cloud-init.yaml.tftpl", { binaries_url = var.binaries_url, binaries_s3 = "", region = "", regions = "" })
+  cloud_init = templatefile("${path.module}/../../cloud-init.yaml.tftpl", { binaries_url = var.binaries_url, binaries_s3 = "", region = "", regions = "", max_hours = 0 })
   image      = "debian-cloud/debian-12-arm64"
 }
 

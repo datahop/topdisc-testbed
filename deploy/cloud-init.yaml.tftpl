@@ -27,6 +27,30 @@ write_files:
       Restart=always
       [Install]
       WantedBy=multi-user.target
+  - path: /opt/topdisc/scale-down.sh
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      # Hard spending stop: every region's node fleet to zero.
+      for r in $(cat /opt/topdisc/regions); do
+        aws autoscaling update-auto-scaling-group --region $r --auto-scaling-group-name topdisc-nodes --min-size 0 --desired-capacity 0 || true
+      done
+      echo "fleet scaled to zero at $(date -u)" >> /opt/topdisc/scale-down.log
+  - path: /etc/systemd/system/fleet-scale-down.service
+    content: |
+      [Unit]
+      Description=topdisc fleet scale-down (spending cap)
+      [Service]
+      Type=oneshot
+      ExecStart=/opt/topdisc/scale-down.sh
+  - path: /etc/systemd/system/fleet-scale-down.timer
+    content: |
+      [Unit]
+      Description=topdisc fleet scale-down max_hours after boot
+      [Timer]
+      OnBootSec=${max_hours}h
+      [Install]
+      WantedBy=timers.target
 runcmd:
   - sysctl --system
   - (command -v dnf && dnf install -y iproute-tc) || (apt-get update && apt-get install -y iproute2)
@@ -40,3 +64,6 @@ runcmd:
 %{ endif ~}
   - tar xzf /opt/topdisc/binaries.tgz -C /opt/topdisc
   - systemctl daemon-reload && systemctl enable --now hostagent
+%{ if max_hours > 0 ~}
+  - systemctl enable --now fleet-scale-down.timer
+%{ endif ~}

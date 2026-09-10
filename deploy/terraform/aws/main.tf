@@ -52,5 +52,34 @@ locals {
     binaries_s3  = "s3://${aws_s3_bucket.binaries.id}/topdisc-linux-arm64.tgz"
     region       = var.home_region
     regions      = join(" ", sort(keys(var.regions)))
+    max_hours    = var.max_hours
   })
+}
+
+# Spending cap. The budget alerts; the hard stop is the coordinator's
+# fleet-scale-down timer (cloud-init), which scales every region's autoscaling
+# group to zero max_hours after boot whatever happens to the laptop.
+resource "aws_budgets_budget" "cap" {
+  name         = "topdisc-testbed"
+  budget_type  = "COST"
+  limit_amount = var.max_spend_usd
+  limit_unit   = "USD"
+  time_unit    = "MONTHLY"
+  dynamic "notification" {
+    for_each = var.budget_email == "" ? [] : [50, 80, 100]
+    content {
+      comparison_operator        = "GREATER_THAN"
+      threshold                  = notification.value
+      threshold_type             = "PERCENTAGE"
+      notification_type          = "ACTUAL"
+      subscriber_email_addresses = [var.budget_email]
+    }
+  }
+}
+resource "aws_iam_role_policy" "scale_down" {
+  name = "topdisc-scale-down"
+  role = aws_iam_role.ssm.id
+  policy = jsonencode({ Version = "2012-10-17", Statement = [
+    { Effect = "Allow", Action = ["autoscaling:UpdateAutoScalingGroup", "autoscaling:SetDesiredCapacity", "autoscaling:DescribeAutoScalingGroups"], Resource = "*" },
+  ] })
 }
