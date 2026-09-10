@@ -9,9 +9,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/datahop/topdisc-testbed/pkg/assign"
+	"github.com/datahop/topdisc-testbed/pkg/churn"
 	"github.com/datahop/topdisc-testbed/pkg/scenario"
 )
 
@@ -73,14 +75,61 @@ func RunLocal(cfg scenario.Config, runDir string) error {
 			time.Sleep(time.Second) // bootnode first
 		}
 	}
+	// Churn: kill at DownAt, restart the same identity at UpAt. A restarted
+	// node re-registers and re-searches at once (its phase times are past).
+	searchAt := time.UnixMilli(as[0].Phases.SearchAt)
+	var churnMu sync.Mutex
+	departs, rejoins := 0, 0
+	for i, a := range as {
+		if len(a.Churn) == 0 {
+			continue
+		}
+		go func(i int, events []churn.Event) {
+			for _, ev := range events {
+				time.Sleep(time.Until(searchAt.Add(time.Duration(ev.DownAt * float64(time.Second)))))
+				churnMu.Lock()
+				if procs[i] != nil && procs[i].Process != nil {
+					procs[i].Process.Kill()
+					procs[i].Wait()
+					departs++
+				}
+				churnMu.Unlock()
+				time.Sleep(time.Until(searchAt.Add(time.Duration(ev.UpAt * float64(time.Second)))))
+				logf, err := os.OpenFile(filepath.Join(logDir, fmt.Sprintf("node%d.log", i)), os.O_APPEND|os.O_WRONLY, 0o644)
+				if err != nil {
+					return
+				}
+				c := exec.Command(lc.NodeBinary, "-assignment", filepath.Join(asgDir, fmt.Sprintf("node%d.json", i)), "-v", "2")
+				c.Stdout, c.Stderr = logf, logf
+				churnMu.Lock()
+				if c.Start() == nil {
+					procs[i] = c
+					rejoins++
+				}
+				churnMu.Unlock()
+			}
+		}(i, a.Churn)
+	}
 	stop := time.UnixMilli(as[0].Phases.StopAt).Add(lc.Grace)
 	fmt.Printf("nodes started; collecting at %s\n", stop.Format(time.TimeOnly))
-	time.Sleep(time.Until(stop))
+	for time.Now().Before(stop) {
+		time.Sleep(30 * time.Second)
+		churnMu.Lock()
+		if departs > 0 {
+			fmt.Printf("[churn] departs=%d rejoins=%d\n", departs, rejoins)
+		}
+		churnMu.Unlock()
+	}
+	churnMu.Lock()
+	fmt.Printf("churn applied: departs=%d rejoins=%d (planned %d)\n", departs, rejoins, planned(as))
+	churnMu.Unlock()
+	churnMu.Lock()
 	for _, c := range procs {
-		if c.ProcessState == nil {
+		if c != nil && c.ProcessState == nil && c.Process != nil {
 			c.Process.Kill()
 		}
 	}
+	churnMu.Unlock()
 	return Collect(trDir, runDir, n)
 }
 
@@ -148,6 +197,14 @@ func Collect(trDir, runDir string, n int) error {
 	os.WriteFile(filepath.Join(runDir, "nodes.json"), b, 0o644)
 	b, _ = json.Marshal(oh)
 	return os.WriteFile(filepath.Join(runDir, "oh.json"), b, 0o644)
+}
+
+func planned(as []assign.Assignment) int {
+	n := 0
+	for _, a := range as {
+		n += len(a.Churn)
+	}
+	return n
 }
 
 func sum(v []int) int {
