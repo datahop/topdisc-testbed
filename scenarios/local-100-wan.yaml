@@ -1,0 +1,21 @@
+# local-100 with per-node netns + netem (Linux, root or passwordless sudo):
+# pair RTT 8..91 ms, 160 kbit/s per node. Not runnable on macOS.
+name: local-100-wan
+scenario:
+  population:
+    nodes: 100
+    topics: 1
+    all_register: true
+    seed: 1
+  phases:
+    bootstrap_wait: 15s
+    register_stagger: 20ms
+    register_wait: 60s
+    search_stagger: 10ms
+    search_timeout: 90s
+  topic:
+    ad_cache_size: 5000
+testbed:
+  backend: local
+  wan:
+    enabled: true

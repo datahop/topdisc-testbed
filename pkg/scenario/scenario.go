@@ -4,6 +4,7 @@ package scenario
 
 import (
 	"fmt"
+	"github.com/datahop/topdisc-testbed/pkg/wan"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -38,6 +39,8 @@ type ScenarioConfig struct {
 type TestbedConfig struct {
 	Backend   string          `yaml:"backend"`
 	Local     LocalConfig     `yaml:"local"`
+	Wan       WanConfig       `yaml:"wan"`
+	Cloud     CloudConfig     `yaml:"cloud"`
 	Simulator SimulatorConfig `yaml:"simulator"`
 	Harness   HarnessConfig   `yaml:"harness"`
 	Traces    TracesConfig    `yaml:"traces"`
@@ -124,11 +127,30 @@ type ChurnConfig struct {
 	Mode     string        `yaml:"mode"`
 }
 
+// WanConfig: per-node WAN emulation (netns + netem); star model, Linux only.
+type WanConfig struct {
+	Enabled    bool    `yaml:"enabled"`
+	DelayMinMs float64 `yaml:"delay_min_ms"`
+	DelayMaxMs float64 `yaml:"delay_max_ms"`
+	JitterMs   float64 `yaml:"jitter_ms"`
+	RateKbps   int     `yaml:"rate_kbps"`
+}
+
+// CloudConfig: the cloud backend drives hostagents listed in a Terraform
+// inventory (deploy/terraform/*/outputs.tf).
+type CloudConfig struct {
+	Inventory string        `yaml:"inventory"`
+	AgentPort int           `yaml:"agent_port"`
+	Verbosity int           `yaml:"verbosity"`
+	Grace     time.Duration `yaml:"grace"`
+}
+
 // LocalConfig: the local backend — N node processes on this host.
 type LocalConfig struct {
 	NodeBinary string        `yaml:"node_binary"`
 	BasePort   int           `yaml:"base_port"`
 	Grace      time.Duration `yaml:"grace"`
+	Verbosity  int           `yaml:"verbosity"`
 }
 
 // SimulatorConfig: simnet internals; no equivalent on real hosts.
@@ -170,6 +192,16 @@ var paramDocs = []paramDoc{
 	{"testbed.local.node_binary", "local backend: path to the node binary"},
 	{"testbed.local.base_port", "local backend: node i listens on base_port+i, status on +10000"},
 	{"testbed.local.grace", "local backend: wait after the last StopAt before collecting"},
+	{"testbed.local.verbosity", "node log level: 2 warn, 3 info, 4 debug (disconnect reasons)"},
+	{"testbed.cloud.inventory", "cloud backend: inventory.json from `terraform output -json inventory`"},
+	{"testbed.cloud.agent_port", "cloud backend: hostagent port on every host"},
+	{"testbed.cloud.verbosity", "cloud backend: node log level"},
+	{"testbed.cloud.grace", "cloud backend: wait after the last StopAt before fetching traces"},
+	{"testbed.wan.enabled", "give each node its own netns shaped by netem (Linux, root)"},
+	{"testbed.wan.delay_min_ms", "star model: min one-way delay per node; plan RTT 8ms -> 4"},
+	{"testbed.wan.delay_max_ms", "star model: max one-way delay per node; plan RTT 91ms -> 45"},
+	{"testbed.wan.jitter_ms", "netem jitter"},
+	{"testbed.wan.rate_kbps", "per-node rate cap; plan 20 KB/s -> 160; 0 = unshaped"},
 	{"scenario.population.nodes", "discv5 nodes to spawn"},
 	{"scenario.population.topics", "distinct topics; >1 assigns one per node by Zipf"},
 	{"scenario.population.all_register", "one shared topic that every node registers and searches"},
@@ -239,6 +271,9 @@ func Default() Config {
 	c.Testbed.Local.NodeBinary = "./topdisc-node"
 	c.Testbed.Local.BasePort = 30300
 	c.Testbed.Local.Grace = mustDur("10s")
+	c.Testbed.Local.Verbosity = 2
+	c.Testbed.Cloud.Inventory, c.Testbed.Cloud.AgentPort, c.Testbed.Cloud.Verbosity, c.Testbed.Cloud.Grace = "inventory.json", 9000, 2, mustDur("30s")
+	c.Testbed.Wan.DelayMinMs, c.Testbed.Wan.DelayMaxMs, c.Testbed.Wan.JitterMs, c.Testbed.Wan.RateKbps = 4, 45, 3, 160
 	c.Scenario.Population.Nodes = 5
 	c.Scenario.Population.Topics = 1
 	c.Scenario.Population.RegisterFrac = 0.5
@@ -419,4 +454,12 @@ func PrepareRun(c *Config) (string, error) {
 		FlushLog = func() {}
 	}
 	return dir, nil
+}
+
+// Star returns the WAN model, or nil when emulation is off.
+func (w WanConfig) Star() *wan.Star {
+	if !w.Enabled {
+		return nil
+	}
+	return &wan.Star{MinMs: w.DelayMinMs, MaxMs: w.DelayMaxMs, JitterMs: w.JitterMs, RateKbps: w.RateKbps}
 }

@@ -3,11 +3,18 @@ name: my-run
 
 testbed:
   backend:
-    : ""                               # simnet: in-process on this host; local: one node process per node on this host; cloud: Terraform fleet
+    : simnet                           # simnet: in-process on this host; local: one node process per node on this host; cloud: Terraform fleet
   local:
-    node_binary: ""                    # local backend: path to the node binary
-    base_port: 0                       # local backend: node i listens on base_port+i, status on +10000
-    grace: 0s                          # local backend: wait after the last StopAt before collecting
+    node_binary: ./topdisc-node        # local backend: path to the node binary
+    base_port: 30300                   # local backend: node i listens on base_port+i, status on +10000
+    grace: 10s                         # local backend: wait after the last StopAt before collecting
+    verbosity: 2                       # node log level: 2 warn, 3 info, 4 debug (disconnect reasons)
+  wan:
+    enabled: false                     # give each node its own netns shaped by netem (Linux, root)
+    delay_min_ms: 4                    # star model: min one-way delay per node; plan RTT 8ms -> 4
+    delay_max_ms: 45                   # star model: max one-way delay per node; plan RTT 91ms -> 45
+    jitter_ms: 3                       # netem jitter
+    rate_kbps: 160                     # per-node rate cap; plan 20 KB/s -> 160; 0 = unshaped
 
 scenario:
   population:
