@@ -1,0 +1,24 @@
+# Cloud acceptance run: 1,000 nodes on 2 hosts (terraform apply -var hosts=2
+# -var nodes_per_host=500), WAN emulation on. Inventory path is relative to
+# this file.
+name: cloud-1k
+scenario:
+  population:
+    nodes: 1000
+    topics: 1
+    all_register: true
+    seed: 1
+  phases:
+    bootstrap_wait: 30s
+    register_stagger: 20ms
+    register_wait: 120s
+    search_stagger: 10ms
+    search_timeout: 300s
+  topic:
+    ad_cache_size: 5000
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json
+  wan:
+    enabled: true

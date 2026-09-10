@@ -1,0 +1,23 @@
+# 10k on 10 hosts x 1,000 (terraform apply with the defaults). Compare with
+# the simnet 10k: fill time, refill, inbound-by-idspace flat, REGTOPIC hotspot.
+name: cloud-10k
+scenario:
+  population:
+    nodes: 10000
+    topics: 1
+    all_register: true
+    seed: 1
+  phases:
+    bootstrap_wait: 30s
+    register_stagger: 20ms
+    register_wait: 900s
+    search_stagger: 10ms
+    search_timeout: 1800s
+  topic:
+    ad_cache_size: 5000
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json
+  wan:
+    enabled: true

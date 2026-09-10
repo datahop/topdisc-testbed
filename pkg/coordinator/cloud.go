@@ -1,0 +1,173 @@
+package coordinator
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"time"
+
+	"github.com/datahop/topdisc-testbed/pkg/assign"
+	"github.com/datahop/topdisc-testbed/pkg/host"
+	"github.com/datahop/topdisc-testbed/pkg/scenario"
+	"github.com/datahop/topdisc-testbed/pkg/wan"
+)
+
+// Inventory is `terraform output -json inventory` of a deploy/terraform module.
+type Inventory struct {
+	Coordinator string `json:"coordinator"`
+	Hosts       []struct {
+		Index int    `json:"index"`
+		IP    string `json:"ip"`
+		Nodes int    `json:"nodes"`
+	} `json:"hosts"`
+}
+
+// RunCloud executes the scenario on the hosts of an inventory, each running a
+// hostagent. Nodes are packed onto hosts in index order (node 0, the bootnode,
+// on host 0); phases are absolute times so hosts only need NTP.
+func RunCloud(cfg scenario.Config, runDir string) error {
+	sc, cc := cfg.Scenario, cfg.Testbed.Cloud
+	b, err := os.ReadFile(filepath.Join(filepath.Dir(cfg.SourcePath), cc.Inventory))
+	if err != nil {
+		return err
+	}
+	var inv Inventory
+	if err := json.Unmarshal(b, &inv); err != nil {
+		return err
+	}
+	sort.Slice(inv.Hosts, func(i, j int) bool { return inv.Hosts[i].Index < inv.Hosts[j].Index })
+	capacity := 0
+	for _, h := range inv.Hosts {
+		capacity += h.Nodes
+	}
+	if n := sc.Population.Nodes; n > capacity {
+		return fmt.Errorf("%d nodes but the inventory holds %d", n, capacity)
+	}
+	hostOf, local := make([]int, sc.Population.Nodes), make([]int, sc.Population.Nodes)
+	for i, h, k := 0, 0, 0; i < len(hostOf); i++ {
+		if k == inv.Hosts[h].Nodes {
+			h, k = h+1, 0
+		}
+		hostOf[i], local[i] = h, k
+		k++
+	}
+	star := cfg.Testbed.Wan.Star()
+	t0 := time.Now().Add(20 * time.Second).UnixMilli()
+	as, err := assign.Generate(cfg, func(i int) assign.Host {
+		ip := inv.Hosts[hostOf[i]].IP
+		if star != nil {
+			ip = host.NodeIP(hostOf[i], local[i])
+		}
+		return assign.Host{IP: ip, BasePort: 30300 + local[i], StatusOff: 10000} // TraceFile: the hostagent fills its own path
+	}, t0, filepath.Dir(cfg.SourcePath))
+	if err != nil {
+		return err
+	}
+	if err := assign.Write(filepath.Join(runDir, "assignments"), as); err != nil {
+		return err
+	}
+	agents := make([]agent, len(inv.Hosts))
+	peers := map[int]string{}
+	for i, h := range inv.Hosts {
+		agents[i] = agent{fmt.Sprintf("http://%s:%d", h.IP, cc.AgentPort)}
+		peers[h.Index] = h.IP
+	}
+	for h := range agents {
+		var mine []assign.Assignment
+		for _, a := range as {
+			if hostOf[a.Idx] == h {
+				mine = append(mine, a)
+			}
+		}
+		if err := agents[h].prepare(prepareRequest{Host: h, Peers: peers, Wan: star, Seed: sc.Population.Seed, Verbosity: cc.Verbosity, Assignments: mine}); err != nil {
+			return fmt.Errorf("host %d: %w", h, err)
+		}
+	}
+	printPhases("cloud", as, t0)
+	fmt.Printf("hosts: %d; nodes per host: %d..%d\n", len(agents), inv.Hosts[0].Nodes, inv.Hosts[len(inv.Hosts)-1].Nodes)
+	ctl := hostControl{
+		start: func(idx int) error { return agents[hostOf[idx]].call("start", idx) },
+		kill:  func(idx int) bool { return agents[hostOf[idx]].call("kill", idx) == nil },
+	}
+	defer func() {
+		for _, a := range agents {
+			a.call("stop", 0)
+		}
+	}()
+	if err := drive(as, ctl, cc.Grace); err != nil {
+		return err
+	}
+	trDir := filepath.Join(runDir, "traces")
+	os.MkdirAll(trDir, 0o755)
+	got := 0
+	for _, a := range as {
+		if agents[hostOf[a.Idx]].fetch("trace", a.Idx, filepath.Join(trDir, fmt.Sprintf("node%d.json", a.Idx))) == nil {
+			got++
+		}
+	}
+	fmt.Printf("fetched %d/%d traces\n", got, len(as))
+	return Collect(trDir, runDir, len(as))
+}
+
+type prepareRequest struct {
+	Host        int                 `json:"host"`
+	Peers       map[int]string      `json:"peers"`
+	Wan         *wan.Star           `json:"wan"`
+	Seed        int64               `json:"seed"`
+	Verbosity   int                 `json:"verbosity"`
+	Assignments []assign.Assignment `json:"assignments"`
+}
+
+type agent struct{ base string }
+
+var agentClient = &http.Client{Timeout: 60 * time.Second}
+
+func (a agent) prepare(p prepareRequest) error {
+	b, _ := json.Marshal(p)
+	resp, err := agentClient.Post(a.base+"/prepare", "application/json", bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		msg, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("prepare: %s", bytes.TrimSpace(msg))
+	}
+	return nil
+}
+
+func (a agent) call(op string, idx int) error {
+	resp, err := agentClient.Post(fmt.Sprintf("%s/%s?idx=%d", a.base, op, idx), "", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		msg, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("%s %d: %s", op, idx, bytes.TrimSpace(msg))
+	}
+	return nil
+}
+
+func (a agent) fetch(op string, idx int, dst string) error {
+	resp, err := agentClient.Get(fmt.Sprintf("%s/%s?idx=%d", a.base, op, idx))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("%s %d: %s", op, idx, resp.Status)
+	}
+	f, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = io.Copy(f, resp.Body)
+	return err
+}

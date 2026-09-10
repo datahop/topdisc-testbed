@@ -30,7 +30,7 @@ func main() {
 		if err := c.Run(); err != nil {
 			fatal(err)
 		}
-	case "local":
+	case "local", "cloud":
 		runDir, err := scenario.PrepareRun(&cfg)
 		if err != nil {
 			fatal(err)
@@ -38,7 +38,11 @@ func main() {
 		defer scenario.FlushLog()
 		fmt.Println("run directory:", runDir)
 		fmt.Println(cfg.ParamsLine())
-		if err := coordinator.RunLocal(cfg, runDir); err != nil {
+		run := coordinator.RunLocal
+		if cfg.Testbed.Backend == "cloud" {
+			run = coordinator.RunCloud
+		}
+		if err := run(cfg, runDir); err != nil {
 			fatal(err)
 		}
 	default:
