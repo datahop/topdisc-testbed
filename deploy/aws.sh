@@ -78,16 +78,11 @@ case "$1" in
     "$0" pull
     if [ -z "$KEEP" ]; then "$0" down; "$0" check; fi ;;
   check)
-    for r in $(python3 -c 'import re; print(" ".join(re.findall(r"\"(\S+-\d)\"", open("'$TF'/gen.py").read().split("\n")[3])))'); do
+    for r in $(sed -n 's/^REGIONS = \[\(.*\)\]/\1/p' $TF/gen.py | tr -d '",'); do
       n=$(aws ec2 describe-instances --region $r --filters Name=instance-state-name,Values=pending,running --query 'length(Reservations[].Instances[])' --output text)
       g=$(aws ec2 describe-nat-gateways --region $r --filter Name=state,Values=pending,available --query 'length(NatGateways)' --output text)
       echo "$r: instances=$n nat-gateways=$g"
     done ;;
-  pull)
-    mkdir -p runs
-    ssm_run "cd /opt/topdisc && d=\$(ls -td *-2* | head -1) && tar czf - \$d | aws s3 cp - s3://$(tfout binaries_bucket)/runs/\$d.tgz && echo \$d" | tail -1 > /tmp/topdisc-run
-    aws s3 cp "s3://$(tfout binaries_bucket)/runs/$(cat /tmp/topdisc-run).tgz" - | tar xzf - -C runs
-    echo "runs/$(cat /tmp/topdisc-run)" ;;
   ssh) aws ssm start-session --target "$(tfout coordinator_id)" ;;
   down) terraform -chdir=$TF destroy -auto-approve -input=false -var "regions={}" ;;
   *) sed -n 2,9p "$0"; exit 2 ;;
