@@ -1,12 +1,17 @@
 #!/bin/sh
-# Writes inventory.json for the cloud backend from the running fleet.
-# Run on the coordinator (instance role has EC2 read access).
+# Writes inventory.json for the cloud backend from the running fleet, across
+# the regions listed in /opt/topdisc/regions. Run on the coordinator (its
+# instance role has EC2 read access).
 set -e
-aws ec2 describe-instances --filters Name=tag:role,Values=host Name=instance-state-name,Values=running \
-  --query 'Reservations[].Instances[].PrivateIpAddress' --output json |
-python3 -c '
+for r in $(cat /opt/topdisc/regions); do
+  aws ec2 describe-instances --region "$r" --filters Name=tag:role,Values=host Name=instance-state-name,Values=running \
+    --query 'Reservations[].Instances[].PrivateIpAddress' --output text | tr '\t' '\n' | sed "s/^/$r /"
+done | python3 -c '
 import json,sys
-ips=sorted(json.load(sys.stdin))
-print(json.dumps({"coordinator":"","hosts":[{"index":i,"ip":ip,"nodes":1} for i,ip in enumerate(ips)]}))
+rows=sorted(l.split() for l in sys.stdin if l.strip())
+print(json.dumps({"coordinator":"","hosts":[{"index":i,"ip":ip,"nodes":1,"region":r} for i,(r,ip) in enumerate(rows)]}))
 ' > inventory.json
-echo "$(python3 -c 'import json;print(len(json.load(open("inventory.json"))["hosts"]))') hosts"
+python3 -c '
+import json,collections
+h=json.load(open("inventory.json"))["hosts"]; c=collections.Counter(x["region"] for x in h)
+print(len(h),"hosts:",dict(c))'

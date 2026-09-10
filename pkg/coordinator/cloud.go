@@ -23,9 +23,10 @@ import (
 type Inventory struct {
 	Coordinator string `json:"coordinator"`
 	Hosts       []struct {
-		Index int    `json:"index"`
-		IP    string `json:"ip"`
-		Nodes int    `json:"nodes"`
+		Index  int    `json:"index"`
+		IP     string `json:"ip"`
+		Nodes  int    `json:"nodes"`
+		Region string `json:"region"`
 	} `json:"hosts"`
 }
 
@@ -50,6 +51,23 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 	if n := sc.Population.Nodes; n > capacity {
 		return fmt.Errorf("%d nodes but the inventory holds %d", n, capacity)
 	}
+	// Placement: the fleet was sized from scenario.network.regions; the first
+	// host of the home region gets the bootnode, the rest are packed in
+	// inventory order (region-sorted), which is fine because node indices are
+	// random keys.
+	if len(inv.Hosts) > 0 && inv.Hosts[0].Region != "" {
+		want, have := cfg.Fleet(), map[string]int{}
+		for _, h := range inv.Hosts {
+			have[h.Region] += h.Nodes
+		}
+		for r, n := range want {
+			if have[r] < n {
+				return fmt.Errorf("region %s: scenario wants %d nodes, inventory has %d", r, n, have[r])
+			}
+		}
+		home := cc.HomeRegion
+		sort.SliceStable(inv.Hosts, func(i, j int) bool { return (inv.Hosts[i].Region == home) && (inv.Hosts[j].Region != home) })
+	}
 	hostOf, local := make([]int, sc.Population.Nodes), make([]int, sc.Population.Nodes)
 	for i, h, k := 0, 0, 0; i < len(hostOf); i++ {
 		if k == inv.Hosts[h].Nodes {
@@ -73,6 +91,13 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 	if err := assign.Write(filepath.Join(runDir, "assignments"), as); err != nil {
 		return err
 	}
+	placement := make([]map[string]any, len(as))
+	for i := range as {
+		h := inv.Hosts[hostOf[i]]
+		placement[i] = map[string]any{"idx": i, "host": h.Index, "ip": h.IP, "region": h.Region}
+	}
+	b, _ = json.Marshal(placement)
+	os.WriteFile(filepath.Join(runDir, "placement.json"), b, 0o644)
 	agents := make([]agent, len(inv.Hosts))
 	peers := map[int]string{}
 	for i, h := range inv.Hosts {
@@ -92,7 +117,11 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 		return err
 	}
 	printPhases("cloud", as, t0)
-	fmt.Printf("hosts: %d; nodes per host: %d..%d\n", len(agents), inv.Hosts[0].Nodes, inv.Hosts[len(inv.Hosts)-1].Nodes)
+	byRegion := map[string]int{}
+	for i := range as {
+		byRegion[inv.Hosts[hostOf[i]].Region]++
+	}
+	fmt.Printf("hosts: %d; nodes by region: %v\n", len(agents), byRegion)
 	ctl := hostControl{
 		start: func(idx int) error { return agents[hostOf[idx]].call("start", idx) },
 		kill:  func(idx int) bool { return agents[hostOf[idx]].call("kill", idx) == nil },

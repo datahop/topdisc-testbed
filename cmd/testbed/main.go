@@ -2,6 +2,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,11 +13,21 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: testbed <scenario.yaml> | testbed reference")
+		fmt.Fprintln(os.Stderr, "usage: testbed <scenario.yaml> | testbed reference | testbed fleet <scenario.yaml>")
 		os.Exit(2)
 	}
 	if os.Args[1] == "reference" {
 		scenario.PrintReference()
+		return
+	}
+	if os.Args[1] == "fleet" && len(os.Args) == 3 {
+		// instance counts per region and the home region, for deploy/aws.sh
+		cfg, err := scenario.Load(os.Args[2])
+		if err != nil {
+			fatal(err)
+		}
+		b, _ := json.Marshal(map[string]any{"regions": cfg.Fleet(), "home_region": cfg.Testbed.Cloud.HomeRegion})
+		fmt.Println(string(b))
 		return
 	}
 	cfg, err := scenario.Load(os.Args[1])

@@ -33,6 +33,7 @@ runcmd:
   - mkdir -p /opt/topdisc
 %{ if binaries_s3 != "" ~}
   - echo "${region}" > /opt/topdisc/region
+  - echo "${regions}" > /opt/topdisc/regions
   - until aws s3 cp --region ${region} "${binaries_s3}" /opt/topdisc/binaries.tgz; do sleep 15; done
 %{ else ~}
   - until curl -fsSL "${binaries_url}" -o /opt/topdisc/binaries.tgz; do sleep 15; done

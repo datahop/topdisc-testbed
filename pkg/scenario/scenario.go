@@ -62,8 +62,9 @@ type PopulationConfig struct {
 
 // NetworkConfig: the emulated WAN conditions.
 type NetworkConfig struct {
-	LatencyMs      int `yaml:"latency_ms"`
-	BandwidthMibps int `yaml:"bandwidth_mibps"`
+	LatencyMs      int                `yaml:"latency_ms"`
+	BandwidthMibps int                `yaml:"bandwidth_mibps"`
+	Regions        map[string]float64 `yaml:"regions"`
 }
 
 // PhasesConfig: how the run is paced.
@@ -139,10 +140,11 @@ type WanConfig struct {
 // CloudConfig: the cloud backend drives hostagents listed in a Terraform
 // inventory (deploy/terraform/*/outputs.tf).
 type CloudConfig struct {
-	Inventory string        `yaml:"inventory"`
-	AgentPort int           `yaml:"agent_port"`
-	Verbosity int           `yaml:"verbosity"`
-	Grace     time.Duration `yaml:"grace"`
+	Inventory  string        `yaml:"inventory"`
+	HomeRegion string        `yaml:"home_region"`
+	AgentPort  int           `yaml:"agent_port"`
+	Verbosity  int           `yaml:"verbosity"`
+	Grace      time.Duration `yaml:"grace"`
 }
 
 // LocalConfig: the local backend — N node processes on this host.
@@ -193,7 +195,8 @@ var paramDocs = []paramDoc{
 	{"testbed.local.base_port", "local backend: node i listens on base_port+i, status on +10000"},
 	{"testbed.local.grace", "local backend: wait after the last StopAt before collecting"},
 	{"testbed.local.verbosity", "node log level: 2 warn, 3 info, 4 debug (disconnect reasons)"},
-	{"testbed.cloud.inventory", "cloud backend: inventory.json from `terraform output -json inventory`"},
+	{"testbed.cloud.inventory", "cloud backend: inventory.json written on the coordinator by deploy/inventory-*.sh"},
+	{"testbed.cloud.home_region", "cloud backend: coordinator, bootnode and binaries bucket live here"},
 	{"testbed.cloud.agent_port", "cloud backend: hostagent port on every host"},
 	{"testbed.cloud.verbosity", "cloud backend: node log level"},
 	{"testbed.cloud.grace", "cloud backend: wait after the last StopAt before fetching traces"},
@@ -211,8 +214,9 @@ var paramDocs = []paramDoc{
 	{"scenario.population.seed", "RNG seed for every random draw; 0 = time"},
 	{"scenario.population.legacy_frac", "fraction of nodes without the topic-discovery ENR flag"},
 	{"scenario.population.vanilla_frac", "fraction running stock upstream geth (needs -tags vanilla)"},
-	{"scenario.network.latency_ms", "per-pair one-way latency, ms"},
-	{"scenario.network.bandwidth_mibps", "per-direction link bandwidth"},
+	{"scenario.network.latency_ms", "simnet: per-pair one-way latency, ms (cloud: given by regions)"},
+	{"scenario.network.bandwidth_mibps", "simnet: per-direction link bandwidth (cloud: given by the instance type)"},
+	{"scenario.network.regions", "cloud: node placement, region -> weight, e.g. {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}; empty = all in the home region"},
 	{"scenario.phases.bootstrap_wait", "after spawning, before registrations start"},
 	{"scenario.phases.register_stagger", "gap between consecutive nodes starting to register"},
 	{"scenario.phases.register_wait", "after the last node starts registering, before searches start"},
@@ -272,7 +276,7 @@ func Default() Config {
 	c.Testbed.Local.BasePort = 30300
 	c.Testbed.Local.Grace = mustDur("10s")
 	c.Testbed.Local.Verbosity = 2
-	c.Testbed.Cloud.Inventory, c.Testbed.Cloud.AgentPort, c.Testbed.Cloud.Verbosity, c.Testbed.Cloud.Grace = "inventory.json", 9000, 2, mustDur("30s")
+	c.Testbed.Cloud.Inventory, c.Testbed.Cloud.HomeRegion, c.Testbed.Cloud.AgentPort, c.Testbed.Cloud.Verbosity, c.Testbed.Cloud.Grace = "inventory.json", "us-east-1", 9000, 2, mustDur("30s")
 	c.Testbed.Wan.DelayMinMs, c.Testbed.Wan.DelayMaxMs, c.Testbed.Wan.JitterMs, c.Testbed.Wan.RateKbps = 4, 45, 3, 160
 	c.Scenario.Population.Nodes = 5
 	c.Scenario.Population.Topics = 1
@@ -352,8 +356,20 @@ func (c Config) flatten() (keys []string, vals map[string]any) {
 }
 
 func fmtVal(v any) string {
-	if d, ok := v.(time.Duration); ok {
-		return d.String()
+	switch x := v.(type) {
+	case time.Duration:
+		return x.String()
+	case map[string]float64:
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, len(keys))
+		for i, k := range keys {
+			parts[i] = fmt.Sprintf("%s:%g", k, x[k])
+		}
+		return "{" + strings.Join(parts, ",") + "}"
 	}
 	return fmt.Sprint(v)
 }
@@ -462,4 +478,42 @@ func (w WanConfig) Star() *wan.Star {
 		return nil
 	}
 	return &wan.Star{MinMs: w.DelayMinMs, MaxMs: w.DelayMaxMs, JitterMs: w.JitterMs, RateKbps: w.RateKbps}
+}
+
+// Fleet turns the region weights into instance counts for the cloud backend
+// (largest remainder; the home region, first in sorted order when no weights
+// are given, holds the bootnode).
+func (c Config) Fleet() map[string]int {
+	n := c.Scenario.Population.Nodes
+	w := c.Scenario.Network.Regions
+	if len(w) == 0 {
+		return map[string]int{c.Testbed.Cloud.HomeRegion: n}
+	}
+	keys := make([]string, 0, len(w))
+	total := 0.0
+	for k, v := range w {
+		keys = append(keys, k)
+		total += v
+	}
+	sort.Strings(keys)
+	out, given := map[string]int{}, 0
+	rem := make([]float64, len(keys))
+	for i, k := range keys {
+		exact := float64(n) * w[k] / total
+		out[k] = int(exact)
+		rem[i] = exact - float64(out[k])
+		given += out[k]
+	}
+	for given < n {
+		best := 0
+		for i := range rem {
+			if rem[i] > rem[best] {
+				best = i
+			}
+		}
+		out[keys[best]]++
+		rem[best] = -1
+		given++
+	}
+	return out
 }

@@ -1,6 +1,6 @@
 #!/bin/sh
 # AWS driver: build the binaries, provision, push, run, collect, tear down.
-#   deploy/aws.sh up [nodes] [tf args]  terraform apply + build + push to S3 (e.g. up 1000 -var spot=true)
+#   deploy/aws.sh up <scenario> [tf args]  terraform apply sized from the scenario + build + push to S3 (e.g. -var spot=true)
 #   deploy/aws.sh push                  rebuild and re-push the binaries only
 #   deploy/aws.sh run scenarios/x.yaml  copy scenario + inventory to the coordinator and run it there
 #   deploy/aws.sh pull                  fetch the latest run directory from the coordinator into runs/
@@ -51,6 +51,6 @@ case "$1" in
     aws s3 cp "s3://$(tfout binaries_bucket)/runs/$(cat /tmp/topdisc-run).tgz" - | tar xzf - -C runs
     echo "runs/$(cat /tmp/topdisc-run)" ;;
   ssh) aws ssm start-session --target "$(tfout coordinator_id)" ;;
-  down) terraform -chdir=$TF destroy -auto-approve -input=false ;;
+  down) terraform -chdir=$TF destroy -auto-approve -input=false -var "regions={}" ;;
   *) sed -n 2,9p "$0"; exit 2 ;;
 esac

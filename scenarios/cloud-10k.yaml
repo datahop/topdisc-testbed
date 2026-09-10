@@ -1,5 +1,6 @@
-# 10k instances, one node each (terraform apply -var nodes=10000). Compare with
-# the simnet 10k: fill time, refill, inbound-by-idspace flat, REGTOPIC hotspot.
+# 10k instances, one node each, over three regions (deploy/aws.sh up
+# scenarios/cloud-10k.yaml). Compare with the simnet 10k: fill time, refill,
+# inbound-by-idspace flat, REGTOPIC hotspot.
 name: cloud-10k
 scenario:
   population:
@@ -7,6 +8,8 @@ scenario:
     topics: 1
     all_register: true
     seed: 1
+  network:
+    regions: {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}
   phases:
     bootstrap_wait: 30s
     register_stagger: 20ms
@@ -19,3 +22,4 @@ testbed:
   backend: cloud
   cloud:
     inventory: inventory.json
+    home_region: us-east-1

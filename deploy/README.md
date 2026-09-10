@@ -1,15 +1,20 @@
 # Cloud backend
 
 One node per instance, no network emulation: the cloud's own network is the
-WAN. Each module creates N small instances plus a coordinator on a private
-network and boots the hostagent on every instance through
-`deploy/cloud-init.yaml.tftpl`.
+WAN, so a scenario says where nodes live instead of what latency to emulate.
+`scenario.network.regions` maps regions to weights; `testbed fleet
+<scenario>` turns that into instance counts and `deploy/aws.sh up` provisions
+one autoscaling group per region, VPC-peered in a full mesh, plus a
+coordinator in `testbed.cloud.home_region`. Every instance boots the
+hostagent through `deploy/cloud-init.yaml.tftpl`. Supported regions are
+listed in `deploy/terraform/aws/gen.py`; `latency_ms` and `bandwidth_mibps`
+in the same block are simnet's model of the same thing and are ignored here.
 
 AWS has a driver that does every step; the other providers follow the
 manual sequence below it.
 
 ```
-deploy/aws.sh up 1000 -var spot=true # terraform apply, build linux/arm64, push to the run's S3 bucket
+deploy/aws.sh up scenarios/cloud-1k.yaml -var spot=true   # fleet sized from scenario.network.regions; build; push to S3
 deploy/aws.sh run scenarios/cloud-1k.yaml
 deploy/aws.sh ssh                    # tail -f /opt/topdisc/run.out
 deploy/aws.sh pull                   # run directory into runs/
