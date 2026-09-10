@@ -6,13 +6,29 @@ terraform {
 }
 provider "hcloud" { token = var.hcloud_token }
 
-resource "hcloud_network" "tb" { name = "topdisc-testbed"; ip_range = "10.0.0.0/8" }
-resource "hcloud_network_subnet" "nodes" { network_id = hcloud_network.tb.id; type = "cloud"; network_zone = var.network_zone; ip_range = "10.10.0.0/18" }
+resource "hcloud_network" "tb" {
+  name = "topdisc-testbed"
+  ip_range = "10.0.0.0/8"
+}
+resource "hcloud_network_subnet" "nodes" {
+  network_id = hcloud_network.tb.id
+  type = "cloud"
+  network_zone = var.network_zone
+  ip_range = "10.10.0.0/18"
+}
 resource "hcloud_firewall" "admin" {
   name = "topdisc-admin"
-  rule { direction = "in"; protocol = "tcp"; port = "22"; source_ips = [var.admin_cidr] }
+  rule {
+  direction = "in"
+  protocol = "tcp"
+  port = "22"
+  source_ips = [var.admin_cidr]
 }
-resource "hcloud_ssh_key" "admin" { name = "topdisc-admin"; public_key = var.ssh_public_key }
+}
+resource "hcloud_ssh_key" "admin" {
+  name = "topdisc-admin"
+  public_key = var.ssh_public_key
+}
 
 locals {
   cloud_init = templatefile("${path.module}/../../cloud-init.yaml.tftpl", { binaries_url = var.binaries_url, binaries_s3 = "", region = "" })
