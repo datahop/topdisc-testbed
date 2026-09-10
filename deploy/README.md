@@ -50,10 +50,11 @@ starts everything, applies churn by killing and restarting over HTTP, and
 fetches the traces at the end.
 
 Spending cap: `deploy/aws.sh up` refuses a fleet whose on-demand cost over
-`MAX_HOURS` (6) exceeds `MAX_SPEND` ($200); Terraform creates a $200 monthly
-budget with e-mail alerts; and the coordinator scales every region's
-autoscaling group to zero `max_hours` after boot, so a forgotten fleet stops
-costing on its own. `deploy/aws.sh down` still has to remove the rest (NAT
+`MAX_HOURS` (6) exceeds `MAX_SPEND` ($200); the account has a $200 monthly
+budget `topdisc-testbed` with e-mail alerts (set once with `aws budgets
+create-budget`, outside Terraform so a destroy does not remove it); and the
+coordinator scales every region's autoscaling group to zero `max_hours` after
+boot, so a forgotten fleet stops costing on its own. `deploy/aws.sh down` still has to remove the rest (NAT
 gateways, coordinator, bucket).
 
 Quotas: 10k instances need the account's vCPU (AWS, GCP) or server (Hetzner)

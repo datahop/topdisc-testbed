@@ -22,14 +22,6 @@ variable "spot" {
   description = "spot for nodes; not for 24h churn runs unless reclaims are logged as departures"
   default     = false
 }
-variable "max_spend_usd" {
-  description = "monthly budget; deploy/aws.sh also refuses a fleet whose max_hours estimate exceeds it"
-  default     = 200
-}
-variable "budget_email" {
-  description = "budget alerts at 50/80/100%; empty = no alerts"
-  default     = ""
-}
 variable "max_hours" {
   description = "the coordinator scales every autoscaling group to zero this long after boot"
   default     = 6
