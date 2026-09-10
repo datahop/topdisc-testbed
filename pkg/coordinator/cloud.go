@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/datahop/topdisc-testbed/pkg/assign"
@@ -77,16 +79,17 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 		agents[i] = agent{fmt.Sprintf("http://%s:%d", h.IP, cc.AgentPort)}
 		peers[h.Index] = h.IP
 	}
-	for h := range agents {
-		var mine []assign.Assignment
-		for _, a := range as {
-			if hostOf[a.Idx] == h {
-				mine = append(mine, a)
-			}
+	mine := make([][]assign.Assignment, len(agents))
+	for _, a := range as {
+		mine[hostOf[a.Idx]] = append(mine[hostOf[a.Idx]], a)
+	}
+	if err := each(len(agents), func(h int) error {
+		if err := agents[h].prepare(prepareRequest{Host: h, Peers: peers, Wan: star, Seed: sc.Population.Seed, Verbosity: cc.Verbosity, Assignments: mine[h]}); err != nil {
+			return fmt.Errorf("host %d (%s): %w", h, inv.Hosts[h].IP, err)
 		}
-		if err := agents[h].prepare(prepareRequest{Host: h, Peers: peers, Wan: star, Seed: sc.Population.Seed, Verbosity: cc.Verbosity, Assignments: mine}); err != nil {
-			return fmt.Errorf("host %d: %w", h, err)
-		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	printPhases("cloud", as, t0)
 	fmt.Printf("hosts: %d; nodes per host: %d..%d\n", len(agents), inv.Hosts[0].Nodes, inv.Hosts[len(inv.Hosts)-1].Nodes)
@@ -104,13 +107,14 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 	}
 	trDir := filepath.Join(runDir, "traces")
 	os.MkdirAll(trDir, 0o755)
-	got := 0
-	for _, a := range as {
-		if agents[hostOf[a.Idx]].fetch("trace", a.Idx, filepath.Join(trDir, fmt.Sprintf("node%d.json", a.Idx))) == nil {
-			got++
+	var got atomic.Int32
+	each(len(as), func(i int) error {
+		if agents[hostOf[i]].fetch("trace", i, filepath.Join(trDir, fmt.Sprintf("node%d.json", i))) == nil {
+			got.Add(1)
 		}
-	}
-	fmt.Printf("fetched %d/%d traces\n", got, len(as))
+		return nil
+	})
+	fmt.Printf("fetched %d/%d traces\n", got.Load(), len(as))
 	return Collect(trDir, runDir, len(as))
 }
 
@@ -170,4 +174,29 @@ func (a agent) fetch(op string, idx int, dst string) error {
 	defer f.Close()
 	_, err = io.Copy(f, resp.Body)
 	return err
+}
+
+// each runs f over 0..n-1 with bounded concurrency; the first error wins.
+func each(n int, f func(i int) error) error {
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 64)
+	var mu sync.Mutex
+	var first error
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if err := f(i); err != nil {
+				mu.Lock()
+				if first == nil {
+					first = err
+				}
+				mu.Unlock()
+			}
+		}(i)
+	}
+	wg.Wait()
+	return first
 }

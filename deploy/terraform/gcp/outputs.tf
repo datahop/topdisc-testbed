@@ -1,3 +1,3 @@
-output "inventory" {
-  value = { coordinator = google_compute_instance.coordinator.network_interface[0].network_ip, hosts = [for i, h in google_compute_instance.host : { index = i, ip = h.network_interface[0].network_ip, nodes = var.nodes_per_host }] }
-}
+output "coordinator_ip" { value = google_compute_instance.coordinator.network_interface[0].network_ip }
+output "mig" { value = google_compute_instance_group_manager.nodes.name }
+# Inventory: on the coordinator, ../../inventory-gcp.sh

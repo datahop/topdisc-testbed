@@ -1,6 +1,6 @@
 #cloud-config
-# Every host: sysctl/limits for 1,000 node processes, fetch the binaries,
-# start the hostagent as root. Coordinator host: same image, run ./testbed there.
+# Every instance: fetch the binaries, start the hostagent as root. The
+# coordinator gets the same image; run ./testbed there.
 write_files:
   - path: /etc/sysctl.d/90-topdisc.conf
     content: |
@@ -31,5 +31,4 @@ runcmd:
   - sysctl --system
   - (command -v dnf && dnf install -y iproute-tc) || (apt-get update && apt-get install -y iproute2)
   - mkdir -p /opt/topdisc && cd /opt/topdisc && curl -fsSL "${binaries_url}" | tar xz
-  - echo "${nodes_per_host}" > /opt/topdisc/nodes_per_host
   - systemctl daemon-reload && systemctl enable --now hostagent

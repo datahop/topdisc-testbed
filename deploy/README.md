@@ -1,33 +1,35 @@
 # Cloud backend
 
-One scenario, three provisioners. Each module creates N node hosts plus a
-coordinator host on a private network and boots the hostagent on every host
-through `deploy/cloud-init.yaml.tftpl`.
+One node per instance, no network emulation: the cloud's own network is the
+WAN. Each module creates N small instances plus a coordinator on a private
+network and boots the hostagent on every instance through
+`deploy/cloud-init.yaml.tftpl`.
 
 ```
-# 1. build for the fleet's architecture (arm64 on AWS/GCP, amd64 on Hetzner)
+# 1. build for the fleet's architecture (arm64 on all three defaults)
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o out/topdisc-node ./cmd/node
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o out/hostagent ./cmd/hostagent
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o out/testbed ./cmd/testbed
-tar czf topdisc-linux-arm64.tgz -C out .        # upload anywhere the hosts can fetch it
+tar czf topdisc-linux-arm64.tgz -C out .        # upload anywhere the instances can fetch it
 
 # 2. provision
-cd deploy/terraform/aws && terraform init && terraform apply -var hosts=2 -var nodes_per_host=500 -var binaries_url=https://…/topdisc-linux-arm64.tgz
-terraform output -json inventory > inventory.json
+cd deploy/terraform/aws && terraform init && terraform apply -var nodes=1000 -var binaries_url=https://…/topdisc-linux-arm64.tgz
 
-# 3. run from the coordinator host (or anywhere that reaches the hosts' agent port)
-scp inventory.json scenarios/cloud-1k.yaml coordinator:   # AWS/GCP: aws ssm / gcloud compute ssh --tunnel-through-iap
-./testbed cloud-1k.yaml
+# 3. on the coordinator (AWS: aws ssm start-session; GCP: gcloud compute ssh --tunnel-through-iap; Hetzner: ssh)
+cd /opt/topdisc && ./inventory-aws.sh           # inventory-gcp.sh; Hetzner: terraform output -json inventory
+./testbed cloud-1k.yaml                         # scenario copied next to inventory.json
 
 # 4. tear down
 terraform destroy
 ```
 
-The inventory is `{coordinator, hosts:[{index, ip, nodes}]}`; the coordinator
-packs node indices onto hosts in order (node 0, the bootnode, on host 0). With
-`testbed.wan.enabled` each node runs in its own netns on host `h` with an
-address in `10.(100+h).0.0/16`; the modules route those subnets to the host
-(`source_dest_check`/`can_ip_forward`/`hcloud_network_route`).
+The inventory is `{coordinator, hosts:[{index, ip, nodes}]}`, one host per
+instance. The coordinator assigns node indices in inventory order (node 0,
+the bootnode, on the first instance), posts each instance its assignment,
+starts everything, applies churn by killing and restarting over HTTP, and
+fetches the traces at the end.
 
-Spot/preemptible hosts are fine for short runs. For 24 h churn runs use
-on-demand: a reclaimed host is indistinguishable from churn in the traces.
+Quotas: 10k instances need the account's vCPU (AWS, GCP) or server (Hetzner)
+limit raised first. Spot/preemptible is fine for short runs; for 24 h churn
+runs use on-demand, because a reclaimed instance is indistinguishable from
+churn in the traces.

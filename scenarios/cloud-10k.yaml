@@ -1,4 +1,4 @@
-# 10k on 10 hosts x 1,000 (terraform apply with the defaults). Compare with
+# 10k instances, one node each (terraform apply -var nodes=10000). Compare with
 # the simnet 10k: fill time, refill, inbound-by-idspace flat, REGTOPIC hotspot.
 name: cloud-10k
 scenario:
@@ -19,5 +19,3 @@ testbed:
   backend: cloud
   cloud:
     inventory: inventory.json
-  wan:
-    enabled: true

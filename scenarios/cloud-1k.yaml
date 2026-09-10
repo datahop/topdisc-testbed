@@ -1,6 +1,5 @@
-# Cloud acceptance run: 1,000 nodes on 2 hosts (terraform apply -var hosts=2
-# -var nodes_per_host=500), WAN emulation on. Inventory path is relative to
-# this file.
+# Cloud acceptance run: 1,000 instances, one node each (terraform apply -var
+# nodes=1000). Inventory path is relative to this file.
 name: cloud-1k
 scenario:
   population:
@@ -20,5 +19,3 @@ testbed:
   backend: cloud
   cloud:
     inventory: inventory.json
-  wan:
-    enabled: true
