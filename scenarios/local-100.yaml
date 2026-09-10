@@ -1,0 +1,28 @@
+# 100 real node processes on this host (backend: local): geth p2p servers, RLPx
+# peer slots filled from topic search. Sub-4-minute check of the local backend.
+name: local-100
+scenario:
+  population:
+    nodes: 100
+    topics: 1
+    all_register: true
+    seed: 1
+  network:
+    latency_ms: 30
+    bandwidth_mibps: 1000
+  phases:
+    bootstrap_wait: 15s
+    register_stagger: 20ms
+    register_wait: 60s
+    search_stagger: 10ms
+    search_timeout: 90s
+  topic:
+    ad_cache_size: 5000
+  conn_model:
+    enabled: true
+    max_peers: 50
+    dial_ratio: 3
+    redial_wait: 35s
+testbed:
+  backend: local
+  traces: {}

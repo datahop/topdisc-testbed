@@ -7,3 +7,4 @@ figs/
 !scenarios/models/*.json
 /topdisc-node
 /local-run/
+/testbed

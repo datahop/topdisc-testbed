@@ -15,9 +15,10 @@ import (
 )
 
 type Config struct {
-	Name     string         `yaml:"name"`
-	Scenario ScenarioConfig `yaml:"scenario"`
-	Testbed  TestbedConfig  `yaml:"testbed"`
+	SourcePath string         `yaml:"-"`
+	Name       string         `yaml:"name"`
+	Scenario   ScenarioConfig `yaml:"scenario"`
+	Testbed    TestbedConfig  `yaml:"testbed"`
 }
 
 // ScenarioConfig describes the experiment; it means the same on any testbed.
@@ -35,6 +36,8 @@ type ScenarioConfig struct {
 
 // TestbedConfig is how this harness executes a scenario.
 type TestbedConfig struct {
+	Backend   string          `yaml:"backend"`
+	Local     LocalConfig     `yaml:"local"`
 	Simulator SimulatorConfig `yaml:"simulator"`
 	Harness   HarnessConfig   `yaml:"harness"`
 	Traces    TracesConfig    `yaml:"traces"`
@@ -121,6 +124,13 @@ type ChurnConfig struct {
 	Mode     string        `yaml:"mode"`
 }
 
+// LocalConfig: the local backend — N node processes on this host.
+type LocalConfig struct {
+	NodeBinary string        `yaml:"node_binary"`
+	BasePort   int           `yaml:"base_port"`
+	Grace      time.Duration `yaml:"grace"`
+}
+
 // SimulatorConfig: simnet internals; no equivalent on real hosts.
 type SimulatorConfig struct {
 	LinkBuf      int  `yaml:"link_buf"`
@@ -156,6 +166,10 @@ type SafetyConfig struct {
 type paramDoc struct{ path, doc string }
 
 var paramDocs = []paramDoc{
+	{"testbed.backend", "simnet: in-process on this host; local: one node process per node on this host; cloud: Terraform fleet"},
+	{"testbed.local.node_binary", "local backend: path to the node binary"},
+	{"testbed.local.base_port", "local backend: node i listens on base_port+i, status on +10000"},
+	{"testbed.local.grace", "local backend: wait after the last StopAt before collecting"},
 	{"scenario.population.nodes", "discv5 nodes to spawn"},
 	{"scenario.population.topics", "distinct topics; >1 assigns one per node by Zipf"},
 	{"scenario.population.all_register", "one shared topic that every node registers and searches"},
@@ -221,6 +235,10 @@ var paramDocs = []paramDoc{
 
 func Default() Config {
 	var c Config
+	c.Testbed.Backend = "simnet"
+	c.Testbed.Local.NodeBinary = "./topdisc-node"
+	c.Testbed.Local.BasePort = 30300
+	c.Testbed.Local.Grace = mustDur("10s")
 	c.Scenario.Population.Nodes = 5
 	c.Scenario.Population.Topics = 1
 	c.Scenario.Population.RegisterFrac = 0.5
@@ -267,6 +285,7 @@ func Load(path string) (Config, error) {
 	if err := dec.Decode(&c); err != nil {
 		return c, fmt.Errorf("%s: %w", path, err)
 	}
+	c.SourcePath = path
 	if c.Name == "" {
 		c.Name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	}

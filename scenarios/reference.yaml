@@ -1,6 +1,14 @@
 # Every parameter, with its default and meaning. Copy and edit.
 name: my-run
 
+testbed:
+  backend:
+    : ""                               # simnet: in-process on this host; local: one node process per node on this host; cloud: Terraform fleet
+  local:
+    node_binary: ""                    # local backend: path to the node binary
+    base_port: 0                       # local backend: node i listens on base_port+i, status on +10000
+    grace: 0s                          # local backend: wait after the last StopAt before collecting
+
 scenario:
   population:
     nodes: 5                           # discv5 nodes to spawn
