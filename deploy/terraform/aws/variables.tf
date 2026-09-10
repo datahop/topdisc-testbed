@@ -13,4 +13,3 @@ variable "spot" {
   description = "spot for nodes; not for 24h churn runs unless reclaims are logged as departures"
   default     = false
 }
-variable "binaries_url" { description = "URL of a tarball with topdisc-node, hostagent and testbed (linux/arm64)" }

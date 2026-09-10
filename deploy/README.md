@@ -5,21 +5,35 @@ WAN. Each module creates N small instances plus a coordinator on a private
 network and boots the hostagent on every instance through
 `deploy/cloud-init.yaml.tftpl`.
 
+AWS has a driver that does every step; the other providers follow the
+manual sequence below it.
+
 ```
-# 1. build for the fleet's architecture (arm64 on all three defaults)
+deploy/aws.sh up 1000 -var spot=true # terraform apply, build linux/arm64, push to the run's S3 bucket
+deploy/aws.sh run scenarios/cloud-1k.yaml
+deploy/aws.sh ssh                    # tail -f /opt/topdisc/run.out
+deploy/aws.sh pull                   # run directory into runs/
+deploy/aws.sh down
+```
+
+Instances fetch the binaries from S3 in a retry loop, so `up` may push after
+they boot. `aws login` (or credentials in the environment) is the only
+prerequisite.
+
+Manual sequence (GCP, Hetzner):
+
+```
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o out/topdisc-node ./cmd/node
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o out/hostagent ./cmd/hostagent
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o out/testbed ./cmd/testbed
 tar czf topdisc-linux-arm64.tgz -C out .        # upload anywhere the instances can fetch it
 
-# 2. provision
-cd deploy/terraform/aws && terraform init && terraform apply -var nodes=1000 -var binaries_url=https://…/topdisc-linux-arm64.tgz
+cd deploy/terraform/gcp && terraform init && terraform apply -var nodes=1000 -var binaries_url=https://…/topdisc-linux-arm64.tgz
 
-# 3. on the coordinator (AWS: aws ssm start-session; GCP: gcloud compute ssh --tunnel-through-iap; Hetzner: ssh)
-cd /opt/topdisc && ./inventory-aws.sh           # inventory-gcp.sh; Hetzner: terraform output -json inventory
+# on the coordinator (GCP: gcloud compute ssh --tunnel-through-iap; Hetzner: ssh)
+cd /opt/topdisc && ./inventory-gcp.sh           # Hetzner: terraform output -json inventory
 ./testbed cloud-1k.yaml                         # scenario copied next to inventory.json
 
-# 4. tear down
 terraform destroy
 ```
 

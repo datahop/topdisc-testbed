@@ -64,6 +64,11 @@ resource "aws_route_table_association" "public" {
   subnet_id      = aws_subnet.public.id
   route_table_id = aws_route_table.public.id
 }
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id          = aws_vpc.tb.id
+  service_name    = "com.amazonaws.${var.region}.s3"
+  route_table_ids = [aws_vpc.tb.main_route_table_id]
+}
 resource "aws_route" "private_default" {
   route_table_id         = aws_vpc.tb.main_route_table_id
   destination_cidr_block = "0.0.0.0/0"
@@ -78,6 +83,18 @@ resource "aws_iam_role_policy_attachment" "ssm" {
   role       = aws_iam_role.ssm.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
+resource "aws_s3_bucket" "binaries" {
+  bucket_prefix = "topdisc-testbed-"
+  force_destroy = true
+}
+resource "aws_iam_role_policy" "s3_read" {
+  name = "topdisc-binaries-read"
+  role = aws_iam_role.ssm.id
+  policy = jsonencode({ Version = "2012-10-17", Statement = [
+    { Effect = "Allow", Action = ["s3:GetObject"], Resource = "${aws_s3_bucket.binaries.arn}/*" },
+    { Effect = "Allow", Action = ["s3:ListBucket"], Resource = aws_s3_bucket.binaries.arn },
+  ] })
+}
 # The coordinator lists the fleet to build its inventory.
 resource "aws_iam_role_policy_attachment" "ec2_read" {
   role       = aws_iam_role.ssm.name
@@ -89,7 +106,7 @@ resource "aws_iam_instance_profile" "ssm" {
 }
 
 locals {
-  cloud_init = templatefile("${path.module}/../../cloud-init.yaml.tftpl", { binaries_url = var.binaries_url })
+  cloud_init = templatefile("${path.module}/../../cloud-init.yaml.tftpl", { binaries_url = "", binaries_s3 = "s3://${aws_s3_bucket.binaries.id}/topdisc-linux-arm64.tgz", region = var.region })
 }
 
 resource "aws_instance" "coordinator" {

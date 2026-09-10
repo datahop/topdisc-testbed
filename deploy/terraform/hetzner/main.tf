@@ -15,7 +15,7 @@ resource "hcloud_firewall" "admin" {
 resource "hcloud_ssh_key" "admin" { name = "topdisc-admin"; public_key = var.ssh_public_key }
 
 locals {
-  cloud_init = templatefile("${path.module}/../../cloud-init.yaml.tftpl", { binaries_url = var.binaries_url })
+  cloud_init = templatefile("${path.module}/../../cloud-init.yaml.tftpl", { binaries_url = var.binaries_url, binaries_s3 = "", region = "" })
 }
 
 resource "hcloud_server" "coordinator" {

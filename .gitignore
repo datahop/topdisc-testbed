@@ -9,3 +9,5 @@ figs/
 /local-run/
 /testbed
 /hostagent
+/out/
+/runs/
