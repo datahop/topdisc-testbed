@@ -1,0 +1,25 @@
+# Fits the account's default spot quotas (384 / 256 vCPUs in us-east-1 /
+# eu-central-1): 300 instances over two regions, ~$0.50/h on spot.
+# deploy/aws.sh up scenarios/cloud-300.yaml -var spot=true
+name: cloud-300
+scenario:
+  population:
+    nodes: 300
+    topics: 1
+    all_register: true
+    seed: 1
+  network:
+    regions: {us-east-1: 0.6, eu-central-1: 0.4}
+  phases:
+    bootstrap_wait: 30s
+    register_stagger: 20ms
+    register_wait: 90s
+    search_stagger: 10ms
+    search_timeout: 180s
+  topic:
+    ad_cache_size: 5000
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json
+    home_region: us-east-1

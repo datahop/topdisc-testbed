@@ -1,0 +1,33 @@
+# local-100 with node churn from the fitted August 2026 model: the 150s search
+# window stands for one real day, so a 2h crawl unit is 12.5s; departed nodes are
+# killed and restarted with the same identity.
+name: local-100-churn
+scenario:
+  population:
+    nodes: 100
+    topics: 1
+    all_register: true
+    seed: 1
+  network:
+    latency_ms: 30
+    bandwidth_mibps: 1000
+  phases:
+    bootstrap_wait: 15s
+    register_stagger: 20ms
+    register_wait: 60s
+    search_stagger: 10ms
+    search_timeout: 150s
+  topic:
+    ad_cache_size: 5000
+  conn_model:
+    enabled: true
+    max_peers: 50
+    dial_ratio: 3
+    redial_wait: 35s
+  session_churn:
+    enabled: true
+    model: models/nebula-discv5-2026-08.json
+    window_real_hours: 24
+testbed:
+  backend: local
+  traces: {}

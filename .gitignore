@@ -5,3 +5,11 @@
 __pycache__/
 figs/
 !scenarios/models/*.json
+/topdisc-node
+/local-run/
+/testbed
+/hostagent
+/out/
+/runs/
+.terraform/
+*.tfstate*

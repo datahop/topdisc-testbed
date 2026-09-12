@@ -1,6 +1,27 @@
 # Every parameter, with its default and meaning. Copy and edit.
 name: my-run
 
+testbed:
+  backend:
+    : simnet                           # simnet: in-process on this host; local: one node process per node on this host; cloud: Terraform fleet
+  local:
+    node_binary: ./topdisc-node        # local backend: path to the node binary
+    base_port: 30300                   # local backend: node i listens on base_port+i, status on +10000
+    grace: 10s                         # local backend: wait after the last StopAt before collecting
+    verbosity: 2                       # node log level: 2 warn, 3 info, 4 debug (disconnect reasons)
+  cloud:
+    inventory: inventory.json          # cloud backend: inventory.json written on the coordinator by deploy/inventory-*.sh
+    home_region: us-east-1             # cloud backend: coordinator, bootnode and binaries bucket live here
+    agent_port: 9000                   # cloud backend: hostagent port on every host
+    verbosity: 2                       # cloud backend: node log level
+    grace: 30s                         # cloud backend: wait after the last StopAt before fetching traces
+  wan:
+    enabled: false                     # give each node its own netns shaped by netem (Linux, root)
+    delay_min_ms: 4                    # star model: min one-way delay per node; plan RTT 8ms -> 4
+    delay_max_ms: 45                   # star model: max one-way delay per node; plan RTT 91ms -> 45
+    jitter_ms: 3                       # netem jitter
+    rate_kbps: 160                     # per-node rate cap; plan 20 KB/s -> 160; 0 = unshaped
+
 scenario:
   population:
     nodes: 5                           # discv5 nodes to spawn
@@ -13,8 +34,10 @@ scenario:
     legacy_frac: 0                     # fraction of nodes without the topic-discovery ENR flag
     vanilla_frac: 0                    # fraction running stock upstream geth (needs -tags vanilla)
   network:
-    latency_ms: 30                     # per-pair one-way latency, ms
-    bandwidth_mibps: 100               # per-direction link bandwidth
+    latency_ms: 30                     # simnet: per-pair one-way latency, ms (cloud: given by regions)
+    bandwidth_mibps: 100               # simnet: per-direction link bandwidth (cloud: given by the instance type)
+    regions: {}                        # cloud: node placement, region -> weight, e.g. {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}; empty = all in the home region
+    node_regions: {}                   # cloud: pin nodes, index -> region, e.g. {0: us-east-1, 7: sa-east-1}; the rest follow regions
   phases:
     bootstrap_wait: 3s                 # after spawning, before registrations start
     register_stagger: 0s               # gap between consecutive nodes starting to register

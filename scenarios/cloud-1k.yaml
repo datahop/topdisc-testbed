@@ -1,0 +1,25 @@
+# Cloud acceptance run: 1,000 instances, one node each, spread over three
+# regions (deploy/aws.sh up scenarios/cloud-1k.yaml -var spot=true).
+# Inventory path is relative to this file.
+name: cloud-1k
+scenario:
+  population:
+    nodes: 1000
+    topics: 1
+    all_register: true
+    seed: 1
+  network:
+    regions: {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}
+  phases:
+    bootstrap_wait: 30s
+    register_stagger: 20ms
+    register_wait: 120s
+    search_stagger: 10ms
+    search_timeout: 300s
+  topic:
+    ad_cache_size: 5000
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json
+    home_region: us-east-1

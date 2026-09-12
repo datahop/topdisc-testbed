@@ -4,6 +4,8 @@ package main
 
 import (
 	"fmt"
+	"github.com/datahop/topdisc-testbed/pkg/churn"
+	"github.com/datahop/topdisc-testbed/pkg/scenario"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -20,19 +22,19 @@ func main() {
 		os.Exit(2)
 	}
 	if os.Args[1] == "reference" {
-		printReference()
+		scenario.PrintReference()
 		return
 	}
-	cfg, err := loadConfig(os.Args[1])
+	cfg, err := scenario.Load(os.Args[1])
 	if err != nil {
 		fatalf("%v", err)
 	}
-	runDir, err := prepareRun(&cfg)
+	runDir, err := scenario.PrepareRun(&cfg)
 	if err != nil {
 		fatalf("%v", err)
 	}
 	fmt.Printf("run directory: %s\n", runDir)
-	defer flushLog()
+	defer scenario.FlushLog()
 	nodes := &cfg.Scenario.Population.Nodes
 	numTopics := &cfg.Scenario.Population.Topics
 	allRegister := &cfg.Scenario.Population.AllRegister
@@ -147,7 +149,7 @@ func main() {
 
 	fmt.Printf("simnet-testbed: spawning %d nodes (latency=%dms, bw=%dMibps)\n",
 		*nodes, *latencyMs, *bandwidthMibps)
-	fmt.Println(cfg.paramsLine())
+	fmt.Println(cfg.ParamsLine())
 
 	sim := &simnet.Simnet{
 		LatencyFunc:      simnet.StaticLatency(time.Duration(*latencyMs) * time.Millisecond),
@@ -292,7 +294,7 @@ func main() {
 				if !filepath.IsAbs(mp) {
 					mp = filepath.Join(filepath.Dir(os.Args[1]), mp)
 				}
-				m, err := loadChurnModel(mp)
+				m, err := churn.Load(mp)
 				if err != nil {
 					fatalf("%v", err)
 				}

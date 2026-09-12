@@ -1,0 +1,83 @@
+#cloud-config
+# Every instance: fetch the binaries, start the hostagent as root. The
+# coordinator gets the same image; run ./testbed there.
+write_files:
+  - path: /etc/sysctl.d/90-topdisc.conf
+    content: |
+      net.core.rmem_max = 8388608
+      net.core.wmem_max = 8388608
+      net.core.netdev_max_backlog = 250000
+      net.ipv4.ip_forward = 1
+      net.ipv4.neigh.default.gc_thresh3 = 65536
+      fs.file-max = 4000000
+      kernel.pid_max = 4194304
+  - path: /etc/security/limits.d/90-topdisc.conf
+    content: |
+      * soft nofile 1000000
+      * hard nofile 1000000
+  - path: /etc/systemd/system/hostagent.service
+    content: |
+      [Unit]
+      Description=topdisc hostagent
+      After=network-online.target
+      [Service]
+      ExecStart=/opt/topdisc/hostagent -serve :9000 -node-binary /opt/topdisc/topdisc-node -workdir /opt/topdisc/run
+      LimitNOFILE=1000000
+      LimitNPROC=1000000
+      Restart=always
+      [Install]
+      WantedBy=multi-user.target
+  - path: /opt/topdisc/scale-down.sh
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      # Hard spending stop, independent of the machine that ran terraform:
+      # every region's fleet to zero, NAT gateways and their addresses gone,
+      # then this coordinator terminates itself. What is left (VPCs, IAM,
+      # an empty bucket) is free; `deploy/aws.sh down` removes it later.
+      for r in $(cat /opt/topdisc/regions); do
+        aws autoscaling update-auto-scaling-group --region $r --auto-scaling-group-name topdisc-nodes --min-size 0 --desired-capacity 0 || true
+        for n in $(aws ec2 describe-nat-gateways --region $r --filter Name=tag:Name,Values=topdisc-testbed Name=state,Values=available --query 'NatGateways[].NatGatewayId' --output text); do
+          aws ec2 delete-nat-gateway --region $r --nat-gateway-id $n || true
+        done
+      done
+      sleep 120
+      for r in $(cat /opt/topdisc/regions); do
+        for a in $(aws ec2 describe-addresses --region $r --filters Name=tag:Name,Values=topdisc-testbed --query 'Addresses[?AssociationId==null].AllocationId' --output text); do
+          aws ec2 release-address --region $r --allocation-id $a || true
+        done
+      done
+      echo "fleet stopped at $(date -u)" >> /opt/topdisc/scale-down.log
+      me=$(curl -s -H "X-aws-ec2-metadata-token: $(curl -s -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')" http://169.254.169.254/latest/meta-data/instance-id)
+      aws ec2 terminate-instances --region $(cat /opt/topdisc/region) --instance-ids $me
+  - path: /etc/systemd/system/fleet-scale-down.service
+    content: |
+      [Unit]
+      Description=topdisc fleet scale-down (spending cap)
+      [Service]
+      Type=oneshot
+      ExecStart=/opt/topdisc/scale-down.sh
+  - path: /etc/systemd/system/fleet-scale-down.timer
+    content: |
+      [Unit]
+      Description=topdisc fleet scale-down max_hours after boot
+      [Timer]
+      OnBootSec=${max_hours}h
+      [Install]
+      WantedBy=timers.target
+runcmd:
+  - sysctl --system
+  - (command -v dnf && dnf install -y iproute-tc) || (apt-get update && apt-get install -y iproute2)
+  - mkdir -p /opt/topdisc
+%{ if binaries_s3 != "" ~}
+  - echo "${region}" > /opt/topdisc/region
+  - echo "${regions}" > /opt/topdisc/regions
+  - until aws s3 cp --region ${region} "${binaries_s3}" /opt/topdisc/binaries.tgz; do sleep 15; done
+%{ else ~}
+  - until curl -fsSL "${binaries_url}" -o /opt/topdisc/binaries.tgz; do sleep 15; done
+%{ endif ~}
+  - tar xzf /opt/topdisc/binaries.tgz -C /opt/topdisc
+  - systemctl daemon-reload && systemctl enable --now hostagent
+%{ if max_hours > 0 ~}
+  - systemctl enable --now fleet-scale-down.timer
+%{ endif ~}

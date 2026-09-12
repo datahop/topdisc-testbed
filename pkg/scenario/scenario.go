@@ -1,9 +1,10 @@
 // Config is a run: a testbed-agnostic scenario plus how this testbed executes
 // it. A run directory's run.yaml is this struct fully resolved.
-package main
+package scenario
 
 import (
 	"fmt"
+	"github.com/datahop/topdisc-testbed/pkg/wan"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,9 +16,10 @@ import (
 )
 
 type Config struct {
-	Name     string         `yaml:"name"`
-	Scenario ScenarioConfig `yaml:"scenario"`
-	Testbed  TestbedConfig  `yaml:"testbed"`
+	SourcePath string         `yaml:"-"`
+	Name       string         `yaml:"name"`
+	Scenario   ScenarioConfig `yaml:"scenario"`
+	Testbed    TestbedConfig  `yaml:"testbed"`
 }
 
 // ScenarioConfig describes the experiment; it means the same on any testbed.
@@ -35,6 +37,10 @@ type ScenarioConfig struct {
 
 // TestbedConfig is how this harness executes a scenario.
 type TestbedConfig struct {
+	Backend   string          `yaml:"backend"`
+	Local     LocalConfig     `yaml:"local"`
+	Wan       WanConfig       `yaml:"wan"`
+	Cloud     CloudConfig     `yaml:"cloud"`
 	Simulator SimulatorConfig `yaml:"simulator"`
 	Harness   HarnessConfig   `yaml:"harness"`
 	Traces    TracesConfig    `yaml:"traces"`
@@ -56,8 +62,10 @@ type PopulationConfig struct {
 
 // NetworkConfig: the emulated WAN conditions.
 type NetworkConfig struct {
-	LatencyMs      int `yaml:"latency_ms"`
-	BandwidthMibps int `yaml:"bandwidth_mibps"`
+	LatencyMs      int                `yaml:"latency_ms"`
+	BandwidthMibps int                `yaml:"bandwidth_mibps"`
+	Regions        map[string]float64 `yaml:"regions"`
+	NodeRegions    map[int]string     `yaml:"node_regions"`
 }
 
 // PhasesConfig: how the run is paced.
@@ -121,6 +129,33 @@ type ChurnConfig struct {
 	Mode     string        `yaml:"mode"`
 }
 
+// WanConfig: per-node WAN emulation (netns + netem); star model, Linux only.
+type WanConfig struct {
+	Enabled    bool    `yaml:"enabled"`
+	DelayMinMs float64 `yaml:"delay_min_ms"`
+	DelayMaxMs float64 `yaml:"delay_max_ms"`
+	JitterMs   float64 `yaml:"jitter_ms"`
+	RateKbps   int     `yaml:"rate_kbps"`
+}
+
+// CloudConfig: the cloud backend drives hostagents listed in a Terraform
+// inventory (deploy/terraform/*/outputs.tf).
+type CloudConfig struct {
+	Inventory  string        `yaml:"inventory"`
+	HomeRegion string        `yaml:"home_region"`
+	AgentPort  int           `yaml:"agent_port"`
+	Verbosity  int           `yaml:"verbosity"`
+	Grace      time.Duration `yaml:"grace"`
+}
+
+// LocalConfig: the local backend — N node processes on this host.
+type LocalConfig struct {
+	NodeBinary string        `yaml:"node_binary"`
+	BasePort   int           `yaml:"base_port"`
+	Grace      time.Duration `yaml:"grace"`
+	Verbosity  int           `yaml:"verbosity"`
+}
+
 // SimulatorConfig: simnet internals; no equivalent on real hosts.
 type SimulatorConfig struct {
 	LinkBuf      int  `yaml:"link_buf"`
@@ -156,6 +191,21 @@ type SafetyConfig struct {
 type paramDoc struct{ path, doc string }
 
 var paramDocs = []paramDoc{
+	{"testbed.backend", "simnet: in-process on this host; local: one node process per node on this host; cloud: Terraform fleet"},
+	{"testbed.local.node_binary", "local backend: path to the node binary"},
+	{"testbed.local.base_port", "local backend: node i listens on base_port+i, status on +10000"},
+	{"testbed.local.grace", "local backend: wait after the last StopAt before collecting"},
+	{"testbed.local.verbosity", "node log level: 2 warn, 3 info, 4 debug (disconnect reasons)"},
+	{"testbed.cloud.inventory", "cloud backend: inventory.json written on the coordinator by deploy/inventory-*.sh"},
+	{"testbed.cloud.home_region", "cloud backend: coordinator, bootnode and binaries bucket live here"},
+	{"testbed.cloud.agent_port", "cloud backend: hostagent port on every host"},
+	{"testbed.cloud.verbosity", "cloud backend: node log level"},
+	{"testbed.cloud.grace", "cloud backend: wait after the last StopAt before fetching traces"},
+	{"testbed.wan.enabled", "give each node its own netns shaped by netem (Linux, root)"},
+	{"testbed.wan.delay_min_ms", "star model: min one-way delay per node; plan RTT 8ms -> 4"},
+	{"testbed.wan.delay_max_ms", "star model: max one-way delay per node; plan RTT 91ms -> 45"},
+	{"testbed.wan.jitter_ms", "netem jitter"},
+	{"testbed.wan.rate_kbps", "per-node rate cap; plan 20 KB/s -> 160; 0 = unshaped"},
 	{"scenario.population.nodes", "discv5 nodes to spawn"},
 	{"scenario.population.topics", "distinct topics; >1 assigns one per node by Zipf"},
 	{"scenario.population.all_register", "one shared topic that every node registers and searches"},
@@ -165,8 +215,10 @@ var paramDocs = []paramDoc{
 	{"scenario.population.seed", "RNG seed for every random draw; 0 = time"},
 	{"scenario.population.legacy_frac", "fraction of nodes without the topic-discovery ENR flag"},
 	{"scenario.population.vanilla_frac", "fraction running stock upstream geth (needs -tags vanilla)"},
-	{"scenario.network.latency_ms", "per-pair one-way latency, ms"},
-	{"scenario.network.bandwidth_mibps", "per-direction link bandwidth"},
+	{"scenario.network.latency_ms", "simnet: per-pair one-way latency, ms (cloud: given by regions)"},
+	{"scenario.network.bandwidth_mibps", "simnet: per-direction link bandwidth (cloud: given by the instance type)"},
+	{"scenario.network.regions", "cloud: node placement, region -> weight, e.g. {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}; empty = all in the home region"},
+	{"scenario.network.node_regions", "cloud: pin nodes, index -> region, e.g. {0: us-east-1, 7: sa-east-1}; the rest follow regions"},
 	{"scenario.phases.bootstrap_wait", "after spawning, before registrations start"},
 	{"scenario.phases.register_stagger", "gap between consecutive nodes starting to register"},
 	{"scenario.phases.register_wait", "after the last node starts registering, before searches start"},
@@ -219,8 +271,15 @@ var paramDocs = []paramDoc{
 	{"testbed.safety.abort_on_drop", "exit on the first dropped packet: drops bias every timing"},
 }
 
-func defaultConfig() Config {
+func Default() Config {
 	var c Config
+	c.Testbed.Backend = "simnet"
+	c.Testbed.Local.NodeBinary = "./topdisc-node"
+	c.Testbed.Local.BasePort = 30300
+	c.Testbed.Local.Grace = mustDur("10s")
+	c.Testbed.Local.Verbosity = 2
+	c.Testbed.Cloud.Inventory, c.Testbed.Cloud.HomeRegion, c.Testbed.Cloud.AgentPort, c.Testbed.Cloud.Verbosity, c.Testbed.Cloud.Grace = "inventory.json", "us-east-1", 9000, 2, mustDur("30s")
+	c.Testbed.Wan.DelayMinMs, c.Testbed.Wan.DelayMaxMs, c.Testbed.Wan.JitterMs, c.Testbed.Wan.RateKbps = 4, 45, 3, 160
 	c.Scenario.Population.Nodes = 5
 	c.Scenario.Population.Topics = 1
 	c.Scenario.Population.RegisterFrac = 0.5
@@ -256,8 +315,8 @@ func mustDur(s string) time.Duration {
 	return d
 }
 
-func loadConfig(path string) (Config, error) {
-	c := defaultConfig()
+func Load(path string) (Config, error) {
+	c := Default()
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return c, err
@@ -267,6 +326,7 @@ func loadConfig(path string) (Config, error) {
 	if err := dec.Decode(&c); err != nil {
 		return c, fmt.Errorf("%s: %w", path, err)
 	}
+	c.SourcePath = path
 	if c.Name == "" {
 		c.Name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	}
@@ -298,14 +358,37 @@ func (c Config) flatten() (keys []string, vals map[string]any) {
 }
 
 func fmtVal(v any) string {
-	if d, ok := v.(time.Duration); ok {
-		return d.String()
+	switch x := v.(type) {
+	case time.Duration:
+		return x.String()
+	case map[string]float64:
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, len(keys))
+		for i, k := range keys {
+			parts[i] = fmt.Sprintf("%s:%g", k, x[k])
+		}
+		return "{" + strings.Join(parts, ",") + "}"
+	case map[int]string:
+		keys := make([]int, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Ints(keys)
+		parts := make([]string, len(keys))
+		for i, k := range keys {
+			parts[i] = fmt.Sprintf("%d:%s", k, x[k])
+		}
+		return "{" + strings.Join(parts, ",") + "}"
 	}
 	return fmt.Sprint(v)
 }
 
-// paramsLine is the one-liner the figure scripts parse.
-func (c Config) paramsLine() string {
+// ParamsLine is the one-liner the figure scripts parse.
+func (c Config) ParamsLine() string {
 	keys, vals := c.flatten()
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
@@ -315,8 +398,8 @@ func (c Config) paramsLine() string {
 	return "PARAMS: " + strings.Join(parts, " ")
 }
 
-func printReference() {
-	_, vals := defaultConfig().flatten()
+func PrintReference() {
+	_, vals := Default().flatten()
 	fmt.Println("# Every parameter, with its default and meaning. Copy and edit.")
 	fmt.Println("name: my-run")
 	lastTop, lastSec := "", ""
@@ -345,12 +428,12 @@ func printReference() {
 	}
 }
 
-// prepareRun creates <name>-<timestamp>/, points relative trace paths into
+// PrepareRun creates <name>-<timestamp>/, points relative trace paths into
 // it, writes the resolved run.yaml, and tees stdout into run.log.
-// flushLog drains the stdout tee into run.log; call it before any exit.
-var flushLog = func() {}
+// FlushLog drains the stdout tee into run.log; call it before any exit.
+var FlushLog = func() {}
 
-func prepareRun(c *Config) (string, error) {
+func PrepareRun(c *Config) (string, error) {
 	dir := fmt.Sprintf("%s-%s", c.Name, time.Now().Format("20060102-150405"))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
@@ -392,12 +475,66 @@ func prepareRun(c *Config) (string, error) {
 			}
 		}
 	}()
-	flushLog = func() {
+	FlushLog = func() {
 		w.Close()
 		<-done
 		logf.Close()
 		os.Stdout = real
-		flushLog = func() {}
+		FlushLog = func() {}
 	}
 	return dir, nil
+}
+
+// Star returns the WAN model, or nil when emulation is off.
+func (w WanConfig) Star() *wan.Star {
+	if !w.Enabled {
+		return nil
+	}
+	return &wan.Star{MinMs: w.DelayMinMs, MaxMs: w.DelayMaxMs, JitterMs: w.JitterMs, RateKbps: w.RateKbps}
+}
+
+// Fleet turns the placement into instance counts per region for the cloud
+// backend: pinned nodes first, the rest by weight (largest remainder), or
+// all in the home region when no weights are given.
+func (c Config) Fleet() map[string]int {
+	n := c.Scenario.Population.Nodes
+	w := c.Scenario.Network.Regions
+	out := map[string]int{}
+	for idx, r := range c.Scenario.Network.NodeRegions {
+		if idx >= 0 && idx < n {
+			out[r]++
+			n--
+		}
+	}
+	if len(w) == 0 {
+		out[c.Testbed.Cloud.HomeRegion] += n
+		return out
+	}
+	keys := make([]string, 0, len(w))
+	total := 0.0
+	for k, v := range w {
+		keys = append(keys, k)
+		total += v
+	}
+	sort.Strings(keys)
+	given := 0
+	rem := make([]float64, len(keys))
+	for i, k := range keys {
+		exact := float64(n) * w[k] / total
+		out[k] += int(exact)
+		rem[i] = exact - float64(int(exact))
+		given += int(exact)
+	}
+	for given < n {
+		best := 0
+		for i := range rem {
+			if rem[i] > rem[best] {
+				best = i
+			}
+		}
+		out[keys[best]]++
+		rem[best] = -1
+		given++
+	}
+	return out
 }

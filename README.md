@@ -49,6 +49,23 @@ python3 figures/figures_overhead.py <run>/series.json \
     --metrics <run>/m.json --overhead <run>/oh.json --out-dir figs --label baseline
 ```
 
+## Backends
+
+`testbed.backend` in the scenario picks where the same scenario runs:
+
+| backend | what runs | how |
+|---|---|---|
+| `simnet` | in-process discv5 nodes over the simulated network | `./testbed <scenario>` execs `./simnet` |
+| `local` | one real geth `p2p.Server` process per node on this host (RLPx peer slots filled from topic search) | `go build -o topdisc-node ./cmd/node`, then `./testbed <scenario>` |
+| `cloud` | the same processes across hosts provisioned by Terraform (`deploy/`) | `./testbed <scenario>` on the coordinator host, driving one hostagent per host |
+
+`local` and `cloud` accept `testbed.wan` (Linux only): each node gets its own
+network namespace with a netem qdisc, so pairs see WAN-like RTTs and a
+per-node rate cap instead of loopback. `scenarios/local-100*.yaml` and
+`scenarios/cloud-*.yaml` are the reference scenarios for those backends;
+`pkg/host` is the per-host runner both share, `cmd/hostagent` exposes it
+over HTTP for the cloud coordinator.
+
 ## Scale
 
 10,000 nodes needs roughly 80 GB of RAM and finishes in about 25 minutes on 24
