@@ -87,6 +87,14 @@ case "$1" in
       g=$(aws ec2 describe-nat-gateways --region $r --filter Name=state,Values=pending,available --query 'length(NatGateways)' --output text)
       echo "$r: instances=$n nat-gateways=$g"
     done ;;
+  pull)
+    mkdir -p runs
+    b=$(tfout binaries_bucket)
+    d=$(ssm_run "cd /opt/topdisc && d=\$(ls -td *-2* | head -1) && tar czf /tmp/\$d.tgz \$d && aws s3 cp /tmp/\$d.tgz s3://$b/runs/\$d.tgz >/dev/null && echo PULLED \$d" | sed -n 's/^PULLED //p')
+    [ -n "$d" ] || { echo "pull: no run archive produced on the coordinator"; exit 1; }
+    aws s3 cp "s3://$b/runs/$d.tgz" - | tar xzf - -C runs
+    [ -f "runs/$d/nodes.json" ] || { echo "pull: runs/$d incomplete"; exit 1; }
+    echo "runs/$d ($(ls runs/$d/traces | wc -l | tr -d ' ') traces)" ;;
   ssh) aws ssm start-session --target "$(tfout coordinator_id)" ;;
   down) terraform -chdir=$TF destroy -auto-approve -input=false -var "regions={}" ;;
   *) sed -n 2,9p "$0"; exit 2 ;;
