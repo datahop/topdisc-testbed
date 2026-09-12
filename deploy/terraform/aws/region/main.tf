@@ -119,6 +119,8 @@ resource "aws_instance" "coordinator" {
   vpc_security_group_ids = [aws_security_group.intra.id]
   iam_instance_profile   = var.instance_profile
   user_data              = var.cloud_init
+  # A restarted instance does not re-run cloud-init; replace it instead.
+  user_data_replace_on_change = true
   root_block_device {
     volume_size = 20
     volume_type = "gp3"
