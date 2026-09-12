@@ -1,0 +1,20 @@
+# Driver check: 5 instances in one region, a couple of minutes, a few cents.
+# deploy/aws.sh up scenarios/cloud-smoke.yaml -var spot=true && deploy/aws.sh run scenarios/cloud-smoke.yaml
+name: cloud-smoke
+scenario:
+  population:
+    nodes: 5
+    topics: 1
+    all_register: true
+    seed: 1
+  phases:
+    bootstrap_wait: 15s
+    register_stagger: 20ms
+    register_wait: 30s
+    search_stagger: 10ms
+    search_timeout: 30s
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json
+    home_region: us-east-1

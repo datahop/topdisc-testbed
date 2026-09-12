@@ -67,7 +67,9 @@ case "$1" in
     build_push ;;
   push) build_push ;;
   run)
-    [ -n "$KEEP" ] || trap '"$0" down; "$0" check' EXIT
+    # Destroy at the end unless KEEP=1; a failed pull keeps the deployment so
+    # the results can still be fetched by hand (deploy/aws.sh pull / ssh).
+    [ -n "$KEEP" ] || trap 'st=$?; if [ $st -eq 0 ] || [ -z "$PULL_FAILED" ]; then "$0" down; "$0" check; else echo "pull failed: deployment kept; fix, then deploy/aws.sh pull && deploy/aws.sh down"; fi' EXIT
     aws s3 cp "$2" "s3://$(tfout binaries_bucket)/scenario.yaml"
     ssm_run "cd /opt/topdisc && aws s3 cp s3://$(tfout binaries_bucket)/scenario.yaml scenario.yaml && ./inventory-aws.sh && (nohup ./testbed scenario.yaml > run.out 2>&1; echo RUN-EXIT \$? >> run.out) > /dev/null 2>&1 &"
     echo "started on the coordinator; waiting"
@@ -78,7 +80,7 @@ case "$1" in
       sleep 30
     done
     echo "$out" | grep -vE "^PARAMS"
-    "$0" pull ;;
+    "$0" pull || { PULL_FAILED=1; exit 1; } ;;
   check)
     for r in $(sed -n 's/^REGIONS = \[\(.*\)\]/\1/p' $TF/gen.py | tr -d '",'); do
       n=$(aws ec2 describe-instances --region $r --filters Name=instance-state-name,Values=pending,running --query 'length(Reservations[].Instances[])' --output text)
