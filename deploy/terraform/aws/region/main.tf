@@ -134,7 +134,7 @@ resource "aws_launch_template" "node" {
   block_device_mappings {
     device_name = "/dev/xvda"
     ebs {
-      volume_size = 4
+      volume_size = 8 # the AL2023 root snapshot is 8 GB
       volume_type = "gp3"
     }
   }
