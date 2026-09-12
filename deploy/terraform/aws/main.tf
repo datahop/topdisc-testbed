@@ -64,6 +64,7 @@ resource "aws_iam_role_policy" "scale_down" {
   name = "topdisc-scale-down"
   role = aws_iam_role.ssm.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
-    { Effect = "Allow", Action = ["autoscaling:UpdateAutoScalingGroup", "autoscaling:SetDesiredCapacity", "autoscaling:DescribeAutoScalingGroups"], Resource = "*" },
+    { Effect = "Allow", Action = ["autoscaling:UpdateAutoScalingGroup", "autoscaling:SetDesiredCapacity", "autoscaling:DescribeAutoScalingGroups", "ec2:DeleteNatGateway", "ec2:ReleaseAddress", "ec2:DescribeNatGateways", "ec2:DescribeAddresses"], Resource = "*" },
+    { Effect = "Allow", Action = ["ec2:TerminateInstances"], Resource = "*", Condition = { StringEquals = { "ec2:ResourceTag/role" = "coordinator" } } },
   ] })
 }

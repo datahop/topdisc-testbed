@@ -3,7 +3,8 @@
 #   deploy/aws.sh up <scenario> [tf args]  terraform apply sized from the scenario + build + push to S3 (e.g. -var spot=true)
 #                                          refuses if nodes x on-demand price x MAX_HOURS (6) > MAX_SPEND ($200)
 #   deploy/aws.sh push                  rebuild and re-push the binaries only
-#   deploy/aws.sh run scenarios/x.yaml  run it on the coordinator, wait, pull the results, then destroy everything (KEEP=1 to keep the fleet)
+#   deploy/aws.sh run scenarios/x.yaml  run it on the coordinator, wait, pull the results, then destroy everything
+#                                       up and run destroy on any failure or interrupt too; KEEP=1 keeps the deployment
 #   deploy/aws.sh check                 list what is still running in every region (instances, NAT gateways)
 #   deploy/aws.sh pull                  fetch the latest run directory from the coordinator into runs/
 #   deploy/aws.sh ssh                   shell on the coordinator (SSM)
@@ -52,6 +53,7 @@ ssm_run() {
 
 case "$1" in
   up)
+    [ -n "$KEEP" ] || trap 'st=$?; [ $st -eq 0 ] || { echo "up failed; destroying"; "$0" down; "$0" check; }; exit $st' EXIT
     sc=$2; shift 2
     go build -o testbed ./cmd/testbed
     fleet=$(./testbed fleet "$sc")
@@ -65,6 +67,7 @@ case "$1" in
     build_push ;;
   push) build_push ;;
   run)
+    [ -n "$KEEP" ] || trap '"$0" down; "$0" check' EXIT
     aws s3 cp "$2" "s3://$(tfout binaries_bucket)/scenario.yaml"
     ssm_run "cd /opt/topdisc && aws s3 cp s3://$(tfout binaries_bucket)/scenario.yaml scenario.yaml && ./inventory-aws.sh && (nohup ./testbed scenario.yaml > run.out 2>&1; echo RUN-EXIT \$? >> run.out) > /dev/null 2>&1 &"
     echo "started on the coordinator; waiting"
@@ -75,8 +78,7 @@ case "$1" in
       sleep 30
     done
     echo "$out" | grep -vE "^PARAMS"
-    "$0" pull
-    if [ -z "$KEEP" ]; then "$0" down; "$0" check; fi ;;
+    "$0" pull ;;
   check)
     for r in $(sed -n 's/^REGIONS = \[\(.*\)\]/\1/p' $TF/gen.py | tr -d '",'); do
       n=$(aws ec2 describe-instances --region $r --filters Name=instance-state-name,Values=pending,running --query 'length(Reservations[].Instances[])' --output text)

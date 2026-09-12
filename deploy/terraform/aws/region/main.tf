@@ -77,12 +77,14 @@ resource "aws_internet_gateway" "igw" {
 resource "aws_eip" "nat" {
   count  = local.active ? 1 : 0
   domain = "vpc"
+  tags   = { Name = "topdisc-testbed" }
 }
 resource "aws_nat_gateway" "nat" {
   count         = local.active ? 1 : 0
   allocation_id = aws_eip.nat[0].id
   subnet_id     = aws_subnet.public.id
   depends_on    = [aws_internet_gateway.igw]
+  tags          = { Name = "topdisc-testbed" }
 }
 resource "aws_route_table" "public" {
   count  = local.active ? 1 : 0

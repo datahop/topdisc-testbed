@@ -31,11 +31,25 @@ write_files:
     permissions: "0755"
     content: |
       #!/bin/sh
-      # Hard spending stop: every region's node fleet to zero.
+      # Hard spending stop, independent of the machine that ran terraform:
+      # every region's fleet to zero, NAT gateways and their addresses gone,
+      # then this coordinator terminates itself. What is left (VPCs, IAM,
+      # an empty bucket) is free; `deploy/aws.sh down` removes it later.
       for r in $(cat /opt/topdisc/regions); do
         aws autoscaling update-auto-scaling-group --region $r --auto-scaling-group-name topdisc-nodes --min-size 0 --desired-capacity 0 || true
+        for n in $(aws ec2 describe-nat-gateways --region $r --filter Name=tag:Name,Values=topdisc-testbed Name=state,Values=available --query 'NatGateways[].NatGatewayId' --output text); do
+          aws ec2 delete-nat-gateway --region $r --nat-gateway-id $n || true
+        done
       done
-      echo "fleet scaled to zero at $(date -u)" >> /opt/topdisc/scale-down.log
+      sleep 120
+      for r in $(cat /opt/topdisc/regions); do
+        for a in $(aws ec2 describe-addresses --region $r --filters Name=tag:Name,Values=topdisc-testbed --query 'Addresses[?AssociationId==null].AllocationId' --output text); do
+          aws ec2 release-address --region $r --allocation-id $a || true
+        done
+      done
+      echo "fleet stopped at $(date -u)" >> /opt/topdisc/scale-down.log
+      me=$(curl -s -H "X-aws-ec2-metadata-token: $(curl -s -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')" http://169.254.169.254/latest/meta-data/instance-id)
+      aws ec2 terminate-instances --region $(cat /opt/topdisc/region) --instance-ids $me
   - path: /etc/systemd/system/fleet-scale-down.service
     content: |
       [Unit]
