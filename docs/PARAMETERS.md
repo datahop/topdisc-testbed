@@ -79,7 +79,7 @@ WAN emulation, cloud inventory and home region, trace outputs, safety
 
 | Scenario | Plan section | Content | Exists |
 |---|---|---|---|
-| `phase3-10k` | §2 | 10k nodes, 300 services Zipf 1, E = 15 min, F_lookup = 30, scheduled lookups, WAN model, no churn | ✗ step 6 |
+| `phase3-10k` | §2 | 10k nodes, 300 services Zipf 1, E = 15 min, F_lookup = 30, scheduled lookups, WAN model, no churn | ✓ `scenarios/phase3-10k.yaml` |
 | `phase3-10k-churn-<scale>` | §2 churn resilience | `phase3-10k` plus session churn at several `scale` values | ✓ `scenarios/phase3-10k-churn.yaml` (edit `scale`) |
 | `phase3-10k-legacy` | §3 | Same population, service assignment, addresses and lookup schedule; every node in legacy mode | ✗ step 7 |
 | `phase3-10k-deploy-<pct>` | §4 | `phase3-10k` with `legacy_frac` at 99, 95, 90, 75, 50 %, stratified per service | ✗ step 7 |
