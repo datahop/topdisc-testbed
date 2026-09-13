@@ -284,7 +284,7 @@ func runMultiTopicSearches(all []nodeRec, nodeTopics [][]int, topics []topicinde
 	wg.Wait()
 	close(checkpointStop)
 	<-checkpointDone
-	if pacing.Model == "continuous" {
+	if pacing.Model == "continuous" || pacing.Model == "scheduled" {
 		printLookupSummary(results, pacing)
 	}
 	return results
