@@ -182,6 +182,7 @@ type TracesConfig struct {
 	Overhead             string        `yaml:"overhead"`
 	OverheadSeries       string        `yaml:"overhead_series"`
 	OverheadSeriesPeriod time.Duration `yaml:"overhead_series_period"`
+	HostSamplePeriod     time.Duration `yaml:"host_sample_period"`
 	Reach                string        `yaml:"reach"`
 	SnapshotDir          string        `yaml:"snapshot_dir"`
 	CheckpointInterval   time.Duration `yaml:"checkpoint_interval"`
@@ -270,6 +271,7 @@ var paramDocs = []paramDoc{
 	{"testbed.traces.metrics", "search and registration record (JSON)"},
 	{"testbed.traces.overhead", "per-node traffic totals by message type (JSON)"},
 	{"testbed.traces.overhead_series", "traffic and ad-cache samples over time (JSON)"},
+	{"testbed.traces.host_sample_period", "real backends: sample CPU/RSS/fds per node and UDP buffer drops per host this often into hostmetrics; 0 = off"},
 	{"testbed.traces.overhead_series_period", "sampling period for overhead_series"},
 	{"testbed.traces.reach", "per-searcher registrar reach sets (JSON)"},
 	{"testbed.traces.snapshot_dir", "periodic find-count snapshots"},
@@ -312,6 +314,7 @@ func Default() Config {
 	c.Scenario.Churn.Frac = 0.1
 	c.Scenario.Churn.Mode = "steadystate"
 	c.Testbed.Traces.OverheadSeriesPeriod = mustDur("30s")
+	c.Testbed.Traces.HostSamplePeriod = mustDur("30s")
 	c.Testbed.Safety.AbortOnDrop = true
 	return c
 }

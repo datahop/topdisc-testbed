@@ -41,6 +41,14 @@ func RunLocal(cfg scenario.Config, runDir string) error {
 		return err
 	}
 	defer r.StopAll()
+	if p := cfg.Testbed.Traces.HostSamplePeriod; p > 0 {
+		r.Monitor(p)
+		defer func() {
+			r.StopMonitor()
+			r.WriteSamples(filepath.Join(runDir, "hostmetrics.json"))
+			hostSummary([][]host.Sample{r.Samples()})
+		}()
+	}
 	printPhases("local", as, t0)
 	if star != nil {
 		fmt.Printf("wan: star model, one-way %g..%g ms, %d kbit/s per node, netns per node\n", star.MinMs, star.MaxMs, star.RateKbps)

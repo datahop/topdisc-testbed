@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/datahop/topdisc-testbed/pkg/assign"
 	"github.com/datahop/topdisc-testbed/pkg/host"
@@ -19,12 +20,13 @@ import (
 
 // PrepareRequest is what the coordinator posts before starting nodes.
 type PrepareRequest struct {
-	Host        int                 `json:"host"`
-	Peers       map[int]string      `json:"peers"`
-	Wan         *wan.Star           `json:"wan"`
-	Seed        int64               `json:"seed"`
-	Verbosity   int                 `json:"verbosity"`
-	Assignments []assign.Assignment `json:"assignments"`
+	Host           int                 `json:"host"`
+	Peers          map[int]string      `json:"peers"`
+	Wan            *wan.Star           `json:"wan"`
+	Seed           int64               `json:"seed"`
+	Verbosity      int                 `json:"verbosity"`
+	SamplePeriodMs int64               `json:"sample_period_ms"`
+	Assignments    []assign.Assignment `json:"assignments"`
 }
 
 func main() {
@@ -46,6 +48,7 @@ func main() {
 		mu.Lock()
 		defer mu.Unlock()
 		if r != nil {
+			r.StopMonitor()
 			r.StopAll()
 		}
 		os.RemoveAll(*work)
@@ -58,6 +61,9 @@ func main() {
 		if err := r.Prepare(p.Assignments, p.Peers); err != nil {
 			fail(w, err)
 			return
+		}
+		if p.SamplePeriodMs > 0 {
+			r.Monitor(time.Duration(p.SamplePeriodMs) * time.Millisecond)
 		}
 		fmt.Fprintf(w, "prepared %d nodes\n", len(p.Assignments))
 	})
@@ -83,8 +89,18 @@ func main() {
 		mu.Lock()
 		defer mu.Unlock()
 		if r != nil {
+			r.StopMonitor()
 			r.StopAll()
 		}
+	})
+	http.HandleFunc("/hostmetrics", func(w http.ResponseWriter, req *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r == nil {
+			fail(w, fmt.Errorf("not prepared"))
+			return
+		}
+		json.NewEncoder(w).Encode(r.Samples())
 	})
 	http.HandleFunc("/trace", func(w http.ResponseWriter, req *http.Request) {
 		http.ServeFile(w, req, filepath.Join(*work, "traces", fmt.Sprintf("node%d.json", idxOf(req))))

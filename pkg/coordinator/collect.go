@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/datahop/topdisc-testbed/pkg/assign"
+	"github.com/datahop/topdisc-testbed/pkg/host"
 )
 
 // NodeTrace is what cmd/node writes at StopAt.
@@ -107,4 +108,39 @@ func sum(v []int) int {
 		s += x
 	}
 	return s
+}
+
+// hostSummary prints what the host monitor saw: node CPU and RSS at the busiest
+// sample, and whether any host dropped UDP datagrams, which invalidates a run
+// the way simnet's link drops do.
+func hostSummary(hosts [][]host.Sample) {
+	var cpu, rss []int
+	drops, dropHosts, samples := int64(0), 0, 0
+	for _, hs := range hosts {
+		if len(hs) == 0 {
+			continue
+		}
+		samples += len(hs)
+		if d := hs[len(hs)-1].UDPRcvbufErrors - hs[0].UDPRcvbufErrors; d > 0 {
+			drops += d
+			dropHosts++
+		}
+		for _, s := range hs {
+			for _, n := range s.Nodes {
+				cpu, rss = append(cpu, int(n.CPUPct)), append(rss, int(n.RSSMB))
+			}
+		}
+	}
+	if samples == 0 {
+		fmt.Println("hostmetrics: no samples")
+		return
+	}
+	pct := func(v []int, p int) int { sort.Ints(v); return v[(p*(len(v)-1))/100] }
+	fmt.Printf("hostmetrics: %d samples over %d hosts; node cpu%% p50=%d p95=%d max=%d; rss MB p50=%d p95=%d max=%d; ",
+		samples, len(hosts), pct(cpu, 50), pct(cpu, 95), pct(cpu, 100), pct(rss, 50), pct(rss, 95), pct(rss, 100))
+	if drops > 0 {
+		fmt.Printf("UDP receive-buffer drops: %d on %d hosts (host saturation; treat timings with care)\n", drops, dropHosts)
+	} else {
+		fmt.Println("no UDP receive-buffer drops")
+	}
 }

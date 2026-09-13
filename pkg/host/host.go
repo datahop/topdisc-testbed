@@ -40,6 +40,7 @@ type Runner struct {
 	mu    sync.Mutex
 	procs map[int]*exec.Cmd
 	delay map[int]time.Duration
+	mon   *monitor
 }
 
 func (r *Runner) init() {
