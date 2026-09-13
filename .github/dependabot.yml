@@ -1,0 +1,16 @@
+# Dependencies are pinned through the datahop/go-ethereum fork (root module)
+# and follow upstream go-ethereum (legacy/); Dependabot must not bump them.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule: {interval: monthly}
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-name: "*"
+  - package-ecosystem: gomod
+    directory: /legacy
+    schedule: {interval: monthly}
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-name: "*"
