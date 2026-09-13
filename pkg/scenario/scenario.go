@@ -66,6 +66,7 @@ type NetworkConfig struct {
 	BandwidthMibps int                `yaml:"bandwidth_mibps"`
 	Regions        map[string]float64 `yaml:"regions"`
 	NodeRegions    map[int]string     `yaml:"node_regions"`
+	RTTTable       string             `yaml:"rtt_table"`
 }
 
 // PhasesConfig: how the run is paced.
@@ -219,6 +220,7 @@ var paramDocs = []paramDoc{
 	{"scenario.network.bandwidth_mibps", "simnet: per-direction link bandwidth (cloud: given by the instance type)"},
 	{"scenario.network.regions", "cloud: node placement, region -> weight, e.g. {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}; empty = all in the home region"},
 	{"scenario.network.node_regions", "cloud: pin nodes, index -> region, e.g. {0: us-east-1, 7: sa-east-1}; the rest follow regions"},
+	{"scenario.network.rtt_table", "emulated backends (Grid'5000/Distem): inter-region RTT table used for per-pair latency; relative to this file"},
 	{"scenario.phases.bootstrap_wait", "after spawning, before registrations start"},
 	{"scenario.phases.register_stagger", "gap between consecutive nodes starting to register"},
 	{"scenario.phases.register_wait", "after the last node starts registering, before searches start"},
@@ -285,6 +287,7 @@ func Default() Config {
 	c.Scenario.Population.RegisterFrac = 0.5
 	c.Scenario.Population.ZipfS = 1.07
 	c.Scenario.Network.LatencyMs = 30
+	c.Scenario.Network.RTTTable = "models/region-rtt.json"
 	c.Scenario.Network.BandwidthMibps = 100
 	c.Testbed.Harness.MaxBootnodes = 20
 	c.Scenario.Phases.BootstrapWait = mustDur("3s")
