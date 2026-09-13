@@ -32,7 +32,7 @@ testbed:
     router_buf: 32768
     router_shards: 16
   traces:
-    metrics: m.json
+    metrics: metrics.json
     overhead: oh.json
     overhead_series: series.json
     overhead_series_period: 30s

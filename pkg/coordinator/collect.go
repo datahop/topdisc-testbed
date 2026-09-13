@@ -126,7 +126,7 @@ func Collect(trDir, runDir string, as []assign.Assignment) error {
 	if err := writeMetrics(trDir, runDir, as); err != nil {
 		fmt.Println("metrics:", err)
 	} else {
-		fmt.Printf("metrics written to: %s/m.json, series.json, oh.json\n", runDir)
+		fmt.Printf("metrics written to: %s/metrics.json, series.json, oh.json\n", runDir)
 	}
 	return nil
 }

@@ -16,7 +16,7 @@ import (
 )
 
 // Trace parity: real backends write per-node traces; this file turns them,
-// with the coordinator's ground truth (assignments), into the m.json and
+// with the coordinator's ground truth (assignments), into the metrics.json and
 // series.json that simnet's harness writes from its global view, in the same
 // shape, so figures/ runs unchanged. Field semantics follow cmd/simnet
 // (report.go, search.go, coverage.go, workload_multi.go, overhead_series.go).
@@ -67,7 +67,7 @@ type rawSample struct {
 	ByTopic   map[string]int              `json:"cache_by_topic"`
 }
 
-// --- m.json shapes (cmd/simnet/report.go, search.go, coverage.go)
+// --- metrics.json shapes (cmd/simnet/report.go, search.go, coverage.go)
 
 type searchResult struct {
 	NodeIdx             int      `json:"nodeIdx"`
@@ -192,7 +192,7 @@ func idBucket(id string) int {
 	return k
 }
 
-// writeMetrics writes m.json and series.json into runDir from the raw traces.
+// writeMetrics writes metrics.json and series.json into runDir from the raw traces.
 // epochMs is the registration start (assignment 0's RegisterAt): the common
 // clock of registrationTimingNs, registrationStartNs and searchStartMs.
 func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
@@ -409,7 +409,7 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 		"registrationTimingNs": timing, "findCountByTopic": findCounts, "topicIds": topicIds,
 		"registrationStartNs": startNs, "registrationPlacements": placements,
 	}
-	f, err := os.Create(filepath.Join(runDir, "m.json"))
+	f, err := os.Create(filepath.Join(runDir, "metrics.json"))
 	if err != nil {
 		return err
 	}
