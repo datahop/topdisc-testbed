@@ -12,10 +12,19 @@ import (
 // Lookup is one search: how long it took to reach the target, how many
 // distinct registrants it returned, and whether it got there before timing out.
 type Lookup struct {
-	StartMs   int64 `json:"start_ms"`
-	LatencyMs int64 `json:"latency_ms"`
-	Results   int   `json:"results"`
-	HitTarget bool  `json:"hit_target"`
+	StartMs   int64   `json:"start_ms"`
+	LatencyMs int64   `json:"latency_ms"`
+	FirstMs   int64   `json:"first_ms"` // to the first result; -1 = none
+	Results   int     `json:"results"`
+	HitTarget bool    `json:"hit_target"`
+	Found     []Found `json:"found"` // distinct registrants in the order seen
+}
+
+// Found is one distinct registrant a lookup returned and when (ms since the
+// lookup started).
+type Found struct {
+	ID   string `json:"id"`
+	AtMs int64  `json:"at_ms"`
 }
 
 // Continuous runs lookups back to back until the deadline: each ends at target
@@ -56,9 +65,17 @@ func runOne(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target
 	it := open()
 	defer func() { go it.Close() }() // Close can block on a busy search; do not hold the loop
 	seen := map[enode.ID]struct{}{}
+	found := []Found{}
 	stop := deadline
 	if timeout > 0 && start.Add(timeout).Before(stop) {
 		stop = start.Add(timeout)
+	}
+	done := func(hit bool) Lookup {
+		l := Lookup{StartMs: start.UnixMilli(), LatencyMs: time.Since(start).Milliseconds(), FirstMs: -1, Results: len(seen), HitTarget: hit, Found: found}
+		if len(found) > 0 {
+			l.FirstMs = found[0].AtMs
+		}
+		return l
 	}
 	next := make(chan bool, 1)
 	for {
@@ -66,17 +83,20 @@ func runOne(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target
 		select {
 		case ok := <-next:
 			if !ok {
-				return Lookup{StartMs: start.UnixMilli(), LatencyMs: time.Since(start).Milliseconds(), Results: len(seen)}
+				return done(false)
 			}
 		case <-time.After(time.Until(stop)):
-			return Lookup{StartMs: start.UnixMilli(), LatencyMs: time.Since(start).Milliseconds(), Results: len(seen)}
+			return done(false)
 		}
 		id := it.Node().ID()
 		if isRegistrant == nil || isRegistrant(id) {
-			seen[id] = struct{}{}
+			if _, dup := seen[id]; !dup {
+				seen[id] = struct{}{}
+				found = append(found, Found{ID: id.String(), AtMs: time.Since(start).Milliseconds()})
+			}
 		}
 		if target > 0 && len(seen) >= target {
-			return Lookup{StartMs: start.UnixMilli(), LatencyMs: time.Since(start).Milliseconds(), Results: len(seen), HitTarget: true}
+			return done(true)
 		}
 	}
 }
