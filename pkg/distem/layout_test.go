@@ -98,10 +98,36 @@ func TestClientEncoding(t *testing.T) {
 	if err != nil || len(infos) != 1 || infos[0].Address != "10.144.0.2/22" || infos[0].Host != "pn1" {
 		t.Fatalf("vnodes: %v %v", infos, err)
 	}
-	if err := c.SetOutputRate("vn0", "if0", "160kbps"); err != nil {
+	if err := c.SetRate("vn0", "if0", "160kbps"); err != nil {
 		t.Fatal(err)
 	}
-	if route != "/vnodes/vn0/ifaces/if0/output" || !strings.Contains(got.Get("desc"), `"rate":"160kbps"`) {
+	if route != "/vnodes/vn0/ifaces/if0/input" || !strings.Contains(got.Get("desc"), `"rate":"160kbps"`) {
 		t.Fatalf("rate: %s %q", route, got.Get("desc"))
+	}
+}
+
+func TestLayoutStar(t *testing.T) {
+	cfg := scenario.Default()
+	cfg.Scenario.Population.Nodes = 200
+	cfg.Scenario.Network.Model = "star"
+	p, err := Layout(cfg, []string{"pn1"}, table())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lo, hi, sum, n := 1e9, 0.0, 0.0, 0
+	for i := range p.Matrix {
+		for j := range p.Matrix[i] {
+			if i == j {
+				continue
+			}
+			if p.Matrix[i][j] != p.Matrix[j][i] {
+				t.Fatalf("asymmetric %d %d", i, j)
+			}
+			rtt := 2 * p.Matrix[i][j]
+			lo, hi, sum, n = min(lo, rtt), max(hi, rtt), sum+rtt, n+1
+		}
+	}
+	if lo < 16 || hi > 180 || sum/float64(n) < 60 || sum/float64(n) > 76 {
+		t.Fatalf("pair RTT range %.0f..%.0f mean %.0f; want 16..180 mean ~68 (one-way 4..45 each, twice)", lo, hi, sum/float64(n))
 	}
 }

@@ -39,7 +39,7 @@ process per node, per-node traces). Status: ✓ done, ◐ partial, ✗ missing,
 | Parameter | Meaning | Scenario key | simnet | real | Notes |
 |---|---|---|---|---|---|
 | F_lookup | A lookup ends once this many distinct providers of the service are found; 30 in the plan. | `search.target_count: 30` | ✓ | ✓ | |
-| Lookup schedule | Plan: the run is divided into L equal intervals and every node does one lookup at a uniformly random time in each. | `search.model: scheduled`, `search.intervals` | ✗ | ✗ | Step 6. Today: `conn` (lookups only while outbound peer slots are empty, the geth behaviour) and `continuous` (lookups back to back with `request_delay`) |
+| Lookup schedule | Plan: the run is divided into L equal intervals and every node does one lookup at a uniformly random time in each. | `search.model: scheduled`, `search.intervals` | ✓ | ✓ | Times drawn from the seed in the assignment. Also: `conn` (lookups only while outbound peer slots are empty, the geth behaviour) and `continuous` (lookups back to back with `request_delay`) |
 | Lookup timeout | Give up on a lookup after this even if F_lookup is not reached. | `search.request_timeout` | ✓ | ✓ | |
 | Connection model | Peer slots a node fills from search results: geth's 50 peers, one third outbound. On real backends this is the actual `p2p.Server`; on simnet a model. | `conn_model.max_peers`, `dial_ratio`, `redial_wait` | ✓ | ✓ inherent | |
 
@@ -47,7 +47,7 @@ process per node, per-node traces). Status: ✓ done, ◐ partial, ✗ missing,
 
 | Parameter | Meaning | Scenario key | simnet | real | Notes |
 |---|---|---|---|---|---|
-| WAN latency | Plan: pair RTTs between 8 and 91 ms, mean 34 ms (from the paper's testbed). | simnet: `network.latency_ms` (one value for every pair); local: `testbed.wan` star model (one-way 4–45 ms per node, netns + netem); Grid'5000: `network.model: star` on Distem | ◐ single latency, no distribution (#115) | local ◐ untested (needs a root Linux host); AWS = real network; Grid'5000 ✗ step 6 | |
+| WAN latency | Plan: pair RTTs between 8 and 91 ms, mean 34 ms (from the paper's testbed). | simnet: `network.latency_ms` (one value for every pair); local: `testbed.wan` star model (one-way 4–45 ms per node, netns + netem); Grid'5000: `network.model: star` (per-pair matrix from the same draws) or `regions` (RTT table) | ◐ single latency, no distribution (#115) | local ◐ untested (needs a root Linux host); AWS = real network; Grid'5000 ✓ layout, pending Distem validation | |
 | Bandwidth | Plan: 20 KB/s per node. | simnet: `network.bandwidth_mibps` (per link); local/Grid'5000: `testbed.wan.rate_kbps: 160` | ✓ | ◐ | AWS: not capped |
 | Node locations | Where nodes live. On AWS: real regions, weights per region and pins per node. On Grid'5000: emulated with an inter-region RTT table. | `network.regions`, `network.node_regions`, `network.rtt_table` | — | ✓ AWS; Grid'5000 step 6 | `scenarios/models/region-rtt.json`; to be replaced by RTTs measured on AWS |
 
@@ -80,7 +80,7 @@ WAN emulation, cloud inventory and home region, trace outputs, safety
 | Scenario | Plan section | Content | Exists |
 |---|---|---|---|
 | `phase3-10k` | §2 | 10k nodes, 300 services Zipf 1, E = 15 min, F_lookup = 30, scheduled lookups, WAN model, no churn | ✗ step 6 |
-| `phase3-10k-churn-<scale>` | §2 churn resilience | `phase3-10k` plus session churn at several `scale` values | ◐ `10k-session-churn-*` exist on simnet with the older workload |
+| `phase3-10k-churn-<scale>` | §2 churn resilience | `phase3-10k` plus session churn at several `scale` values | ✓ `scenarios/phase3-10k-churn.yaml` (edit `scale`) |
 | `phase3-10k-legacy` | §3 | Same population, service assignment, addresses and lookup schedule; every node in legacy mode | ✗ step 7 |
 | `phase3-10k-deploy-<pct>` | §4 | `phase3-10k` with `legacy_frac` at 99, 95, 90, 75, 50 %, stratified per service | ✗ step 7 |
 | `<name>` per backend | all | The same `scenario:` block with a different `testbed:` block | ✓ pattern: `smoke-*` (simnet), `local-*`, `cloud-*`, `g5k-*` (step 5) |

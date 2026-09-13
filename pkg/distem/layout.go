@@ -3,6 +3,7 @@ package distem
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"os"
 	"sort"
 	"strings"
@@ -59,6 +60,26 @@ func Layout(cfg scenario.Config, pnodes []string, table *wan.RTTTable) (*Plan, e
 			p.Vnodes = append(p.Vnodes, Vnode{Name: fmt.Sprintf("vn%d", i), Region: r, Pnode: pnodes[i%len(pnodes)]})
 			i++
 		}
+	}
+	if cfg.Scenario.Network.Model == "star" {
+		// The plan's model: every node has one one-way delay to a virtual
+		// core, a pair's latency is the sum. Drawn from the seed.
+		star := wan.Star{MinMs: cfg.Testbed.Wan.DelayMinMs, MaxMs: cfg.Testbed.Wan.DelayMaxMs, JitterMs: cfg.Testbed.Wan.JitterMs}
+		rng := rand.New(rand.NewSource(cfg.Scenario.Population.Seed + 7))
+		d := make([]float64, len(p.Vnodes))
+		for i := range d {
+			d[i] = float64(star.Delay(rng)) / float64(time.Millisecond)
+		}
+		p.Matrix = make([][]float64, len(d))
+		for i := range d {
+			p.Matrix[i] = make([]float64, len(d))
+			for j := range d {
+				if i != j {
+					p.Matrix[i][j] = d[i] + d[j]
+				}
+			}
+		}
+		return p, nil
 	}
 	per := make([]string, len(p.Vnodes))
 	for i, v := range p.Vnodes {
@@ -124,7 +145,7 @@ func (p *Plan) Apply(c *Client, subnetCIDR, image string, rateKbps int, log func
 	}
 	if rateKbps > 0 {
 		for _, n := range names {
-			if err := c.SetOutputRate(n, Iface, fmt.Sprintf("%dkbps", rateKbps)); err != nil {
+			if err := c.SetRate(n, Iface, fmt.Sprintf("%dkbps", rateKbps)); err != nil {
 				return fmt.Errorf("rate %s: %w", n, err)
 			}
 		}

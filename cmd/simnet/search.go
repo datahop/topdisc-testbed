@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/datahop/topdisc-testbed/pkg/assign"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -57,6 +58,8 @@ type searchPacing struct {
 	// RequestTimeout, with RequestDelay between them.
 	Model          string
 	RequestDelay   time.Duration
+	Intervals      int           // scheduled: L
+	SearchTimeout  time.Duration // scheduled: length of the search phase
 	RequestTimeout time.Duration
 
 	// TargetCount, if > 0, causes a searcher to close its iterator as
@@ -395,7 +398,10 @@ func runOneSearcher(n nodeRec, topicIdx int, topic topicindex.TopicID, deadlineA
 		slotsFilledAtMs int64
 		lastDial        = make(map[enode.ID]time.Time)
 
-		continuous       = pacing.Model == "continuous"
+		scheduled        = pacing.Model == "scheduled"
+		continuous       = pacing.Model == "continuous" || scheduled
+		schedule         []time.Time
+		scheduleIdx      int
 		lookupStart      time.Time
 		lookupSeen       map[enode.ID]struct{}
 		lookupTimer      <-chan time.Time
@@ -405,8 +411,25 @@ func runOneSearcher(n nodeRec, topicIdx int, topic topicindex.TopicID, deadlineA
 		lookupResults    []int
 	)
 	selfID := n.ln.ID()
+	if scheduled && pacing.Intervals > 0 {
+		for _, ms := range assign.LookupTimes(rng, time.Now().UnixMilli(), time.Now().Add(pacing.SearchTimeout).UnixMilli(), pacing.Intervals) {
+			schedule = append(schedule, time.UnixMilli(ms))
+		}
+	}
 sessions:
 	for {
+		if scheduled {
+			if scheduleIdx >= len(schedule) {
+				break sessions
+			}
+			select {
+			case <-deadline:
+				hitDeadline = true
+				break sessions
+			case <-time.After(time.Until(schedule[scheduleIdx])):
+			}
+			scheduleIdx++
+		}
 		openSearch()
 		if continuous {
 			lookupStart = time.Now()
@@ -521,7 +544,7 @@ sessions:
 			}
 			lookupLatencyMs = append(lookupLatencyMs, time.Since(lookupStart).Milliseconds())
 			lookupResults = append(lookupResults, len(lookupSeen))
-			if pacing.RequestDelay > 0 {
+			if pacing.RequestDelay > 0 && !scheduled {
 				select {
 				case <-deadline:
 					hitDeadline = true

@@ -35,6 +35,22 @@ func Continuous(open func() enode.Iterator, isRegistrant func(enode.ID) bool, ta
 	}
 }
 
+// Scheduled runs one lookup at each of the given times (a lookup that overruns
+// the next time starts the next one at once), until the deadline.
+func Scheduled(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target int, timeout time.Duration, at []time.Time, deadline time.Time, record func(Lookup)) {
+	for _, t := range at {
+		if !t.Before(deadline) {
+			return
+		}
+		select {
+		case <-time.After(time.Until(t)):
+		case <-time.After(time.Until(deadline)):
+			return
+		}
+		record(runOne(open, isRegistrant, target, timeout, deadline))
+	}
+}
+
 func runOne(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target int, timeout time.Duration, deadline time.Time) Lookup {
 	start := time.Now()
 	it := open()

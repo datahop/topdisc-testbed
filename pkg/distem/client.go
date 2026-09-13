@@ -132,11 +132,16 @@ func (c *Client) SetPeersLatencies(names []string, matrix [][]float64) error {
 	return err
 }
 
-// SetOutputRate caps a vnode's egress, e.g. "160kbps".
-func (c *Client) SetOutputRate(vnode, iface, rate string) error {
-	_, err := c.do("PUT", fmt.Sprintf("/vnodes/%s/ifaces/%s/output", url.PathEscape(vnode), url.PathEscape(iface)),
-		params{"desc": map[string]any{"bandwidth": map[string]string{"rate": rate}}})
-	return err
+// SetRate caps a vnode's egress and ingress, e.g. "160kbps".
+func (c *Client) SetRate(vnode, iface, rate string) error {
+	for _, dir := range []string{"output", "input"} {
+		_, err := c.do("PUT", fmt.Sprintf("/vnodes/%s/ifaces/%s/%s", url.PathEscape(vnode), url.PathEscape(iface), dir),
+			params{"desc": map[string]any{"bandwidth": map[string]string{"rate": rate}}})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *Client) Execute(vnode, command string) (string, error) {

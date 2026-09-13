@@ -23,10 +23,11 @@ type Phases struct {
 }
 
 type Search struct {
-	Model          string `json:"model"`
-	TargetCount    int    `json:"target_count"`
-	RequestDelayMs int64  `json:"request_delay_ms"`
-	RequestTimeout int64  `json:"request_timeout_ms"`
+	Model          string  `json:"model"`
+	TargetCount    int     `json:"target_count"`
+	RequestDelayMs int64   `json:"request_delay_ms"`
+	RequestTimeout int64   `json:"request_timeout_ms"`
+	LookupAtMs     []int64 `json:"lookup_at_ms,omitempty"` // scheduled: absolute lookup times, from the seed
 }
 
 type Assignment struct {
@@ -114,6 +115,9 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 		if i != 0 {
 			a.Bootnodes = []string{boot}
 		}
+		if sc.Search.Model == "scheduled" && sc.Search.Intervals > 0 {
+			a.Search.LookupAtMs = LookupTimes(rand.New(rand.NewSource(sc.Population.Seed+int64(i)*40503)), a.Phases.SearchAt, stopAt, sc.Search.Intervals)
+		}
 		if model != nil {
 			a.Churn = model.Schedule(rand.New(rand.NewSource(sc.Population.Seed+int64(i)*2654435761)), ph.SearchTimeout.Seconds(), sc.SessionChurn.WindowHours)
 		}
@@ -143,4 +147,18 @@ func Read(path string) (Assignment, error) {
 		return a, err
 	}
 	return a, json.Unmarshal(b, &a)
+}
+
+// LookupTimes draws one uniformly random time in each of n equal intervals of
+// [from, to) (unix ms): the plan's "L lookups per node" schedule.
+func LookupTimes(rng *rand.Rand, from, to int64, n int) []int64 {
+	if n <= 0 || to <= from {
+		return nil
+	}
+	span := float64(to-from) / float64(n)
+	out := make([]int64, n)
+	for k := 0; k < n; k++ {
+		out[k] = from + int64(float64(k)*span+rng.Float64()*span)
+	}
+	return out
 }

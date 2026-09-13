@@ -163,16 +163,23 @@ func main() {
 	srv.DiscoveryV5().RegisterTopic(topic, uint64(*port))
 	wait(asg.Phases.SearchAt)
 	close(ready)
-	if asg.Search.Model == "continuous" {
+	if asg.Search.Model == "continuous" || asg.Search.Model == "scheduled" {
 		deadline := time.UnixMilli(asg.Phases.StopAt)
 		if asg.Phases.StopAt == 0 {
 			deadline = time.Now().Add(24 * time.Hour)
 		}
-		go workload.Continuous(
-			func() enode.Iterator { return srv.DiscoveryV5().TopicSearch(topic, uint64(*port)+1) },
-			nil, asg.Search.TargetCount, time.Duration(asg.Search.RequestDelayMs)*time.Millisecond,
-			time.Duration(asg.Search.RequestTimeout)*time.Millisecond, deadline,
-			func(l workload.Lookup) { mu.Lock(); lookups = append(lookups, l); mu.Unlock() })
+		open := func() enode.Iterator { return srv.DiscoveryV5().TopicSearch(topic, uint64(*port)+1) }
+		rec := func(l workload.Lookup) { mu.Lock(); lookups = append(lookups, l); mu.Unlock() }
+		timeout := time.Duration(asg.Search.RequestTimeout) * time.Millisecond
+		if asg.Search.Model == "scheduled" {
+			at := make([]time.Time, len(asg.Search.LookupAtMs))
+			for i, ms := range asg.Search.LookupAtMs {
+				at[i] = time.UnixMilli(ms)
+			}
+			go workload.Scheduled(open, nil, asg.Search.TargetCount, timeout, at, deadline, rec)
+		} else {
+			go workload.Continuous(open, nil, asg.Search.TargetCount, time.Duration(asg.Search.RequestDelayMs)*time.Millisecond, timeout, deadline, rec)
+		}
 	}
 	writeTrace := func() {
 		if asg.TraceFile == "" {

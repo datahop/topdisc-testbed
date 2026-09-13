@@ -67,6 +67,7 @@ type NetworkConfig struct {
 	Regions        map[string]float64 `yaml:"regions"`
 	NodeRegions    map[int]string     `yaml:"node_regions"`
 	RTTTable       string             `yaml:"rtt_table"`
+	Model          string             `yaml:"model"`
 }
 
 // PhasesConfig: how the run is paced.
@@ -97,6 +98,7 @@ type SearchConfig struct {
 	RequestDelay   time.Duration `yaml:"request_delay"`
 	RequestTimeout time.Duration `yaml:"request_timeout"`
 	TargetCount    int           `yaml:"target_count"`
+	Intervals      int           `yaml:"intervals"`
 }
 
 // ConnModelConfig: geth peer slots: a node stops searching once its outbound slots are full.
@@ -220,6 +222,7 @@ var paramDocs = []paramDoc{
 	{"scenario.network.bandwidth_mibps", "simnet: per-direction link bandwidth (cloud: given by the instance type)"},
 	{"scenario.network.regions", "cloud: node placement, region -> weight, e.g. {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}; empty = all in the home region"},
 	{"scenario.network.node_regions", "cloud: pin nodes, index -> region, e.g. {0: us-east-1, 7: sa-east-1}; the rest follow regions"},
+	{"scenario.network.model", "emulated backends: regions = per-pair latency from rtt_table by region; star = the plan's model, each node draws a one-way delay from testbed.wan (pair RTT 8-91 ms)"},
 	{"scenario.network.rtt_table", "emulated backends (Grid'5000/Distem): inter-region RTT table used for per-pair latency; relative to this file"},
 	{"scenario.phases.bootstrap_wait", "after spawning, before registrations start"},
 	{"scenario.phases.register_stagger", "gap between consecutive nodes starting to register"},
@@ -235,7 +238,8 @@ var paramDocs = []paramDoc{
 	{"scenario.topic.aux_nodes_limit", "closest-to-topic nodes attached to TOPICQUERY and REGTOPIC replies; 0 = default 8"},
 	{"scenario.topic.nodes_per_source_bucket", "cap per source per bucket; 0 = default 1 (inert on topdisc)"},
 	{"scenario.topic.remove_on_expiry", "drop ads at expiry instead of renewing (inert on topdisc)"},
-	{"scenario.search.model", "conn: search only while outbound slots are empty; continuous: lookups back to back"},
+	{"scenario.search.model", "conn: search only while outbound slots are empty; continuous: lookups back to back; scheduled: one lookup per node at a random time in each of `intervals` equal slices of the search phase (plan §1)"},
+	{"scenario.search.intervals", "scheduled: number of equal intervals L the search phase is divided into"},
 	{"scenario.search.request_delay", "continuous: pause between lookups"},
 	{"scenario.search.request_timeout", "continuous: give up on a lookup after this; 0 = only target_count ends it"},
 	{"scenario.search.target_count", "conn: stop a searcher after this many distinct registrants; continuous: end each lookup at this many. 0 = never"},
@@ -288,6 +292,7 @@ func Default() Config {
 	c.Scenario.Population.ZipfS = 1.07
 	c.Scenario.Network.LatencyMs = 30
 	c.Scenario.Network.RTTTable = "models/region-rtt.json"
+	c.Scenario.Network.Model = "regions"
 	c.Scenario.Network.BandwidthMibps = 100
 	c.Testbed.Harness.MaxBootnodes = 20
 	c.Scenario.Phases.BootstrapWait = mustDur("3s")
@@ -295,6 +300,7 @@ func Default() Config {
 	c.Scenario.Phases.SearchTimeout = mustDur("30s")
 	c.Testbed.Harness.RegProbePeriod = mustDur("500ms")
 	c.Scenario.Search.Model = "conn"
+	c.Scenario.Search.Intervals = 10
 	c.Scenario.ConnModel.MaxPeers = 50
 	c.Scenario.ConnModel.DialRatio = 3
 	c.Scenario.ConnModel.RedialWait = mustDur("35s")
