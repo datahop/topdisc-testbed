@@ -6,6 +6,7 @@ testbed:
     : simnet                           # simnet: in-process on this host; local: one node process per node on this host; cloud: Terraform fleet
   local:
     node_binary: ./topdisc-node        # local backend: path to the node binary
+    legacy_binary: ./topdisc-node-legacy # local backend: stock-geth node binary for population.legacy_frac nodes (legacy/cmd/node-legacy)
     base_port: 30300                   # local backend: node i listens on base_port+i, status on +10000
     grace: 10s                         # local backend: wait after the last StopAt before collecting
     verbosity: 2                       # node log level: 2 warn, 3 info, 4 debug (disconnect reasons)
@@ -31,7 +32,8 @@ scenario:
     zipf_s: 1.07                       # Zipf skew for topic assignment when topics > 1
     common_topic: false                # topics > 1: everyone also registers and searches topic 0
     seed: 0                            # RNG seed for every random draw; 0 = time
-    legacy_frac: 0                     # fraction of nodes without the topic-discovery ENR flag
+    legacy_frac: 0                     # fraction of nodes that are legacy discv5: simnet removes the topic-discovery ENR flag; real backends run stock upstream geth (legacy_binary), the same fraction within every service
+    legacy_bootnode: false             # let node 0 (the bootnode) be drawn legacy too; default keeps it TopDisc-capable, since a fresh stock bootnode serves no nodes until it has revalidated its table (~20 nodes/min)
     vanilla_frac: 0                    # fraction running stock upstream geth (needs -tags vanilla)
   network:
     latency_ms: 30                     # simnet: per-pair one-way latency, ms (cloud: given by regions)

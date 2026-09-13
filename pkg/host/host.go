@@ -29,23 +29,25 @@ func NodeIP(h, k int) string  { return fmt.Sprintf("10.%d.%d.%d", 100+h, (k+1)>>
 func nsName(idx int) string   { return "tb" + strconv.Itoa(idx) }
 
 type Runner struct {
-	NodeBinary string
-	Verbosity  int
-	AsgDir     string // node<idx>.json per node
-	LogDir     string
-	Wan        *wan.Star // nil: plain processes on the host's own address
-	Host       int       // this host's index (subnet)
-	Seed       int64
+	NodeBinary   string
+	LegacyBinary string // for assignments with Legacy set
+	Verbosity    int
+	AsgDir       string // node<idx>.json per node
+	LogDir       string
+	Wan          *wan.Star // nil: plain processes on the host's own address
+	Host         int       // this host's index (subnet)
+	Seed         int64
 
-	mu    sync.Mutex
-	procs map[int]*exec.Cmd
-	delay map[int]time.Duration
-	mon   *monitor
+	mu     sync.Mutex
+	procs  map[int]*exec.Cmd
+	delay  map[int]time.Duration
+	legacy map[int]bool
+	mon    *monitor
 }
 
 func (r *Runner) init() {
 	if r.procs == nil {
-		r.procs, r.delay = map[int]*exec.Cmd{}, map[int]time.Duration{}
+		r.procs, r.delay, r.legacy = map[int]*exec.Cmd{}, map[int]time.Duration{}, map[int]bool{}
 	}
 }
 
@@ -61,6 +63,14 @@ func (r *Runner) Prepare(as []assign.Assignment, peers map[int]string) error {
 	}
 	if err := assign.Write(r.AsgDir, as); err != nil {
 		return err
+	}
+	for _, a := range as {
+		if a.Legacy {
+			if r.LegacyBinary == "" {
+				return fmt.Errorf("node %d is legacy but no legacy binary is configured", a.Idx)
+			}
+			r.legacy[a.Idx] = true
+		}
 	}
 	if r.Wan == nil {
 		return nil
@@ -97,7 +107,11 @@ func (r *Runner) Start(idx int) error {
 	if err != nil {
 		return err
 	}
-	args := []string{r.NodeBinary, "-assignment", filepath.Join(r.AsgDir, fmt.Sprintf("node%d.json", idx)), "-v", strconv.Itoa(r.Verbosity)}
+	bin := r.NodeBinary
+	if r.legacy[idx] {
+		bin = r.LegacyBinary
+	}
+	args := []string{bin, "-assignment", filepath.Join(r.AsgDir, fmt.Sprintf("node%d.json", idx)), "-v", strconv.Itoa(r.Verbosity)}
 	if r.Wan != nil {
 		args = append(rootArgs("ip", "netns", "exec", nsName(idx)), args...)
 	}

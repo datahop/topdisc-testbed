@@ -11,7 +11,6 @@ scenario:
     nodes: 10000
     topics: 300
     zipf_s: 1.0
-    all_register: true
     seed: 1
   network:
     model: star

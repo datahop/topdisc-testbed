@@ -13,3 +13,4 @@ figs/
 /runs/
 .terraform/
 *.tfstate*
+/topdisc-node-legacy

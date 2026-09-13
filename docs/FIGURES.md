@@ -55,9 +55,11 @@ trace-parity task, whose required fields are listed at the end. Status: ✓ done
 ## §3 TopDisc vs legacy discv5
 
 All six plots compare the same metric between a TopDisc run and a legacy run
-of the same population; the legacy node mode is step 7 of the Grid'5000 plan,
-so every row is ✗ until it lands. On the TopDisc side the metrics exist as
-listed in §2.
+of the same population. Legacy nodes are stock upstream geth (`legacy/`),
+finding providers by table scan plus random-target lookups filtered on the
+`svc` ENR entry; their lookups land in the same trace record, so latency and
+fraction discovered are ✓ on real backends, contacts and bytes per lookup are
+still ✗ (#116).
 
 | Plot | Measures |
 |---|---|
@@ -72,7 +74,7 @@ listed in §2.
 
 | Plot | Measures | simnet | real |
 |---|---|---|---|
-| Startup to first TopDisc-capable peer via legacy discv5, vs deployment % | How long a TopDisc node takes to meet another one when most of the network is legacy (ENR `topic-discovery` key seen). | ✗ node event, step 7 | ✗ |
+| Startup to first TopDisc-capable peer via legacy discv5, vs deployment % | How long a node takes to get an RLPx peer whose ENR carries the `ng` key. | ✗ | ✓ `first_capable_ms` in every trace |
 | Start of registration to first successful registration, vs deployment % | As §2, per deployment level. | ◐ visibility runs exist | ✗ |
 | Fraction of advertisers discovered, vs deployment % | As §2. | ✓ (incremental-deployment runs, 10–100 %) | ✗ |
 | Lookup latency, vs deployment % | As §2. | ✓ | ◐ |

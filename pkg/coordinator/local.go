@@ -35,7 +35,7 @@ func RunLocal(cfg scenario.Config, runDir string) error {
 	if err != nil {
 		return err
 	}
-	r := &host.Runner{NodeBinary: lc.NodeBinary, Verbosity: lc.Verbosity, AsgDir: filepath.Join(runDir, "assignments"),
+	r := &host.Runner{NodeBinary: lc.NodeBinary, LegacyBinary: lc.LegacyBinary, Verbosity: lc.Verbosity, AsgDir: filepath.Join(runDir, "assignments"),
 		LogDir: filepath.Join(runDir, "logs"), Wan: star, Seed: sc.Population.Seed}
 	if err := r.Prepare(as, nil); err != nil {
 		return err

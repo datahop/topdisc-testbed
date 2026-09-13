@@ -17,9 +17,9 @@ process per node, per-node traces). Status: ✓ done, ◐ partial, ✗ missing,
 |---|---|---|---|---|---|
 | Network size | Number of nodes in the experiment. The plan wants at least 10,000. | `population.nodes` | ✓ (80 GB RAM, 25 min) | ✓ AWS once vCPU quotas land; Grid'5000 pending sizing | |
 | Services | Distinct services (topics). The plan uses 300. | `population.topics` | ✓ | ✓ | `topics: 1` with `all_register` is the single-topic stress case |
-| Service popularity | Zipf distribution of nodes over services, α = 1 in the plan. Each node gets exactly one service and registers it. | `population.zipf_s: 1.0`, `all_register: true` | ✓ | ✓ | Binning services into small / medium / popular for figures is not implemented (#113) |
+| Service popularity | Zipf distribution of nodes over services, α = 1 in the plan. Each node gets exactly one service and registers it. | `population.topics: 300`, `zipf_s: 1.0` (`all_register` is the single-topic mode and must be off) | ✓ | ✓ | Binning services into small / medium / popular for figures is not implemented (#113) |
 | Seed | Every random draw (keys, service assignment, churn schedule, placement, lookup times) derives from it, so a run is reproducible from the YAML alone. | `population.seed` | ✓ | ✓ | |
-| Deployment fraction | Share of nodes that speak TopDisc; the rest are legacy discv5. §4 sweeps 1, 5, 10, 25, 50 % and wants the same fraction within every service. | `population.legacy_frac` | ◐ global fraction, not per service | ✗ | Step 7 of the Grid'5000 plan: stratified selection and a legacy node mode |
+| Deployment fraction | Share of nodes that speak TopDisc; the rest are legacy discv5. §4 sweeps 1, 5, 10, 25, 50 % and wants the same fraction within every service. | `population.legacy_frac`, `legacy_bootnode` | ◐ global fraction, ENR flag removed | ✓ stock upstream geth v1.17.5 (`legacy/`), same fraction per service | The bootnode stays TopDisc unless `legacy_bootnode`: a fresh stock bootnode returns no nodes until it has revalidated its table (~20 nodes/min), which isolates TopDisc nodes for minutes |
 | Stock-binary nodes | Nodes running unmodified upstream geth, for interop rather than a TopDisc-off mode. | `population.vanilla_frac` | ✓ (`-tags vanilla`) | ✗ | simnet only |
 
 ## Protocol parameters
@@ -81,8 +81,8 @@ WAN emulation, cloud inventory and home region, trace outputs, safety
 |---|---|---|---|
 | `phase3-10k` | §2 | 10k nodes, 300 services Zipf 1, E = 15 min, F_lookup = 30, scheduled lookups, WAN model, no churn | ✓ `scenarios/phase3-10k.yaml` |
 | `phase3-10k-churn-<scale>` | §2 churn resilience | `phase3-10k` plus session churn at several `scale` values | ✓ `scenarios/phase3-10k-churn.yaml` (edit `scale`) |
-| `phase3-10k-legacy` | §3 | Same population, service assignment, addresses and lookup schedule; every node in legacy mode | ✗ step 7 |
-| `phase3-10k-deploy-<pct>` | §4 | `phase3-10k` with `legacy_frac` at 99, 95, 90, 75, 50 %, stratified per service | ✗ step 7 |
+| `phase3-10k-legacy` | §3 | Same population, service assignment, addresses and lookup schedule; every node in legacy mode | ◐ `legacy_frac: 1.0` on `phase3-10k` (bootnode included via `legacy_bootnode`) |
+| `phase3-10k-deploy-<pct>` | §4 | `phase3-10k` with `legacy_frac` at 99, 95, 90, 75, 50 %, stratified per service | ✓ set `legacy_frac` on `phase3-10k` |
 | `<name>` per backend | all | The same `scenario:` block with a different `testbed:` block | ✓ pattern: `smoke-*` (simnet), `local-*`, `cloud-*`, `g5k-*` (step 5) |
 
 Existing scenarios by purpose: `default.yaml` (100 Mibps baseline),

@@ -32,6 +32,7 @@ type PrepareRequest struct {
 func main() {
 	addr := flag.String("serve", ":9000", "listen address")
 	bin := flag.String("node-binary", "/opt/topdisc/topdisc-node", "node binary")
+	legacyBin := flag.String("legacy-binary", "/opt/topdisc/topdisc-node-legacy", "stock-geth node binary for legacy assignments")
 	work := flag.String("workdir", "/opt/topdisc/run", "assignments, logs and traces")
 	flag.Parse()
 	var mu sync.Mutex
@@ -52,7 +53,7 @@ func main() {
 			r.StopAll()
 		}
 		os.RemoveAll(*work)
-		r = &host.Runner{NodeBinary: *bin, Verbosity: p.Verbosity, AsgDir: filepath.Join(*work, "assignments"),
+		r = &host.Runner{NodeBinary: *bin, LegacyBinary: *legacyBin, Verbosity: p.Verbosity, AsgDir: filepath.Join(*work, "assignments"),
 			LogDir: filepath.Join(*work, "logs"), Wan: p.Wan, Host: p.Host, Seed: p.Seed}
 		os.MkdirAll(filepath.Join(*work, "traces"), 0o755)
 		for i := range p.Assignments {

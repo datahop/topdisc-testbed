@@ -49,15 +49,16 @@ type TestbedConfig struct {
 
 // PopulationConfig: who is in the network.
 type PopulationConfig struct {
-	Nodes        int     `yaml:"nodes"`
-	Topics       int     `yaml:"topics"`
-	AllRegister  bool    `yaml:"all_register"`
-	RegisterFrac float64 `yaml:"register_frac"`
-	ZipfS        float64 `yaml:"zipf_s"`
-	CommonTopic  bool    `yaml:"common_topic"`
-	Seed         int64   `yaml:"seed"`
-	LegacyFrac   float64 `yaml:"legacy_frac"`
-	VanillaFrac  float64 `yaml:"vanilla_frac"`
+	Nodes          int     `yaml:"nodes"`
+	Topics         int     `yaml:"topics"`
+	AllRegister    bool    `yaml:"all_register"`
+	RegisterFrac   float64 `yaml:"register_frac"`
+	ZipfS          float64 `yaml:"zipf_s"`
+	CommonTopic    bool    `yaml:"common_topic"`
+	Seed           int64   `yaml:"seed"`
+	LegacyFrac     float64 `yaml:"legacy_frac"`
+	LegacyBootnode bool    `yaml:"legacy_bootnode"`
+	VanillaFrac    float64 `yaml:"vanilla_frac"`
 }
 
 // NetworkConfig: the emulated WAN conditions.
@@ -153,10 +154,11 @@ type CloudConfig struct {
 
 // LocalConfig: the local backend — N node processes on this host.
 type LocalConfig struct {
-	NodeBinary string        `yaml:"node_binary"`
-	BasePort   int           `yaml:"base_port"`
-	Grace      time.Duration `yaml:"grace"`
-	Verbosity  int           `yaml:"verbosity"`
+	NodeBinary   string        `yaml:"node_binary"`
+	LegacyBinary string        `yaml:"legacy_binary"`
+	BasePort     int           `yaml:"base_port"`
+	Grace        time.Duration `yaml:"grace"`
+	Verbosity    int           `yaml:"verbosity"`
 }
 
 // SimulatorConfig: simnet internals; no equivalent on real hosts.
@@ -197,6 +199,7 @@ type paramDoc struct{ path, doc string }
 var paramDocs = []paramDoc{
 	{"testbed.backend", "simnet: in-process on this host; local: one node process per node on this host; cloud: Terraform fleet"},
 	{"testbed.local.node_binary", "local backend: path to the node binary"},
+	{"testbed.local.legacy_binary", "local backend: stock-geth node binary for population.legacy_frac nodes (legacy/cmd/node-legacy)"},
 	{"testbed.local.base_port", "local backend: node i listens on base_port+i, status on +10000"},
 	{"testbed.local.grace", "local backend: wait after the last StopAt before collecting"},
 	{"testbed.local.verbosity", "node log level: 2 warn, 3 info, 4 debug (disconnect reasons)"},
@@ -217,7 +220,8 @@ var paramDocs = []paramDoc{
 	{"scenario.population.zipf_s", "Zipf skew for topic assignment when topics > 1"},
 	{"scenario.population.common_topic", "topics > 1: everyone also registers and searches topic 0"},
 	{"scenario.population.seed", "RNG seed for every random draw; 0 = time"},
-	{"scenario.population.legacy_frac", "fraction of nodes without the topic-discovery ENR flag"},
+	{"scenario.population.legacy_frac", "fraction of nodes that are legacy discv5: simnet removes the topic-discovery ENR flag; real backends run stock upstream geth (legacy_binary), the same fraction within every service"},
+	{"scenario.population.legacy_bootnode", "let node 0 (the bootnode) be drawn legacy too; default keeps it TopDisc-capable, since a fresh stock bootnode serves no nodes until it has revalidated its table (~20 nodes/min)"},
 	{"scenario.population.vanilla_frac", "fraction running stock upstream geth (needs -tags vanilla)"},
 	{"scenario.network.latency_ms", "simnet: per-pair one-way latency, ms (cloud: given by regions)"},
 	{"scenario.network.bandwidth_mibps", "simnet: per-direction link bandwidth (cloud: given by the instance type)"},
@@ -286,6 +290,7 @@ func Default() Config {
 	c.Testbed.Local.BasePort = 30300
 	c.Testbed.Local.Grace = mustDur("10s")
 	c.Testbed.Local.Verbosity = 2
+	c.Testbed.Local.LegacyBinary = "./topdisc-node-legacy"
 	c.Testbed.Cloud.Inventory, c.Testbed.Cloud.HomeRegion, c.Testbed.Cloud.AgentPort, c.Testbed.Cloud.Verbosity, c.Testbed.Cloud.Grace = "inventory.json", "us-east-1", 9000, 2, mustDur("30s")
 	c.Testbed.Wan.DelayMinMs, c.Testbed.Wan.DelayMaxMs, c.Testbed.Wan.JitterMs, c.Testbed.Wan.RateKbps = 4, 45, 3, 160
 	c.Scenario.Population.Nodes = 5
