@@ -1,0 +1,9 @@
+# 100 nodes over 3 services, half of every service on stock upstream geth (legacy discv5): the
+# §3/§4 mixed population on the local backend. Bootnode stays TopDisc (population.legacy_bootnode).
+name: local-100-legacy
+scenario:
+  population: {nodes: 100, topics: 3, zipf_s: 1.0, legacy_frac: 0.5, seed: 2}
+  phases: {bootstrap_wait: 15s, register_stagger: 20ms, register_wait: 45s, search_stagger: 10ms, search_timeout: 60s}
+  search: {model: scheduled, intervals: 2, target_count: 5, request_timeout: 25s}
+testbed:
+  backend: local

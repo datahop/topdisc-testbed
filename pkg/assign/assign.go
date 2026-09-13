@@ -7,9 +7,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/datahop/topdisc-testbed/pkg/churn"
 	"github.com/datahop/topdisc-testbed/pkg/scenario"
@@ -23,10 +25,11 @@ type Phases struct {
 }
 
 type Search struct {
-	Model          string `json:"model"`
-	TargetCount    int    `json:"target_count"`
-	RequestDelayMs int64  `json:"request_delay_ms"`
-	RequestTimeout int64  `json:"request_timeout_ms"`
+	Model          string  `json:"model"`
+	TargetCount    int     `json:"target_count"`
+	RequestDelayMs int64   `json:"request_delay_ms"`
+	RequestTimeout int64   `json:"request_timeout_ms"`
+	LookupAtMs     []int64 `json:"lookup_at_ms,omitempty"` // scheduled: absolute lookup times, from the seed
 }
 
 type Assignment struct {
@@ -41,6 +44,7 @@ type Assignment struct {
 	DialRatio  int           `json:"dial_ratio"`
 	Phases     Phases        `json:"phases"`
 	Search     Search        `json:"search"`
+	Legacy     bool          `json:"legacy"`     // stock upstream geth, no topic discovery
 	Churn      []churn.Event `json:"churn"`      // seconds from search start
 	TraceFile  string        `json:"trace_file"` // where the node writes its trace at StopAt
 }
@@ -79,9 +83,9 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 			topics[i] = []string{"topic-0"}
 		}
 	} else {
-		z := rand.NewZipf(rng, sc.Population.ZipfS, 1, uint64(sc.Population.Topics-1))
+		z := NewZipf(sc.Population.ZipfS, sc.Population.Topics)
 		for i := range topics {
-			topics[i] = []string{fmt.Sprintf("topic-%d", z.Uint64())}
+			topics[i] = []string{fmt.Sprintf("topic-%d", z.Draw(rng))}
 			if sc.Population.CommonTopic {
 				topics[i] = append(topics[i], "topic-0")
 			}
@@ -102,6 +106,10 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 	// Node 0 is the bootnode for everyone.
 	h0 := hosts(0)
 	boot := fmt.Sprintf("enode://%s@%s:%d", hex.EncodeToString(crypto.FromECDSAPub(&keys[0].PublicKey)[1:]), h0.IP, h0.BasePort)
+	legacy := legacySet(rng, topics, sc.Population.LegacyFrac)
+	if !sc.Population.LegacyBootnode {
+		legacy[0] = false
+	}
 	out := make([]Assignment, n)
 	for i := range out {
 		h := hosts(i)
@@ -113,6 +121,12 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 		}
 		if i != 0 {
 			a.Bootnodes = []string{boot}
+		}
+		if legacy[i] {
+			a.Legacy = true
+		}
+		if sc.Search.Model == "scheduled" && sc.Search.Intervals > 0 {
+			a.Search.LookupAtMs = LookupTimes(rand.New(rand.NewSource(sc.Population.Seed+int64(i)*40503)), a.Phases.SearchAt, stopAt, sc.Search.Intervals)
 		}
 		if model != nil {
 			a.Churn = model.Schedule(rand.New(rand.NewSource(sc.Population.Seed+int64(i)*2654435761)), ph.SearchTimeout.Seconds(), sc.SessionChurn.WindowHours)
@@ -143,4 +157,76 @@ func Read(path string) (Assignment, error) {
 		return a, err
 	}
 	return a, json.Unmarshal(b, &a)
+}
+
+// LookupTimes draws one uniformly random time in each of n equal intervals of
+// [from, to) (unix ms): the plan's "L lookups per node" schedule.
+func LookupTimes(rng *rand.Rand, from, to int64, n int) []int64 {
+	if n <= 0 || to <= from {
+		return nil
+	}
+	span := float64(to-from) / float64(n)
+	out := make([]int64, n)
+	for k := 0; k < n; k++ {
+		out[k] = from + int64(float64(k)*span+rng.Float64()*span)
+	}
+	return out
+}
+
+// legacySet picks the legacy (stock discv5) nodes: the same fraction within
+// every service, as the partial-deployment sweep requires, rounded per
+// service and drawn from the seed.
+func legacySet(rng *rand.Rand, topics [][]string, frac float64) []bool {
+	set := make([]bool, len(topics))
+	if frac <= 0 {
+		return set
+	}
+	byTopic := map[string][]int{}
+	for i, t := range topics {
+		byTopic[t[0]] = append(byTopic[t[0]], i)
+	}
+	keys := make([]string, 0, len(byTopic))
+	for k := range byTopic {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		members := byTopic[k]
+		count := int(math.Round(frac * float64(len(members))))
+		for _, j := range rng.Perm(len(members))[:count] {
+			set[members[j]] = true
+		}
+	}
+	return set
+}
+
+// Zipf draws topic indices 0..n-1 with P(k) ∝ 1/(k+1)^s. Unlike math/rand's
+// Zipf it accepts s <= 1, which the plan's α = 1 needs.
+type Zipf struct{ cdf []float64 }
+
+func NewZipf(s float64, n int) *Zipf {
+	cdf := make([]float64, n)
+	sum := 0.0
+	for k := 0; k < n; k++ {
+		sum += 1 / math.Pow(float64(k+1), s)
+		cdf[k] = sum
+	}
+	for k := range cdf {
+		cdf[k] /= sum
+	}
+	return &Zipf{cdf}
+}
+
+func (z *Zipf) Draw(rng *rand.Rand) int {
+	u := rng.Float64()
+	lo, hi := 0, len(z.cdf)-1
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if z.cdf[mid] < u {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	return lo
 }

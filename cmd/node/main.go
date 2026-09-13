@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"hash/fnv"
 	"net"
 	"net/http"
 	"os"
@@ -129,6 +130,7 @@ func main() {
 		os.Exit(1)
 	}
 	srv.LocalNode().SetFallbackIP(net.ParseIP(*ip))
+	srv.LocalNode().Set(svcOf(*topicName)) // the service, readable by legacy nodes too
 
 	// Refill latency from the server's own peer events: an outbound drop
 	// starts a clock, the next outbound add stops it.
@@ -138,6 +140,9 @@ func main() {
 		refills []int64
 		drops   int
 		lookups []workload.Lookup
+
+		firstCapableMs int64 = -1 // first TopDisc-capable RLPx peer, ms since start (§4)
+		started              = time.Now()
 	)
 	events := make(chan *p2p.PeerEvent, 64)
 	sub := srv.SubscribeEvents(events)
@@ -155,6 +160,13 @@ func main() {
 					refills = append(refills, time.Since(lostAt[0]).Milliseconds())
 					lostAt = lostAt[1:]
 				}
+				if firstCapableMs < 0 {
+					for _, p := range srv.Peers() {
+						if p.ID() == ev.Peer && topicindex.SupportsTopicDiscovery(p.Node()) {
+							firstCapableMs = time.Since(started).Milliseconds()
+						}
+					}
+				}
 				mu.Unlock()
 			}
 		}
@@ -163,16 +175,23 @@ func main() {
 	srv.DiscoveryV5().RegisterTopic(topic, uint64(*port))
 	wait(asg.Phases.SearchAt)
 	close(ready)
-	if asg.Search.Model == "continuous" {
+	if asg.Search.Model == "continuous" || asg.Search.Model == "scheduled" {
 		deadline := time.UnixMilli(asg.Phases.StopAt)
 		if asg.Phases.StopAt == 0 {
 			deadline = time.Now().Add(24 * time.Hour)
 		}
-		go workload.Continuous(
-			func() enode.Iterator { return srv.DiscoveryV5().TopicSearch(topic, uint64(*port)+1) },
-			nil, asg.Search.TargetCount, time.Duration(asg.Search.RequestDelayMs)*time.Millisecond,
-			time.Duration(asg.Search.RequestTimeout)*time.Millisecond, deadline,
-			func(l workload.Lookup) { mu.Lock(); lookups = append(lookups, l); mu.Unlock() })
+		open := func() enode.Iterator { return srv.DiscoveryV5().TopicSearch(topic, uint64(*port)+1) }
+		rec := func(l workload.Lookup) { mu.Lock(); lookups = append(lookups, l); mu.Unlock() }
+		timeout := time.Duration(asg.Search.RequestTimeout) * time.Millisecond
+		if asg.Search.Model == "scheduled" {
+			at := make([]time.Time, len(asg.Search.LookupAtMs))
+			for i, ms := range asg.Search.LookupAtMs {
+				at[i] = time.UnixMilli(ms)
+			}
+			go workload.Scheduled(open, nil, asg.Search.TargetCount, timeout, at, deadline, rec)
+		} else {
+			go workload.Continuous(open, nil, asg.Search.TargetCount, time.Duration(asg.Search.RequestDelayMs)*time.Millisecond, timeout, deadline, rec)
+		}
 	}
 	writeTrace := func() {
 		if asg.TraceFile == "" {
@@ -194,7 +213,7 @@ func main() {
 		}
 		b, _ := json.MarshalIndent(map[string]any{
 			"idx": asg.Idx, "id": srv.Self().ID().String(), "outbound": out, "inbound": in,
-			"peer_drops": drops, "refill_ms": refills, "lookups": lookups,
+			"peer_drops": drops, "refill_ms": refills, "lookups": lookups, "first_capable_ms": firstCapableMs, "legacy": false,
 			"ads_held": len(srv.DiscoveryV5().LocalTopicNodes(topic)), "wire": wire,
 		}, "", " ")
 		os.WriteFile(asg.TraceFile, b, 0o644)
@@ -234,4 +253,16 @@ func main() {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
 	srv.Stop()
+}
+
+// svcEntry is the "svc" ENR entry: the service a node provides, as a 32-bit
+// hash of the topic name. Legacy nodes filter random-walk discovery on it.
+type svcEntry uint32
+
+func (svcEntry) ENRKey() string { return "svc" }
+
+func svcOf(topic string) svcEntry {
+	h := fnv.New32a()
+	h.Write([]byte(topic))
+	return svcEntry(h.Sum32())
 }

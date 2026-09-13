@@ -228,7 +228,7 @@ func main() {
 		monitorStop := make(chan struct{})
 		monitorDone := make(chan struct{})
 		go monitorBuffers(sim, *abortOnDrop, monitorStop, monitorDone)
-		pacing := searchPacing{Stagger: *searchStagger, MaxPause: *searchPauseMax, PauseNovelOnly: *searchPauseNovelOnly, TargetCount: *searchTargetCount, Checkpoint: *checkpointInterval, RedialWait: *connRedialWait, Model: *searchModel, RequestDelay: *searchRequestDelay, RequestTimeout: *searchRequestTimeout}
+		pacing := searchPacing{Stagger: *searchStagger, MaxPause: *searchPauseMax, PauseNovelOnly: *searchPauseNovelOnly, TargetCount: *searchTargetCount, Checkpoint: *checkpointInterval, RedialWait: *connRedialWait, Model: *searchModel, RequestDelay: *searchRequestDelay, RequestTimeout: *searchRequestTimeout, Intervals: cfg.Scenario.Search.Intervals, SearchTimeout: cfg.Scenario.Phases.SearchTimeout}
 		runVanillaInterop(sim, settings, *nodes, *vanillaFrac, *numTopics, *zipfS, *seed,
 			*bootstrapWait, *registerWait, *searchTimeout, *regProbePeriod, *registerStagger, *refreshInterval,
 			*maxBootnodes, *spawnDelay, *metricsOut, pacing)
@@ -282,6 +282,8 @@ func main() {
 		Model:          *searchModel,
 		RequestDelay:   *searchRequestDelay,
 		RequestTimeout: *searchRequestTimeout,
+		Intervals:      cfg.Scenario.Search.Intervals,
+		SearchTimeout:  cfg.Scenario.Phases.SearchTimeout,
 	}
 	if *connModel {
 		pacing.Conns = newConnTable(all, *connMaxPeers, *connDialRatio)

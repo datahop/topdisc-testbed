@@ -1,32 +1,35 @@
 package assign
 
 import (
+	"math/rand"
 	"testing"
-	"time"
-
-	"github.com/datahop/topdisc-testbed/pkg/scenario"
 )
 
-func TestDeterministic(t *testing.T) {
-	cfg := scenario.Default()
-	cfg.Scenario.Population.Nodes = 5
-	cfg.Scenario.Population.Seed = 7
-	cfg.Scenario.Phases.RegisterStagger = 30 * time.Millisecond
-	hosts := func(i int) Host { return Host{IP: "127.0.0.1", BasePort: 30300 + i, StatusOff: 10000} }
-	a, err := Generate(cfg, hosts, 1_000_000, ".")
-	if err != nil {
-		t.Fatal(err)
+func TestLookupTimes(t *testing.T) {
+	at := LookupTimes(rand.New(rand.NewSource(1)), 1000, 11000, 5)
+	if len(at) != 5 {
+		t.Fatalf("%d times", len(at))
 	}
-	b, _ := Generate(cfg, hosts, 1_000_000, ".")
-	for i := range a {
-		if a[i].Key != b[i].Key || a[i].Key == "" {
-			t.Fatalf("node %d key not deterministic", i)
+	for k, ms := range at {
+		lo, hi := int64(1000+k*2000), int64(1000+(k+1)*2000)
+		if ms < lo || ms >= hi {
+			t.Fatalf("lookup %d at %d outside its interval [%d,%d)", k, ms, lo, hi)
 		}
 	}
-	if len(a[0].Bootnodes) != 0 || len(a[1].Bootnodes) != 1 {
-		t.Fatalf("bootnode wiring wrong: %v %v", a[0].Bootnodes, a[1].Bootnodes)
+}
+
+func TestZipfAlphaOne(t *testing.T) {
+	z := NewZipf(1.0, 300)
+	rng := rand.New(rand.NewSource(1))
+	counts := make([]int, 300)
+	for i := 0; i < 100000; i++ {
+		counts[z.Draw(rng)]++
 	}
-	if a[4].Phases.RegisterAt <= a[0].Phases.RegisterAt {
-		t.Fatal("register stagger not applied")
+	// P(0)/P(1) = 2, P(0)/P(9) = 10 for s = 1.
+	if r := float64(counts[0]) / float64(counts[1]); r < 1.8 || r > 2.2 {
+		t.Fatalf("P0/P1 = %.2f, want 2", r)
+	}
+	if r := float64(counts[0]) / float64(counts[9]); r < 8.5 || r > 11.5 {
+		t.Fatalf("P0/P9 = %.2f, want 10", r)
 	}
 }

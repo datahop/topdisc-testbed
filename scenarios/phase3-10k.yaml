@@ -1,0 +1,42 @@
+# Phase 3 plan §1 workload, §2 baseline (no churn). 10k nodes, one service each
+# over 300 services (Zipf 1), E = 15 min, C = 1000, F_lookup = 30, one lookup
+# per node in each of L = 6 intervals of a 60-minute search phase. Protocol
+# parameters follow the plan (K_lookup 5, F_return 10); the code defaults are
+# 16/16, see #12. Backend: change the testbed block (cloud shown; on Grid'5000
+# the star model emulates the plan's 8-91 ms pair RTT and 20 KB/s per node; on
+# AWS the regions are real and the star model is ignored).
+name: phase3-10k
+scenario:
+  population:
+    nodes: 10000
+    topics: 300
+    zipf_s: 1.0
+    seed: 1
+  network:
+    model: star
+    regions: {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}
+  phases:
+    bootstrap_wait: 2m
+    register_stagger: 20ms
+    register_wait: 22m30s      # 1.5 x E: registrations settle before lookups start
+    search_stagger: 10ms
+    search_timeout: 60m
+  topic:
+    ad_lifetime: 15m
+    ad_cache_size: 1000
+    search_bucket_size: 5
+    topic_nodes_limit: 10
+  search:
+    model: scheduled
+    intervals: 6
+    target_count: 30
+    request_timeout: 60s
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json
+    home_region: us-east-1
+  wan:
+    delay_min_ms: 4
+    delay_max_ms: 45
+    rate_kbps: 160

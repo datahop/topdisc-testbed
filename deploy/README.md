@@ -61,3 +61,35 @@ Quotas: 10k instances need the account's vCPU (AWS, GCP) or server (Hetzner)
 limit raised first. Spot/preemptible is fine for short runs; for 24 h churn
 runs use on-demand, because a reclaimed instance is indistinguishable from
 churn in the traces.
+
+## Grid'5000 (Distem)
+
+Untested until a Grid'5000 account exists; the vnode layer (`cmd/distemctl`,
+`pkg/distem`) is unit-tested against Distem's wire format and can be exercised
+on any root Debian host running a Distem coordinator.
+
+One Distem virtual node (LXC container, own IP from a reserved /22, per-pair
+latency from `scenario.network.rtt_table` or the star model) per TopDisc node,
+`testbed.g5k.vnodes_per_machine` of them per physical machine. `deploy/g5k/g5k.py`
+(EnOSlib) has the same verbs and failure semantics as `deploy/aws.sh`:
+
+```
+pip install -r deploy/g5k/requirements.txt
+sudo deploy/g5k/build-image.sh ~/topdisc-vnode.tar.gz     # once, on a Debian host with debootstrap
+deploy/g5k/g5k.py up  scenarios/g5k-smoke.yaml   # OAR job + /22 + kadeploy + distem-bootstrap + vnodes + inventory.json
+deploy/g5k/g5k.py run scenarios/g5k-smoke.yaml   # runs on the first machine, waits, pulls into runs/, releases the job
+deploy/g5k/g5k.py check
+```
+
+`testbed fleet <scenario>` prints the machine count next to the region
+counts. The walltime is the hard cap. `KEEP=1` keeps the job after `run`; a
+failed pull keeps it too.
+
+## Provisioner contract
+
+Every driver (`deploy/aws.sh`, `deploy/g5k/g5k.py`, a future one) provides
+`up <scenario>`, `run <scenario>`, `pull`, `down`, `check` with the same
+meaning, produces an `inventory.json` of `{hosts:[{index, ip, nodes, region,
+port?}]}` with a hostagent reachable on every host, and leaves nothing running
+after `run` unless `KEEP=1`. The coordinator (`./testbed`, backend `cloud`)
+and the node binaries are the same everywhere; only provisioning differs.

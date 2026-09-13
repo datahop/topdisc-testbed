@@ -6,6 +6,7 @@ testbed:
     : simnet                           # simnet: in-process on this host; local: one node process per node on this host; cloud: Terraform fleet
   local:
     node_binary: ./topdisc-node        # local backend: path to the node binary
+    legacy_binary: ./topdisc-node-legacy # local backend: stock-geth node binary for population.legacy_frac nodes (legacy/cmd/node-legacy)
     base_port: 30300                   # local backend: node i listens on base_port+i, status on +10000
     grace: 10s                         # local backend: wait after the last StopAt before collecting
     verbosity: 2                       # node log level: 2 warn, 3 info, 4 debug (disconnect reasons)
@@ -15,6 +16,15 @@ testbed:
     agent_port: 9000                   # cloud backend: hostagent port on every host
     verbosity: 2                       # cloud backend: node log level
     grace: 30s                         # cloud backend: wait after the last StopAt before fetching traces
+  g5k:
+    site: nancy                        # Grid'5000 site of the reservation
+    cluster: ""                        # cluster to reserve on; empty = any
+    walltime: 02:00:00                 # OAR walltime HH:MM:SS; the hard cap of the run
+    reservation: ""                    # advance reservation start, YYYY-mm-dd HH:MM:SS; empty = as soon as possible
+    queue: default                     # OAR queue: default, production, besteffort
+    env: debian11-x64-base             # kadeploy environment for the physical machines
+    vnodes_per_machine: 250            # Distem virtual nodes per physical machine; sizes the reservation (measure on the first one)
+    image: file:///home/USER/topdisc-vnode.tar.gz # vnode filesystem image on the Grid'5000 home (deploy/g5k/build-image.sh)
   wan:
     enabled: false                     # give each node its own netns shaped by netem (Linux, root)
     delay_min_ms: 4                    # star model: min one-way delay per node; plan RTT 8ms -> 4
@@ -31,13 +41,16 @@ scenario:
     zipf_s: 1.07                       # Zipf skew for topic assignment when topics > 1
     common_topic: false                # topics > 1: everyone also registers and searches topic 0
     seed: 0                            # RNG seed for every random draw; 0 = time
-    legacy_frac: 0                     # fraction of nodes without the topic-discovery ENR flag
+    legacy_frac: 0                     # fraction of nodes that are legacy discv5: simnet removes the topic-discovery ENR flag; real backends run stock upstream geth (legacy_binary), the same fraction within every service
+    legacy_bootnode: false             # let node 0 (the bootnode) be drawn legacy too; default keeps it TopDisc-capable, since a fresh stock bootnode serves no nodes until it has revalidated its table (~20 nodes/min)
     vanilla_frac: 0                    # fraction running stock upstream geth (needs -tags vanilla)
   network:
     latency_ms: 30                     # simnet: per-pair one-way latency, ms (cloud: given by regions)
     bandwidth_mibps: 100               # simnet: per-direction link bandwidth (cloud: given by the instance type)
     regions: {}                        # cloud: node placement, region -> weight, e.g. {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}; empty = all in the home region
     node_regions: {}                   # cloud: pin nodes, index -> region, e.g. {0: us-east-1, 7: sa-east-1}; the rest follow regions
+    model: regions                     # emulated backends: regions = per-pair latency from rtt_table by region; star = the plan's model, each node draws a one-way delay from testbed.wan (pair RTT 8-91 ms)
+    rtt_table: models/region-rtt.json  # emulated backends (Grid'5000/Distem): inter-region RTT table used for per-pair latency; relative to this file
   phases:
     bootstrap_wait: 3s                 # after spawning, before registrations start
     register_stagger: 0s               # gap between consecutive nodes starting to register
@@ -55,7 +68,8 @@ scenario:
     nodes_per_source_bucket: 0         # cap per source per bucket; 0 = default 1 (inert on topdisc)
     remove_on_expiry: false            # drop ads at expiry instead of renewing (inert on topdisc)
   search:
-    model: conn                        # conn: search only while outbound slots are empty; continuous: lookups back to back
+    model: conn                        # conn: search only while outbound slots are empty; continuous: lookups back to back; scheduled: one lookup per node at a random time in each of `intervals` equal slices of the search phase (plan §1)
+    intervals: 10                      # scheduled: number of equal intervals L the search phase is divided into
     request_delay: 0s                  # continuous: pause between lookups
     request_timeout: 0s                # continuous: give up on a lookup after this; 0 = only target_count ends it
     target_count: 0                    # conn: stop a searcher after this many distinct registrants; continuous: end each lookup at this many. 0 = never
@@ -95,6 +109,7 @@ testbed:
     metrics: ""                        # search and registration record (JSON)
     overhead: ""                       # per-node traffic totals by message type (JSON)
     overhead_series: ""                # traffic and ad-cache samples over time (JSON)
+    host_sample_period: 30s            # real backends: sample CPU/RSS/fds per node and UDP buffer drops per host this often into hostmetrics; 0 = off
     overhead_series_period: 30s        # sampling period for overhead_series
     reach: ""                          # per-searcher registrar reach sets (JSON)
     snapshot_dir: ""                   # periodic find-count snapshots

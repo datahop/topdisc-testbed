@@ -41,6 +41,7 @@ type TestbedConfig struct {
 	Local     LocalConfig     `yaml:"local"`
 	Wan       WanConfig       `yaml:"wan"`
 	Cloud     CloudConfig     `yaml:"cloud"`
+	G5k       G5kConfig       `yaml:"g5k"`
 	Simulator SimulatorConfig `yaml:"simulator"`
 	Harness   HarnessConfig   `yaml:"harness"`
 	Traces    TracesConfig    `yaml:"traces"`
@@ -49,15 +50,16 @@ type TestbedConfig struct {
 
 // PopulationConfig: who is in the network.
 type PopulationConfig struct {
-	Nodes        int     `yaml:"nodes"`
-	Topics       int     `yaml:"topics"`
-	AllRegister  bool    `yaml:"all_register"`
-	RegisterFrac float64 `yaml:"register_frac"`
-	ZipfS        float64 `yaml:"zipf_s"`
-	CommonTopic  bool    `yaml:"common_topic"`
-	Seed         int64   `yaml:"seed"`
-	LegacyFrac   float64 `yaml:"legacy_frac"`
-	VanillaFrac  float64 `yaml:"vanilla_frac"`
+	Nodes          int     `yaml:"nodes"`
+	Topics         int     `yaml:"topics"`
+	AllRegister    bool    `yaml:"all_register"`
+	RegisterFrac   float64 `yaml:"register_frac"`
+	ZipfS          float64 `yaml:"zipf_s"`
+	CommonTopic    bool    `yaml:"common_topic"`
+	Seed           int64   `yaml:"seed"`
+	LegacyFrac     float64 `yaml:"legacy_frac"`
+	LegacyBootnode bool    `yaml:"legacy_bootnode"`
+	VanillaFrac    float64 `yaml:"vanilla_frac"`
 }
 
 // NetworkConfig: the emulated WAN conditions.
@@ -66,6 +68,8 @@ type NetworkConfig struct {
 	BandwidthMibps int                `yaml:"bandwidth_mibps"`
 	Regions        map[string]float64 `yaml:"regions"`
 	NodeRegions    map[int]string     `yaml:"node_regions"`
+	RTTTable       string             `yaml:"rtt_table"`
+	Model          string             `yaml:"model"`
 }
 
 // PhasesConfig: how the run is paced.
@@ -96,6 +100,7 @@ type SearchConfig struct {
 	RequestDelay   time.Duration `yaml:"request_delay"`
 	RequestTimeout time.Duration `yaml:"request_timeout"`
 	TargetCount    int           `yaml:"target_count"`
+	Intervals      int           `yaml:"intervals"`
 }
 
 // ConnModelConfig: geth peer slots: a node stops searching once its outbound slots are full.
@@ -148,12 +153,26 @@ type CloudConfig struct {
 	Grace      time.Duration `yaml:"grace"`
 }
 
+// G5kConfig: the Grid'5000 backend (deploy/g5k/g5k.py): a reservation of
+// physical machines running Distem, one virtual node per TopDisc node.
+type G5kConfig struct {
+	Site             string `yaml:"site"`
+	Cluster          string `yaml:"cluster"`
+	Walltime         string `yaml:"walltime"`
+	Reservation      string `yaml:"reservation"`
+	Queue            string `yaml:"queue"`
+	Env              string `yaml:"env"`
+	VnodesPerMachine int    `yaml:"vnodes_per_machine"`
+	Image            string `yaml:"image"`
+}
+
 // LocalConfig: the local backend — N node processes on this host.
 type LocalConfig struct {
-	NodeBinary string        `yaml:"node_binary"`
-	BasePort   int           `yaml:"base_port"`
-	Grace      time.Duration `yaml:"grace"`
-	Verbosity  int           `yaml:"verbosity"`
+	NodeBinary   string        `yaml:"node_binary"`
+	LegacyBinary string        `yaml:"legacy_binary"`
+	BasePort     int           `yaml:"base_port"`
+	Grace        time.Duration `yaml:"grace"`
+	Verbosity    int           `yaml:"verbosity"`
 }
 
 // SimulatorConfig: simnet internals; no equivalent on real hosts.
@@ -179,6 +198,7 @@ type TracesConfig struct {
 	Overhead             string        `yaml:"overhead"`
 	OverheadSeries       string        `yaml:"overhead_series"`
 	OverheadSeriesPeriod time.Duration `yaml:"overhead_series_period"`
+	HostSamplePeriod     time.Duration `yaml:"host_sample_period"`
 	Reach                string        `yaml:"reach"`
 	SnapshotDir          string        `yaml:"snapshot_dir"`
 	CheckpointInterval   time.Duration `yaml:"checkpoint_interval"`
@@ -193,6 +213,7 @@ type paramDoc struct{ path, doc string }
 var paramDocs = []paramDoc{
 	{"testbed.backend", "simnet: in-process on this host; local: one node process per node on this host; cloud: Terraform fleet"},
 	{"testbed.local.node_binary", "local backend: path to the node binary"},
+	{"testbed.local.legacy_binary", "local backend: stock-geth node binary for population.legacy_frac nodes (legacy/cmd/node-legacy)"},
 	{"testbed.local.base_port", "local backend: node i listens on base_port+i, status on +10000"},
 	{"testbed.local.grace", "local backend: wait after the last StopAt before collecting"},
 	{"testbed.local.verbosity", "node log level: 2 warn, 3 info, 4 debug (disconnect reasons)"},
@@ -201,6 +222,14 @@ var paramDocs = []paramDoc{
 	{"testbed.cloud.agent_port", "cloud backend: hostagent port on every host"},
 	{"testbed.cloud.verbosity", "cloud backend: node log level"},
 	{"testbed.cloud.grace", "cloud backend: wait after the last StopAt before fetching traces"},
+	{"testbed.g5k.site", "Grid'5000 site of the reservation"},
+	{"testbed.g5k.cluster", "cluster to reserve on; empty = any"},
+	{"testbed.g5k.walltime", "OAR walltime HH:MM:SS; the hard cap of the run"},
+	{"testbed.g5k.reservation", "advance reservation start, YYYY-mm-dd HH:MM:SS; empty = as soon as possible"},
+	{"testbed.g5k.queue", "OAR queue: default, production, besteffort"},
+	{"testbed.g5k.env", "kadeploy environment for the physical machines"},
+	{"testbed.g5k.vnodes_per_machine", "Distem virtual nodes per physical machine; sizes the reservation (measure on the first one)"},
+	{"testbed.g5k.image", "vnode filesystem image on the Grid'5000 home (deploy/g5k/build-image.sh)"},
 	{"testbed.wan.enabled", "give each node its own netns shaped by netem (Linux, root)"},
 	{"testbed.wan.delay_min_ms", "star model: min one-way delay per node; plan RTT 8ms -> 4"},
 	{"testbed.wan.delay_max_ms", "star model: max one-way delay per node; plan RTT 91ms -> 45"},
@@ -213,12 +242,15 @@ var paramDocs = []paramDoc{
 	{"scenario.population.zipf_s", "Zipf skew for topic assignment when topics > 1"},
 	{"scenario.population.common_topic", "topics > 1: everyone also registers and searches topic 0"},
 	{"scenario.population.seed", "RNG seed for every random draw; 0 = time"},
-	{"scenario.population.legacy_frac", "fraction of nodes without the topic-discovery ENR flag"},
+	{"scenario.population.legacy_frac", "fraction of nodes that are legacy discv5: simnet removes the topic-discovery ENR flag; real backends run stock upstream geth (legacy_binary), the same fraction within every service"},
+	{"scenario.population.legacy_bootnode", "let node 0 (the bootnode) be drawn legacy too; default keeps it TopDisc-capable, since a fresh stock bootnode serves no nodes until it has revalidated its table (~20 nodes/min)"},
 	{"scenario.population.vanilla_frac", "fraction running stock upstream geth (needs -tags vanilla)"},
 	{"scenario.network.latency_ms", "simnet: per-pair one-way latency, ms (cloud: given by regions)"},
 	{"scenario.network.bandwidth_mibps", "simnet: per-direction link bandwidth (cloud: given by the instance type)"},
 	{"scenario.network.regions", "cloud: node placement, region -> weight, e.g. {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}; empty = all in the home region"},
 	{"scenario.network.node_regions", "cloud: pin nodes, index -> region, e.g. {0: us-east-1, 7: sa-east-1}; the rest follow regions"},
+	{"scenario.network.model", "emulated backends: regions = per-pair latency from rtt_table by region; star = the plan's model, each node draws a one-way delay from testbed.wan (pair RTT 8-91 ms)"},
+	{"scenario.network.rtt_table", "emulated backends (Grid'5000/Distem): inter-region RTT table used for per-pair latency; relative to this file"},
 	{"scenario.phases.bootstrap_wait", "after spawning, before registrations start"},
 	{"scenario.phases.register_stagger", "gap between consecutive nodes starting to register"},
 	{"scenario.phases.register_wait", "after the last node starts registering, before searches start"},
@@ -233,7 +265,8 @@ var paramDocs = []paramDoc{
 	{"scenario.topic.aux_nodes_limit", "closest-to-topic nodes attached to TOPICQUERY and REGTOPIC replies; 0 = default 8"},
 	{"scenario.topic.nodes_per_source_bucket", "cap per source per bucket; 0 = default 1 (inert on topdisc)"},
 	{"scenario.topic.remove_on_expiry", "drop ads at expiry instead of renewing (inert on topdisc)"},
-	{"scenario.search.model", "conn: search only while outbound slots are empty; continuous: lookups back to back"},
+	{"scenario.search.model", "conn: search only while outbound slots are empty; continuous: lookups back to back; scheduled: one lookup per node at a random time in each of `intervals` equal slices of the search phase (plan §1)"},
+	{"scenario.search.intervals", "scheduled: number of equal intervals L the search phase is divided into"},
 	{"scenario.search.request_delay", "continuous: pause between lookups"},
 	{"scenario.search.request_timeout", "continuous: give up on a lookup after this; 0 = only target_count ends it"},
 	{"scenario.search.target_count", "conn: stop a searcher after this many distinct registrants; continuous: end each lookup at this many. 0 = never"},
@@ -264,6 +297,7 @@ var paramDocs = []paramDoc{
 	{"testbed.traces.metrics", "search and registration record (JSON)"},
 	{"testbed.traces.overhead", "per-node traffic totals by message type (JSON)"},
 	{"testbed.traces.overhead_series", "traffic and ad-cache samples over time (JSON)"},
+	{"testbed.traces.host_sample_period", "real backends: sample CPU/RSS/fds per node and UDP buffer drops per host this often into hostmetrics; 0 = off"},
 	{"testbed.traces.overhead_series_period", "sampling period for overhead_series"},
 	{"testbed.traces.reach", "per-searcher registrar reach sets (JSON)"},
 	{"testbed.traces.snapshot_dir", "periodic find-count snapshots"},
@@ -278,13 +312,17 @@ func Default() Config {
 	c.Testbed.Local.BasePort = 30300
 	c.Testbed.Local.Grace = mustDur("10s")
 	c.Testbed.Local.Verbosity = 2
+	c.Testbed.Local.LegacyBinary = "./topdisc-node-legacy"
 	c.Testbed.Cloud.Inventory, c.Testbed.Cloud.HomeRegion, c.Testbed.Cloud.AgentPort, c.Testbed.Cloud.Verbosity, c.Testbed.Cloud.Grace = "inventory.json", "us-east-1", 9000, 2, mustDur("30s")
+	c.Testbed.G5k = G5kConfig{Site: "nancy", Walltime: "02:00:00", Queue: "default", Env: "debian11-x64-base", VnodesPerMachine: 250, Image: "file:///home/USER/topdisc-vnode.tar.gz"}
 	c.Testbed.Wan.DelayMinMs, c.Testbed.Wan.DelayMaxMs, c.Testbed.Wan.JitterMs, c.Testbed.Wan.RateKbps = 4, 45, 3, 160
 	c.Scenario.Population.Nodes = 5
 	c.Scenario.Population.Topics = 1
 	c.Scenario.Population.RegisterFrac = 0.5
 	c.Scenario.Population.ZipfS = 1.07
 	c.Scenario.Network.LatencyMs = 30
+	c.Scenario.Network.RTTTable = "models/region-rtt.json"
+	c.Scenario.Network.Model = "regions"
 	c.Scenario.Network.BandwidthMibps = 100
 	c.Testbed.Harness.MaxBootnodes = 20
 	c.Scenario.Phases.BootstrapWait = mustDur("3s")
@@ -292,6 +330,7 @@ func Default() Config {
 	c.Scenario.Phases.SearchTimeout = mustDur("30s")
 	c.Testbed.Harness.RegProbePeriod = mustDur("500ms")
 	c.Scenario.Search.Model = "conn"
+	c.Scenario.Search.Intervals = 10
 	c.Scenario.ConnModel.MaxPeers = 50
 	c.Scenario.ConnModel.DialRatio = 3
 	c.Scenario.ConnModel.RedialWait = mustDur("35s")
@@ -303,6 +342,7 @@ func Default() Config {
 	c.Scenario.Churn.Frac = 0.1
 	c.Scenario.Churn.Mode = "steadystate"
 	c.Testbed.Traces.OverheadSeriesPeriod = mustDur("30s")
+	c.Testbed.Traces.HostSamplePeriod = mustDur("30s")
 	c.Testbed.Safety.AbortOnDrop = true
 	return c
 }

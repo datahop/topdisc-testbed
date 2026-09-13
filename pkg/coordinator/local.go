@@ -35,12 +35,20 @@ func RunLocal(cfg scenario.Config, runDir string) error {
 	if err != nil {
 		return err
 	}
-	r := &host.Runner{NodeBinary: lc.NodeBinary, Verbosity: lc.Verbosity, AsgDir: filepath.Join(runDir, "assignments"),
+	r := &host.Runner{NodeBinary: lc.NodeBinary, LegacyBinary: lc.LegacyBinary, Verbosity: lc.Verbosity, AsgDir: filepath.Join(runDir, "assignments"),
 		LogDir: filepath.Join(runDir, "logs"), Wan: star, Seed: sc.Population.Seed}
 	if err := r.Prepare(as, nil); err != nil {
 		return err
 	}
 	defer r.StopAll()
+	if p := cfg.Testbed.Traces.HostSamplePeriod; p > 0 {
+		r.Monitor(p)
+		defer func() {
+			r.StopMonitor()
+			r.WriteSamples(filepath.Join(runDir, "hostmetrics.json"))
+			hostSummary([][]host.Sample{r.Samples()})
+		}()
+	}
 	printPhases("local", as, t0)
 	if star != nil {
 		fmt.Printf("wan: star model, one-way %g..%g ms, %d kbit/s per node, netns per node\n", star.MinMs, star.MaxMs, star.RateKbps)

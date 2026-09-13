@@ -93,7 +93,7 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 		mine[hostOf[a.Idx]] = append(mine[hostOf[a.Idx]], a)
 	}
 	if err := each(len(agents), func(h int) error {
-		if err := agents[h].prepare(prepareRequest{Host: h, Peers: peers, Wan: star, Seed: sc.Population.Seed, Verbosity: cc.Verbosity, Assignments: mine[h]}); err != nil {
+		if err := agents[h].prepare(prepareRequest{Host: h, Peers: peers, Wan: star, Seed: sc.Population.Seed, Verbosity: cc.Verbosity, SamplePeriodMs: cfg.Testbed.Traces.HostSamplePeriod.Milliseconds(), Assignments: mine[h]}); err != nil {
 			return fmt.Errorf("host %d (%s): %w", h, inv.Hosts[h].IP, err)
 		}
 		return nil
@@ -128,16 +128,32 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 		return nil
 	})
 	fmt.Printf("fetched %d/%d traces\n", got.Load(), len(as))
+	if cfg.Testbed.Traces.HostSamplePeriod > 0 {
+		hmDir := filepath.Join(runDir, "hostmetrics")
+		os.MkdirAll(hmDir, 0o755)
+		all := make([][]host.Sample, len(agents))
+		each(len(agents), func(h int) error {
+			path := filepath.Join(hmDir, fmt.Sprintf("host%d.json", h))
+			if agents[h].fetch("hostmetrics", 0, path) == nil {
+				if b, err := os.ReadFile(path); err == nil {
+					json.Unmarshal(b, &all[h])
+				}
+			}
+			return nil
+		})
+		hostSummary(all)
+	}
 	return Collect(trDir, runDir, len(as))
 }
 
 type prepareRequest struct {
-	Host        int                 `json:"host"`
-	Peers       map[int]string      `json:"peers"`
-	Wan         *wan.Star           `json:"wan"`
-	Seed        int64               `json:"seed"`
-	Verbosity   int                 `json:"verbosity"`
-	Assignments []assign.Assignment `json:"assignments"`
+	Host           int                 `json:"host"`
+	Peers          map[int]string      `json:"peers"`
+	Wan            *wan.Star           `json:"wan"`
+	Seed           int64               `json:"seed"`
+	Verbosity      int                 `json:"verbosity"`
+	SamplePeriodMs int64               `json:"sample_period_ms"`
+	Assignments    []assign.Assignment `json:"assignments"`
 }
 
 type agent struct{ base string }
