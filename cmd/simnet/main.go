@@ -282,6 +282,8 @@ func main() {
 		Model:          *searchModel,
 		RequestDelay:   *searchRequestDelay,
 		RequestTimeout: *searchRequestTimeout,
+		Intervals:      cfg.Scenario.Search.Intervals,
+		SearchTimeout:  cfg.Scenario.Phases.SearchTimeout,
 	}
 	if *connModel {
 		pacing.Conns = newConnTable(all, *connMaxPeers, *connDialRatio)
