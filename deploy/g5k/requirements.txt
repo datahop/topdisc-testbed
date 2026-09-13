@@ -1,0 +1,2 @@
+enoslib>=10.9,<11
+pyyaml

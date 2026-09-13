@@ -1,0 +1,28 @@
+# Grid'5000: 5 Distem virtual nodes, 5 per machine, emulated geography from the
+# RTT table (network.model: regions). deploy/g5k/g5k.py up scenarios/g5k-smoke.yaml
+name: g5k-smoke
+scenario:
+  population:
+    nodes: 5
+    topics: 1
+    all_register: true
+    seed: 1
+  network:
+    model: regions
+    regions: {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}
+  phases:
+    bootstrap_wait: 15s
+    register_stagger: 20ms
+    register_wait: 30s
+    search_stagger: 10ms
+    search_timeout: 30s
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json          # g5k.py copies it next to the scenario on the coordinator
+    home_region: us-east-1
+  g5k:
+    site: nancy
+    vnodes_per_machine: 5
+  wan:
+    rate_kbps: 160

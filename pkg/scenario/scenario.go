@@ -41,6 +41,7 @@ type TestbedConfig struct {
 	Local     LocalConfig     `yaml:"local"`
 	Wan       WanConfig       `yaml:"wan"`
 	Cloud     CloudConfig     `yaml:"cloud"`
+	G5k       G5kConfig       `yaml:"g5k"`
 	Simulator SimulatorConfig `yaml:"simulator"`
 	Harness   HarnessConfig   `yaml:"harness"`
 	Traces    TracesConfig    `yaml:"traces"`
@@ -152,6 +153,19 @@ type CloudConfig struct {
 	Grace      time.Duration `yaml:"grace"`
 }
 
+// G5kConfig: the Grid'5000 backend (deploy/g5k/g5k.py): a reservation of
+// physical machines running Distem, one virtual node per TopDisc node.
+type G5kConfig struct {
+	Site             string `yaml:"site"`
+	Cluster          string `yaml:"cluster"`
+	Walltime         string `yaml:"walltime"`
+	Reservation      string `yaml:"reservation"`
+	Queue            string `yaml:"queue"`
+	Env              string `yaml:"env"`
+	VnodesPerMachine int    `yaml:"vnodes_per_machine"`
+	Image            string `yaml:"image"`
+}
+
 // LocalConfig: the local backend — N node processes on this host.
 type LocalConfig struct {
 	NodeBinary   string        `yaml:"node_binary"`
@@ -208,6 +222,14 @@ var paramDocs = []paramDoc{
 	{"testbed.cloud.agent_port", "cloud backend: hostagent port on every host"},
 	{"testbed.cloud.verbosity", "cloud backend: node log level"},
 	{"testbed.cloud.grace", "cloud backend: wait after the last StopAt before fetching traces"},
+	{"testbed.g5k.site", "Grid'5000 site of the reservation"},
+	{"testbed.g5k.cluster", "cluster to reserve on; empty = any"},
+	{"testbed.g5k.walltime", "OAR walltime HH:MM:SS; the hard cap of the run"},
+	{"testbed.g5k.reservation", "advance reservation start, YYYY-mm-dd HH:MM:SS; empty = as soon as possible"},
+	{"testbed.g5k.queue", "OAR queue: default, production, besteffort"},
+	{"testbed.g5k.env", "kadeploy environment for the physical machines"},
+	{"testbed.g5k.vnodes_per_machine", "Distem virtual nodes per physical machine; sizes the reservation (measure on the first one)"},
+	{"testbed.g5k.image", "vnode filesystem image on the Grid'5000 home (deploy/g5k/build-image.sh)"},
 	{"testbed.wan.enabled", "give each node its own netns shaped by netem (Linux, root)"},
 	{"testbed.wan.delay_min_ms", "star model: min one-way delay per node; plan RTT 8ms -> 4"},
 	{"testbed.wan.delay_max_ms", "star model: max one-way delay per node; plan RTT 91ms -> 45"},
@@ -292,6 +314,7 @@ func Default() Config {
 	c.Testbed.Local.Verbosity = 2
 	c.Testbed.Local.LegacyBinary = "./topdisc-node-legacy"
 	c.Testbed.Cloud.Inventory, c.Testbed.Cloud.HomeRegion, c.Testbed.Cloud.AgentPort, c.Testbed.Cloud.Verbosity, c.Testbed.Cloud.Grace = "inventory.json", "us-east-1", 9000, 2, mustDur("30s")
+	c.Testbed.G5k = G5kConfig{Site: "nancy", Walltime: "02:00:00", Queue: "default", Env: "debian11-x64-base", VnodesPerMachine: 250, Image: "file:///home/USER/topdisc-vnode.tar.gz"}
 	c.Testbed.Wan.DelayMinMs, c.Testbed.Wan.DelayMaxMs, c.Testbed.Wan.JitterMs, c.Testbed.Wan.RateKbps = 4, 45, 3, 160
 	c.Scenario.Population.Nodes = 5
 	c.Scenario.Population.Topics = 1

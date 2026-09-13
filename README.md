@@ -64,7 +64,7 @@ needs.
 |---|---|---|
 | `simnet` | in-process discv5 nodes over the simulated network | `./testbed <scenario>` execs `./simnet` |
 | `local` | one real geth `p2p.Server` process per node on this host (RLPx peer slots filled from topic search) | `go build -o topdisc-node ./cmd/node`, then `./testbed <scenario>` |
-| `cloud` | the same processes across hosts provisioned by Terraform (`deploy/`) | `./testbed <scenario>` on the coordinator host, driving one hostagent per host |
+| `cloud` | the same processes across hosts provisioned by Terraform on AWS or, via Distem, on Grid'5000 (`deploy/`) | `./testbed <scenario>` on the coordinator host, driving one hostagent per host |
 
 `local` and `cloud` accept `testbed.wan` (Linux only): each node gets its own
 network namespace with a netem qdisc, so pairs see WAN-like RTTs and a

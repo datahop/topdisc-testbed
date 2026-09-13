@@ -16,6 +16,15 @@ testbed:
     agent_port: 9000                   # cloud backend: hostagent port on every host
     verbosity: 2                       # cloud backend: node log level
     grace: 30s                         # cloud backend: wait after the last StopAt before fetching traces
+  g5k:
+    site: nancy                        # Grid'5000 site of the reservation
+    cluster: ""                        # cluster to reserve on; empty = any
+    walltime: 02:00:00                 # OAR walltime HH:MM:SS; the hard cap of the run
+    reservation: ""                    # advance reservation start, YYYY-mm-dd HH:MM:SS; empty = as soon as possible
+    queue: default                     # OAR queue: default, production, besteffort
+    env: debian11-x64-base             # kadeploy environment for the physical machines
+    vnodes_per_machine: 250            # Distem virtual nodes per physical machine; sizes the reservation (measure on the first one)
+    image: file:///home/USER/topdisc-vnode.tar.gz # vnode filesystem image on the Grid'5000 home (deploy/g5k/build-image.sh)
   wan:
     enabled: false                     # give each node its own netns shaped by netem (Linux, root)
     delay_min_ms: 4                    # star model: min one-way delay per node; plan RTT 8ms -> 4
