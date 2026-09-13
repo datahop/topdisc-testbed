@@ -49,6 +49,13 @@ python3 figures/figures_overhead.py <run>/series.json \
     --metrics <run>/m.json --overhead <run>/oh.json --out-dir figs --label baseline
 ```
 
+## Phase 3 coverage
+
+`docs/PARAMETERS.md` lists every evaluation parameter and scenario of the
+Phase 3 plan with its scenario key and status per backend; `docs/FIGURES.md`
+does the same for every figure and metric, with the trace fields each one
+needs.
+
 ## Backends
 
 `testbed.backend` in the scenario picks where the same scenario runs:
