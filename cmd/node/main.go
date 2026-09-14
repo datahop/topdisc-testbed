@@ -120,8 +120,12 @@ func main() {
 			return srv.DiscoveryV5().TopicSearch(topic, uint64(*port))
 		}},
 	}
+	if asg.Search.Model == "continuous" {
+		// The node only consumes its own search: no dialer, so no second search.
+		proto.DialCandidates = enode.IterNodes(nil)
+	}
 	srv = &p2p.Server{Config: p2p.Config{
-		PrivateKey: key, Name: "topdisc-node", MaxPeers: *maxPeers, DialRatio: *dialRatio,
+		PrivateKey: key, Name: "topdisc-node", MaxPeers: *maxPeers, DialRatio: *dialRatio, NoDial: asg.Search.Model == "continuous",
 		ListenAddr: fmt.Sprintf("%s:%d", *ip, *port), DiscoveryV4: false, DiscoveryV5: true,
 		BootstrapNodesV5: bootnodes, Protocols: []p2p.Protocol{proto}, Logger: log.Root(),
 		DiscoveryV5Topic: topicindex.Config{
@@ -288,7 +292,7 @@ func main() {
 			}
 			go workload.Scheduled(open, nil, asg.Search.TargetCount, timeout, at, deadline, rec)
 		} else {
-			go workload.Continuous(open, nil, asg.Search.TargetCount, time.Duration(asg.Search.RequestDelayMs)*time.Millisecond, timeout, deadline, rec)
+			go workload.Continuous(open, nil, deadline, func(l workload.Lookup) { mu.Lock(); lookups = []workload.Lookup{l}; mu.Unlock() })
 		}
 	}
 	writeTrace := func() {

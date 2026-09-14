@@ -41,7 +41,7 @@ Real backends pass the protocol parameters to every node through its assignment 
 | Parameter | Meaning | Scenario key | simnet | real | Notes |
 |---|---|---|---|---|---|
 | F_lookup | A lookup ends once this many distinct providers of the service are found; 30 in the plan. | `search.target_count: 30` | ✓ | ✓ | |
-| Lookup schedule | Plan: the run is divided into L equal intervals and every node does one lookup at a uniformly random time in each. | `search.model: scheduled`, `search.intervals` | ✓ | ✓ | Times drawn from the seed in the assignment. Also: `conn` (lookups only while outbound peer slots are empty, the geth behaviour) and `continuous` (lookups back to back with `request_delay`) |
+| Lookup schedule | Plan: the run is divided into L equal intervals and every node does one lookup at a uniformly random time in each. | `search.model: scheduled`, `search.intervals` | ✓ | ✓ | Times drawn from the seed in the assignment. Also: `conn` (one search while outbound peer slots are empty, the geth behaviour) and `continuous` (one search for the whole search phase that keeps consuming results without dialing, for the performance limit) |
 | Lookup timeout | Give up on a lookup after this even if F_lookup is not reached. | `search.request_timeout` | ✓ | ✓ | |
 | Connection model | Peer slots a node fills from search results: geth's 50 peers, one third outbound. On real backends this is the actual `p2p.Server`; on simnet a model. | `conn_model.max_peers`, `dial_ratio`, `redial_wait` | ✓ | ✓ inherent | |
 
@@ -89,7 +89,7 @@ WAN emulation, cloud inventory and home region, trace outputs, safety
 | `<name>` per backend | all | The same `scenario:` block with a different `testbed:` block | ✓ pattern: `smoke-*` (simnet), `local-*`, `cloud-*`, `g5k-*` (step 5) |
 
 Existing scenarios by purpose: `default.yaml` (100 Mibps baseline),
-`smoke-20`/`smoke-500*` (simnet checks, churn model, continuous lookups),
+`smoke-20`/`smoke-500*` (simnet checks, churn model, continuous search),
 `10k-*` (simnet at scale), `local-100*` (real processes on one host, churn,
 continuous, WAN), `cloud-smoke`/`cloud-300`/`cloud-1k`/`cloud-10k` (AWS),
 `reference.yaml` (every key documented).

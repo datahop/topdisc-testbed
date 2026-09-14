@@ -1,5 +1,5 @@
-# 10k-session-churn with the continuous search model: every node runs lookups
-# back to back (F_lookup=30, 30s between them) instead of stopping when its slots fill.
+# 10k-session-churn with the continuous search model: every node keeps one search
+# running for the whole search phase and consumes its results without dialing.
 name: 10k-session-churn-continuous
 scenario:
   population:
@@ -28,9 +28,6 @@ scenario:
     gap: 30s
   search:
     model: continuous
-    target_count: 30
-    request_delay: 30s
-    request_timeout: 60s
 testbed:
   simulator:
     link_buf: 8192

@@ -29,21 +29,12 @@ type Found struct {
 	AtMs int64  `json:"at_ms"`
 }
 
-// Continuous runs lookups back to back until the deadline: each ends at target
-// distinct registrants or after timeout, then the next starts after delay.
-// isRegistrant filters what counts as a result; nil counts every node.
-func Continuous(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target int, delay, timeout time.Duration, deadline time.Time, record func(Lookup)) {
-	for time.Now().Before(deadline) {
-		l := runOne(open, isRegistrant, target, timeout, deadline)
-		record(l)
-		if delay > 0 {
-			select {
-			case <-time.After(delay):
-			case <-time.After(time.Until(deadline)):
-				return
-			}
-		}
-	}
+// Continuous runs one search until the deadline and reports it as a single
+// lookup, passed to update each time a new registrant is found and when the
+// search ends. isRegistrant filters what counts as a result; nil counts every
+// node.
+func Continuous(open func() enode.Iterator, isRegistrant func(enode.ID) bool, deadline time.Time, update func(Lookup)) {
+	update(runOne(open, isRegistrant, 0, 0, deadline, update))
 }
 
 // Scheduled runs one lookup at each of the given times (a lookup that overruns
@@ -58,11 +49,11 @@ func Scheduled(open func() enode.Iterator, isRegistrant func(enode.ID) bool, tar
 		case <-time.After(time.Until(deadline)):
 			return
 		}
-		record(runOne(open, isRegistrant, target, timeout, deadline))
+		record(runOne(open, isRegistrant, target, timeout, deadline, nil))
 	}
 }
 
-func runOne(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target int, timeout time.Duration, deadline time.Time) Lookup {
+func runOne(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target int, timeout time.Duration, deadline time.Time, progress func(Lookup)) Lookup {
 	start := time.Now()
 	it := open()
 	defer func() { go it.Close() }() // Close can block on a busy search; do not hold the loop
@@ -98,6 +89,9 @@ func runOne(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target
 			if _, dup := seen[id]; !dup {
 				seen[id] = struct{}{}
 				found = append(found, Found{ID: id.String(), AtMs: time.Since(start).Milliseconds()})
+				if progress != nil {
+					progress(done(false))
+				}
 			}
 		}
 		if target > 0 && len(seen) >= target {
