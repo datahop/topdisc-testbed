@@ -103,7 +103,7 @@ func runVanillaInterop(sim *simnet.Simnet, settings simnet.NodeBiDiLinkSettings,
 
 	// Topic register+search runs on the TopDisc nodes only; vanilla nodes route
 	// but never register/search.
-	runMultiTopicWorkload(forks, numTopics, zipfS, seed, registerWait, searchTimeout, regProbePeriod, registerStagger, metricsOut, pacing)
+	runMultiTopicWorkload(forks, numTopics, zipfS, seed, registerWait, searchTimeout, regProbePeriod, registerStagger, 0, metricsOut, pacing)
 
 	reportInterop(forks, vanillas, 2000)
 }

@@ -124,7 +124,7 @@ func main() {
 	// are minutes at 10k), plus bootstrap-wait, register-wait and the full
 	// search-timeout — then an 8-minute grace for teardown.
 	n := time.Duration(*nodes)
-	hardCap := n*(*spawnDelay) + *bootstrapWait + n*(*registerStagger) + *registerWait + *searchTimeout + 20*time.Minute
+	hardCap := n*(*spawnDelay) + *bootstrapWait + n*(*registerStagger) + cfg.Scenario.Phases.StartWindow + cfg.Scenario.Phases.RegisterWindow + *registerWait + *searchTimeout + 20*time.Minute
 	if *churnInterval > 0 {
 		// Churn spawns replacement nodes while the search phase runs, which is
 		// far slower than the steady-state phases the budget above assumes.
@@ -240,7 +240,7 @@ func main() {
 		return
 	}
 
-	all := spawnNodes(sim, settings, *nodes, legacySet, *maxBootnodes, *spawnDelay, *refreshInterval, *adLifetime)
+	all := spawnNodes(sim, settings, *nodes, legacySet, *maxBootnodes, *spawnDelay, *refreshInterval, *adLifetime, cfg.Scenario.Phases.StartWindow, *seed)
 	defer func() {
 		// Parallelize disc.Close across nodes. Sequential close of N
 		// nodes takes O(N × per-node-shutdown) which becomes minutes at
@@ -316,14 +316,14 @@ func main() {
 
 	switch {
 	case *churnInterval > 0:
-		runChurnWorkload(sim, settings, *maxBootnodes, *refreshInterval, all, *numTopics, *zipfS, *seed, *registerWait, *searchTimeout, *regProbePeriod, *registerStagger,
+		runChurnWorkload(sim, settings, *maxBootnodes, *refreshInterval, all, *numTopics, *zipfS, *seed, *registerWait, *searchTimeout, *regProbePeriod, *registerStagger, cfg.Scenario.Phases.RegisterWindow,
 			churnParams{Interval: *churnInterval, Frac: *churnFrac, SteadyState: *churnMode == "steadystate"}, *metricsOut, pacing)
 	case *allRegister:
 		nt := *numTopics
 		if nt < 1 {
 			nt = 1
 		}
-		runMultiTopicWorkload(all, nt, *zipfS, *seed, *registerWait, *searchTimeout, *regProbePeriod, *registerStagger, *metricsOut, pacing)
+		runMultiTopicWorkload(all, nt, *zipfS, *seed, *registerWait, *searchTimeout, *regProbePeriod, *registerStagger, cfg.Scenario.Phases.RegisterWindow, *metricsOut, pacing)
 	case *legacyFrac > 0 && *numTopics <= 1:
 		runDiscNGValidationWorkload(all, *registerWait, *searchTimeout, *metricsOut)
 	case *numTopics <= 1:
@@ -332,7 +332,7 @@ func main() {
 		// runMultiTopicWorkload skips nodes with n.legacy=true (they
 		// stay as passive Discv5 peers and only contribute to the
 		// routing-table substrate).
-		runMultiTopicWorkload(all, *numTopics, *zipfS, *seed, *registerWait, *searchTimeout, *regProbePeriod, *registerStagger, *metricsOut, pacing)
+		runMultiTopicWorkload(all, *numTopics, *zipfS, *seed, *registerWait, *searchTimeout, *regProbePeriod, *registerStagger, cfg.Scenario.Phases.RegisterWindow, *metricsOut, pacing)
 	}
 	dumpSeries()
 	dumpOverheadIfSet()

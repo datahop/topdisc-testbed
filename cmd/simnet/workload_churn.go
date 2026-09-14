@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/datahop/topdisc-testbed/pkg/assign"
 	"math/rand"
 	"sync"
 	"time"
@@ -132,7 +133,7 @@ func (cs *churnState) counts() (alive, killed, total int) {
 // across the surviving network, how many killed registrants are still visible in
 // some topic table (should decay as eviction fires), and the dead-result metrics
 // (how often searches return already-dead registrants, and how stale they were).
-func runChurnWorkload(sim *simnet.Simnet, settings simnet.NodeBiDiLinkSettings, maxBootnodes int, refreshInterval time.Duration, all []nodeRec, numTopics int, zipfS float64, seed int64, registerWait, searchTimeout, regProbePeriod, registerStagger time.Duration, churn churnParams, metricsOut string, pacing searchPacing) {
+func runChurnWorkload(sim *simnet.Simnet, settings simnet.NodeBiDiLinkSettings, maxBootnodes int, refreshInterval time.Duration, all []nodeRec, numTopics int, zipfS float64, seed int64, registerWait, searchTimeout, regProbePeriod, registerStagger, registerWindow time.Duration, churn churnParams, metricsOut string, pacing searchPacing) {
 	if seed == 0 {
 		seed = time.Now().UnixNano()
 	}
@@ -178,12 +179,17 @@ func runChurnWorkload(sim *simnet.Simnet, settings simnet.NodeBiDiLinkSettings, 
 	// Phase 1: register (with optional stagger).
 	regStart := time.Now()
 	setSearchEpoch(regStart)
+	regOff := assign.RegisterOffsets(seed, len(all), registerWindow, 0)
 	staggered := 0
 	for i, n := range all {
 		if nodeTopic[i] < 0 {
 			continue
 		}
-		if registerStagger > 0 && staggered > 0 {
+		if registerWindow > 0 {
+			if d := time.Until(regStart.Add(time.Duration(regOff[staggered]) * time.Millisecond)); d > 0 {
+				time.Sleep(d)
+			}
+		} else if registerStagger > 0 && staggered > 0 {
 			time.Sleep(registerStagger)
 		}
 		staggered++

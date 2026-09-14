@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/ecdsa"
 	"encoding/binary"
+	"github.com/datahop/topdisc-testbed/pkg/assign"
 	"math"
 	"math/rand"
 	"net"
@@ -154,15 +155,21 @@ func spawnNode(sim *simnet.Simnet, settings simnet.NodeBiDiLinkSettings, idx int
 	return rec
 }
 
-func spawnNodes(sim *simnet.Simnet, settings simnet.NodeBiDiLinkSettings, count int, legacySet map[int]bool, maxBootnodes int, spawnDelay time.Duration, refreshInterval time.Duration, adLifetime time.Duration) []nodeRec {
+func spawnNodes(sim *simnet.Simnet, settings simnet.NodeBiDiLinkSettings, count int, legacySet map[int]bool, maxBootnodes int, spawnDelay time.Duration, refreshInterval time.Duration, adLifetime time.Duration, startWindow time.Duration, seed int64) []nodeRec {
 	nodeAdLifetime = adLifetime
 	if maxBootnodes <= 0 {
 		maxBootnodes = defaultMaxBootnodes
 	}
 	rng := rand.New(rand.NewSource(1))
 	all := make([]nodeRec, 0, count)
+	startOff := assign.StartOffsets(seed, count, startWindow)
+	spawnStart := time.Now()
 	for i := 0; i < count; i++ {
-		if i > 0 && spawnDelay > 0 {
+		if startWindow > 0 {
+			if d := time.Until(spawnStart.Add(time.Duration(startOff[i]) * time.Millisecond)); d > 0 {
+				time.Sleep(d)
+			}
+		} else if i > 0 && spawnDelay > 0 {
 			time.Sleep(spawnDelay)
 		}
 		boot := sampleBootnodes(all, maxBootnodes, rng)
