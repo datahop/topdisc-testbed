@@ -217,7 +217,10 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 	if len(traces) == 0 {
 		return fmt.Errorf("no traces")
 	}
-	epochMs := as[0].Phases.RegisterAt
+	epochMs := as[0].Phases.RegisterBase
+	if epochMs == 0 {
+		epochMs = as[0].Phases.RegisterAt
+	}
 	ns := func(ms int64) int64 { return (ms - epochMs) * 1e6 }
 
 	// Ground truth: registrants per topic (TopDisc nodes register their topic).

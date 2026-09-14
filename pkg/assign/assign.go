@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/datahop/topdisc-testbed/pkg/churn"
 	"github.com/datahop/topdisc-testbed/pkg/scenario"
@@ -19,9 +20,11 @@ import (
 )
 
 type Phases struct {
-	RegisterAt int64 `json:"register_at_ms"` // absolute unix ms
-	SearchAt   int64 `json:"search_at_ms"`
-	StopAt     int64 `json:"stop_at_ms"`
+	StartAt      int64 `json:"start_at_ms"`      // absolute unix ms; the node waits until then before starting
+	RegisterBase int64 `json:"register_base_ms"` // registration phase start, the common clock of the traces
+	RegisterAt   int64 `json:"register_at_ms"`   // absolute unix ms
+	SearchAt     int64 `json:"search_at_ms"`
+	StopAt       int64 `json:"stop_at_ms"`
 }
 
 type Search struct {
@@ -113,8 +116,21 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 		}
 	}
 	ph := sc.Phases
+	// Registration phase begins bootstrap_wait after the run starts. With a
+	// start window each node registers bootstrap_wait after its own start;
+	// without one, node i registers i x register_stagger into the phase.
 	registerAt := t0 + ph.BootstrapWait.Milliseconds()
-	searchAt := registerAt + int64(n)*ph.RegisterStagger.Milliseconds() + ph.RegisterWait.Milliseconds()
+	startOff := StartOffsets(sc.Population.Seed, n, ph.StartWindow)
+	regOff := make([]int64, n)
+	regSpan := int64(n) * ph.RegisterStagger.Milliseconds()
+	for i := range regOff {
+		regOff[i] = int64(i) * ph.RegisterStagger.Milliseconds()
+	}
+	if ph.StartWindow > 0 {
+		copy(regOff, startOff)
+		regSpan = ph.StartWindow.Milliseconds()
+	}
+	searchAt := registerAt + regSpan + ph.RegisterWait.Milliseconds()
 	stopAt := searchAt + ph.SearchTimeout.Milliseconds()
 	// Node 0 is the bootnode for everyone.
 	h0 := hosts(0)
@@ -129,7 +145,7 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 		a := Assignment{
 			Idx: i, Key: hex.EncodeToString(crypto.FromECDSA(keys[i])), IP: h.IP, Port: h.BasePort, StatusPort: h.BasePort + h.StatusOff, TraceFile: h.TraceFile,
 			Topics: topics[i], MaxPeers: sc.ConnModel.MaxPeers, DialRatio: sc.ConnModel.DialRatio,
-			Phases: Phases{RegisterAt: registerAt + int64(i)*ph.RegisterStagger.Milliseconds(), SearchAt: searchAt + int64(i)*ph.SearchStagger.Milliseconds(), StopAt: stopAt},
+			Phases: Phases{StartAt: t0 + startOff[i], RegisterBase: registerAt, RegisterAt: registerAt + regOff[i], SearchAt: searchAt + int64(i)*ph.SearchStagger.Milliseconds(), StopAt: stopAt},
 			Search: Search{Model: sc.Search.Model, TargetCount: sc.Search.TargetCount, RequestDelayMs: sc.Search.RequestDelay.Milliseconds(), RequestTimeout: sc.Search.RequestTimeout.Milliseconds()},
 		}
 		if i != 0 {
@@ -246,4 +262,30 @@ func (z *Zipf) Draw(rng *rand.Rand) int {
 		}
 	}
 	return lo
+}
+
+// StartOffsets spreads node starts uniformly at random over window (ms since
+// the run's start), ascending by node index so the bootnode (node 0) starts
+// first. A node registers bootstrap_wait after its start, so the same offsets
+// spread registrations and ad expiries. A zero window starts everyone at once.
+func StartOffsets(seed int64, n int, window time.Duration) []int64 {
+	o := sortedUniform(seed+7919, n, window)
+	if n > 0 {
+		o[0] = 0
+	}
+	return o
+}
+
+func sortedUniform(seed int64, n int, window time.Duration) []int64 {
+	out := make([]int64, n)
+	if window <= 0 || n == 0 {
+		return out
+	}
+	rng := rand.New(rand.NewSource(seed))
+	w := window.Milliseconds()
+	for i := range out {
+		out[i] = rng.Int63n(w + 1)
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a] < out[b] })
+	return out
 }

@@ -102,6 +102,7 @@ func main() {
 		}
 	}
 
+	wait(asg.Phases.StartAt) // spread startups; a churn restart is past it and starts at once
 	ready := make(chan struct{})
 	var srv *p2p.Server
 	proto := p2p.Protocol{

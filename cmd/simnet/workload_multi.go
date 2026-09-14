@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/datahop/topdisc-testbed/pkg/assign"
 	"math/rand"
 	"os"
 	"time"
@@ -78,7 +79,7 @@ func dumpReach(path string, all []nodeRec, topics []topicindex.TopicID) {
 	json.NewEncoder(f).Encode(map[string]any{"searchers": sr, "registrarContents": contents})
 	fmt.Printf("reach written to: %s (%d searchers, %d topics contents)\n", path, len(sr), len(contents))
 }
-func runMultiTopicWorkload(all []nodeRec, numTopics int, zipfS float64, seed int64, registerWait, searchTimeout, regProbePeriod, registerStagger time.Duration, metricsOut string, pacing searchPacing) {
+func runMultiTopicWorkload(all []nodeRec, numTopics int, zipfS float64, seed int64, registerWait, searchTimeout, regProbePeriod, registerStagger, startWindow time.Duration, metricsOut string, pacing searchPacing) {
 	if seed == 0 {
 		seed = time.Now().UnixNano()
 	}
@@ -152,6 +153,7 @@ func runMultiTopicWorkload(all []nodeRec, numTopics int, zipfS float64, seed int
 	// nodes are skipped — they remain passive Discv5 peers.
 	regStart := time.Now()
 	setSearchEpoch(regStart)
+	regOff := assign.StartOffsets(seed, len(all), startWindow) // registration offset = the node's start offset
 
 	// The probe must be sampling *before* registrations begin. The stagger loop
 	// below is synchronous and runs for registerStagger x N (minutes at 10k), so
@@ -172,13 +174,22 @@ func runMultiTopicWorkload(all []nodeRec, numTopics int, zipfS float64, seed int
 		if nodeTopics[i][0] < 0 {
 			continue
 		}
-		if registerStagger > 0 && staggered > 0 {
+		if startWindow > 0 {
+			if d := time.Until(regStart.Add(time.Duration(regOff[i]) * time.Millisecond)); d > 0 {
+				time.Sleep(d)
+			}
+		} else if registerStagger > 0 && staggered > 0 {
 			time.Sleep(registerStagger)
 		}
 		staggered++
 		startNs[n.ln.ID().String()] = time.Since(regStart).Nanoseconds()
 		for _, t := range nodeTopics[i] {
 			n.disc.RegisterTopic(topics[t], uint64(n.idx))
+		}
+	}
+	if startWindow > 0 {
+		if d := time.Until(regStart.Add(startWindow)); d > 0 {
+			time.Sleep(d)
 		}
 	}
 	registrationStartNs = startNs

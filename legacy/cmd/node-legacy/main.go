@@ -39,6 +39,7 @@ type assignment struct {
 	MaxPeers   int      `json:"max_peers"`
 	DialRatio  int      `json:"dial_ratio"`
 	Phases     struct {
+		StartAt    int64 `json:"start_at_ms"`
 		RegisterAt int64 `json:"register_at_ms"`
 		SearchAt   int64 `json:"search_at_ms"`
 		StopAt     int64 `json:"stop_at_ms"`
@@ -141,6 +142,7 @@ func main() {
 		}
 	}
 
+	wait(asg.Phases.StartAt)
 	ready := make(chan struct{})
 	var srv *p2p.Server
 	proto := p2p.Protocol{
