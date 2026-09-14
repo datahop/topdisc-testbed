@@ -201,7 +201,7 @@ def plot_load_vs_topic_distance(nodes, metrics, out, label):
 # TOPICNODES responses it draws. NODES/FINDNODE/PING/PONG are DHT maintenance
 # that both sides rely on, so they are reported separately rather than being
 # attributed to either.
-REG_TYPES = ("REGTOPIC/v5", "REGCONFIRMATION/v5", "TICKET/v5")
+REG_TYPES = ("REGTOPIC/v5", "REGTOPIC(renewal)/v5", "REGCONFIRMATION/v5")
 LOOKUP_TYPES = ("TOPICQUERY/v5", "TOPICNODES/v5")
 
 

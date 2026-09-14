@@ -34,6 +34,8 @@ process per node, per-node traces). Status: ✓ done, ◐ partial, ✗ missing,
 | Aux nodes | Closest-to-topic nodes attached to replies (protocol constant, not in the plan). | `topic.aux_nodes_limit` | ✓ | ✓ | |
 | Registration attempt timeout | Give up on a registrar after this; defaults to 1.5 × E. | `topic.reg_attempt_timeout` | ✓ | ✓ | |
 
+Real backends pass the protocol parameters to every node through its assignment (`p2p.Config.DiscoveryV5Topic` in the fork since `v1.17.2-testbed.3`); before that tag they silently ran the fork defaults.
+
 ## Lookup workload
 
 | Parameter | Meaning | Scenario key | simnet | real | Notes |

@@ -171,3 +171,22 @@ flag is set: `-overhead-out` enables per-message-type wire counting and
 TOPICQUERY-received counting, `-overhead-series-out` additionally enables
 registrar wait-time sampling, and `-reach-out` enables per-searcher reach
 sampling. Runs without those flags carry no measurement overhead.
+
+## Fork version and real-backend additions
+
+`run.yaml` records `build.testbed` (testbed commit) and `build.fork` (the
+go-ethereum tag, e.g. `github.com/datahop/go-ethereum@v1.17.2-testbed.3`). The
+fork's testbed tags live on `feat/topdisc-instrumentation` and are never merged
+into `topdisc`.
+
+Real backends add to `metrics.json`:
+
+| Field | Contents |
+|---|---|
+| `results[].lookupQueries`, `results[].lookupContacted` | TOPICQUERY requests sent and distinct nodes queried, per lookup |
+| `registrationBucketFullNs{}` | topic hex → registrant → per registration bucket (far to close), ns since registration start when the bucket first held its target number of ads; -1 = never |
+| `registrationCompleteNs{}` | topic hex → registrant → ns when every bucket was full or out of candidates |
+
+Wire counters on every backend split REGTOPIC requests to a registrar that
+already admitted the advertiser once into `REGTOPIC(renewal)/v5`; first
+registrations stay `REGTOPIC/v5`.

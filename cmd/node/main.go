@@ -123,6 +123,11 @@ func main() {
 		PrivateKey: key, Name: "topdisc-node", MaxPeers: *maxPeers, DialRatio: *dialRatio,
 		ListenAddr: fmt.Sprintf("%s:%d", *ip, *port), DiscoveryV4: false, DiscoveryV5: true,
 		BootstrapNodesV5: bootnodes, Protocols: []p2p.Protocol{proto}, Logger: log.Root(),
+		DiscoveryV5Topic: topicindex.Config{
+			AdLifetime: time.Duration(asg.Topic.AdLifetimeMs) * time.Millisecond, AdCacheSize: asg.Topic.AdCacheSize,
+			RegAttemptTimeout: time.Duration(asg.Topic.RegAttemptTimeoutMs) * time.Millisecond, SearchBucketSize: asg.Topic.SearchBucketSize,
+			TopicNodesLimit: asg.Topic.TopicNodesLimit, AuxNodesLimit: asg.Topic.AuxNodesLimit,
+		},
 	}}
 	discover.EnableWireStats()
 	discover.EnableWaitStats()
@@ -140,9 +145,41 @@ func main() {
 	adsFirst := map[string]map[string]int64{} // topic hex -> advertiser id -> unix ms
 	adsLast := map[string][]string{}
 	var adsMu sync.Mutex
+	// Advertiser side: when each registration bucket first held its target
+	// number of ads, when the whole table first was complete (every bucket
+	// full or out of candidates), and the last table state.
+	var (
+		bucketFullMs  []int64
+		regCompleteMs = int64(-1)
+		bucketsLast   []topicindex.BucketStats
+	)
 	go func() {
 		d := srv.DiscoveryV5()
 		for range time.Tick(time.Second) {
+			if bs := d.TopicRegistrationBuckets(topic); bs != nil {
+				now := time.Now().UnixMilli()
+				adsMu.Lock()
+				if bucketFullMs == nil {
+					bucketFullMs = make([]int64, len(bs))
+					for i := range bucketFullMs {
+						bucketFullMs[i] = -1
+					}
+				}
+				complete := true
+				for i, b := range bs {
+					if b.Registered >= b.Target && bucketFullMs[i] < 0 {
+						bucketFullMs[i] = now
+					}
+					if b.Registered < b.Target && (b.Waiting > 0 || b.Standby > 0) {
+						complete = false
+					}
+				}
+				if complete && regCompleteMs < 0 {
+					regCompleteMs = now
+				}
+				bucketsLast = bs
+				adsMu.Unlock()
+			}
 			_, _, byTopic := d.TopicCacheOccupancy()
 			now := time.Now().UnixMilli()
 			adsMu.Lock()
@@ -277,6 +314,7 @@ func main() {
 		}
 		adsMu.Lock()
 		first, last := adsFirst, adsLast
+		bFull, bLast, rComplete := bucketFullMs, bucketsLast, regCompleteMs
 		adsMu.Unlock()
 		samplesMu.Lock()
 		smp := samples
@@ -290,6 +328,7 @@ func main() {
 			"ads_held": len(srv.DiscoveryV5().LocalTopicNodes(topic)), "wire": wire,
 			"topic": topic.String(), "topics": asg.Topics, "register_at_ms": asg.Phases.RegisterAt, "search_at_ms": asg.Phases.SearchAt,
 			"ads_first_seen_ms": first, "ads_final": last, "wait": wait, "samples": smp,
+			"reg_bucket_full_ms": bFull, "reg_complete_ms": rComplete, "reg_buckets_final": bLast,
 		}, "", " ")
 		os.WriteFile(asg.TraceFile, b, 0o644)
 	}

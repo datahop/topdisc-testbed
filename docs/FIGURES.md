@@ -20,7 +20,7 @@ with the assignments. All 21 per-run figures render from a real-backend run. Sta
 |---|---|---|---|---|---|
 | Cache utilisation over time | Ads held network-wide and per service against capacity C, sampled periodically; the plan compares it with the Python simulator under the same workload. | `series.json` `samples[].cacheHeld / cacheCap / cacheByTopic` | `oh_08_cache_utilisation` | ✓ | ✓ |
 | Registration waiting time vs popularity | The wait a registrar quotes an advertiser (every quote) and the cumulative wait until admission (one per successful registration), per service. | `series.json` `waitTime[].quotedMs / admittedMs` | `oh_05_wait_time_cdf` | ✓ | ✓ |
-| Time to first registration and to complete the intended registrations across buckets, by popularity | From an advertiser's start until its ad is first admitted by a remote registrar, and until every bucket of its registration table holds an ad. | `metrics.json` `registrationTimingNs`, `registrationStartNs`; per-bucket completion not recorded | `07_registration_latency_bar`, `07_placement_time_idspace`, `07b_placement_mean_idspace` | ◐ first admission only (#116) | ◐ same, from registrar snapshots at 1 s |
+| Time to first registration and to complete the intended registrations across buckets, by popularity | From an advertiser's start until its ad is first admitted by a remote registrar, and until every bucket of its registration table holds an ad. | `metrics.json` `registrationTimingNs`, `registrationStartNs`; per-bucket completion not recorded | `07_registration_latency_bar`, `07_placement_time_idspace`, `07b_placement_mean_idspace` | ◐ first admission only (#116) | ◐ first admission plotted; per-bucket completion recorded (`registrationBucketFullNs`, `registrationCompleteNs`), no figure yet |
 | Registrars per advertiser, ads per registrar | Fan-out: how many registrars hold each advertiser's ad; load: how many ads each registrar holds. | `metrics.json` `registrationCoverage.byRegistrant / byHost` | `06_fanout_both_views`, `04b_id_space_registrars`, `04_id_space_registrants` | ✓ | ✓ |
 
 ## §2 Search performance and discovery
@@ -29,7 +29,7 @@ with the assignments. All 21 per-run figures render from a real-backend run. Sta
 |---|---|---|---|---|---|
 | Lookup latency vs popularity | Time from a lookup's start to its first result and to completion (F_lookup reached or timeout). | `metrics.json` `results[].timeToFirstNs / timeToCompletionNs`; real traces: `lookups[].latency_ms` | `02b_time_to_first_cdf` | ✓ | ✓ |
 | Fraction of advertisers discovered vs popularity | Distinct registrants found over time and at the end, against the number that exist for the service. | `metrics.json` `results[].uniqueFoundAtMs`, `perTopic[].meanRecall / fullRecall` | `02_recall_reached`, `03_unique_found_over_time` | ✓ | ✓ |
-| Registrars / nodes contacted per lookup vs popularity | How many nodes a lookup queried before finishing. | not recorded | — | ✗ (#116) | ✗ |
+| Registrars / nodes contacted per lookup vs popularity | How many nodes a lookup queried before finishing. | not recorded | — | ✗ (#116) | ◐ recorded (`lookupQueries`, `lookupContacted`), no figure yet |
 | Times each advertiser is discovered | Over all searchers of a service, how many found each registrant; shows the never-found tail. | `metrics.json` `findCountByTopic`, `results[].foundRegistrantIds` | `05_id_space_found_vs_missed` | ✓ | ✓ |
 | Placement to first discovery | From an ad's first admission to the first time any searcher returns it, on the common clock. | `metrics.json` `registrationTimingNs` × `results[].uniqueFoundAtMs + searchStartMs` | `oh_06_idspace_found_time` | ✓ | ✓ |
 
@@ -39,7 +39,7 @@ with the assignments. All 21 per-run figures render from a real-backend run. Sta
 |---|---|---|---|---|---|
 | Registration and lookup contacts across the service-centred ID space | Which nodes, by XOR distance from the service id, get contacted by registrations and by lookups. | contacts are not recorded; traffic is | — | ◐ traffic proxy | ◐ |
 | Total messages / bytes sent and received per node | Per-node totals across the ID space. | `oh.json` `txBytes / rxBytes / txPkts / rxPkts` | `oh_01_idspace_traffic` | ✓ | ✓ |
-| Per-node traffic by registration, renewal and lookup | Same split by message type; renewal is not distinguished from a fresh REGTOPIC. | `oh.json` `byType{}` | `oh_03_idspace_msgtype`, `oh_10_reg_vs_lookup` | ◐ no renewal split (#116) | ◐ |
+| Per-node traffic by registration, renewal and lookup | Same split by message type; renewal is not distinguished from a fresh REGTOPIC. | `oh.json` `byType{}` | `oh_03_idspace_msgtype`, `oh_10_reg_vs_lookup` | ✓ `REGTOPIC(renewal)/v5` | ✓ `REGTOPIC(renewal)/v5` |
 | Peak per-node rate across the ID space, total and by type | Highest sustained send/receive rate per node over a sliding window. | `series.json` `samples[]` differenced | `oh_02_idspace_peak_rate`, `oh_04_idspace_peak_msgtype` | ✓ | ✓ |
 | Load vs node distance from service ids | Traffic against XOR distance to the topics a node is close to. | `oh.json` × `metrics.json` `topicIds` | `oh_07_load_vs_topic_distance` | ✓ | ✓ |
 | Lookup traffic per searcher vs popularity | Cost of a lookup as a function of the service's size. | `oh.json` × `metrics.json` `perTopic` | `oh_09_cost_per_lookup` | ✓ | ✓ |
