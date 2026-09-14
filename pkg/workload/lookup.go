@@ -17,7 +17,9 @@ type Lookup struct {
 	FirstMs   int64   `json:"first_ms"` // to the first result; -1 = none
 	Results   int     `json:"results"`
 	HitTarget bool    `json:"hit_target"`
-	Found     []Found `json:"found"` // distinct registrants in the order seen
+	Found     []Found `json:"found"`     // distinct registrants in the order seen
+	Queries   int     `json:"queries"`   // TOPICQUERY requests sent; -1 = not reported
+	Contacted int     `json:"contacted"` // distinct nodes queried; -1 = not reported
 }
 
 // Found is one distinct registrant a lookup returned and when (ms since the
@@ -71,7 +73,10 @@ func runOne(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target
 		stop = start.Add(timeout)
 	}
 	done := func(hit bool) Lookup {
-		l := Lookup{StartMs: start.UnixMilli(), LatencyMs: time.Since(start).Milliseconds(), FirstMs: -1, Results: len(seen), HitTarget: hit, Found: found}
+		l := Lookup{StartMs: start.UnixMilli(), LatencyMs: time.Since(start).Milliseconds(), FirstMs: -1, Results: len(seen), HitTarget: hit, Found: found, Queries: -1, Contacted: -1}
+		if c, ok := it.(interface{ Contacts() (int, int) }); ok {
+			l.Queries, l.Contacted = c.Contacts()
+		}
 		if len(found) > 0 {
 			l.FirstMs = found[0].AtMs
 		}

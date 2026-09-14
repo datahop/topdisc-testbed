@@ -37,6 +37,8 @@ type rawTrace struct {
 	AdsFinal       map[string][]string         `json:"ads_final"`
 	Wait           map[string]waitStats        `json:"wait"`
 	Samples        []rawSample                 `json:"samples"`
+	RegBucketFull  []int64                     `json:"reg_bucket_full_ms"`
+	RegCompleteMs  int64                       `json:"reg_complete_ms"`
 	Wire           map[string]map[string]int64 `json:"wire"`
 }
 
@@ -46,6 +48,8 @@ type rawLookup struct {
 	FirstMs   int64 `json:"first_ms"`
 	Results   int   `json:"results"`
 	HitTarget bool  `json:"hit_target"`
+	Queries   int   `json:"queries"`
+	Contacted int   `json:"contacted"`
 	Found     []struct {
 		ID   string `json:"id"`
 		AtMs int64  `json:"at_ms"`
@@ -98,6 +102,9 @@ type searchResult struct {
 	LookupLatencyMs     []int64  `json:"lookupLatencyMs"`
 	LookupResults       []int    `json:"lookupResults"`
 	SearchStartMs       int64    `json:"searchStartMs"`
+	// Real backends only: TOPICQUERY requests and distinct nodes per lookup.
+	LookupQueries   []int `json:"lookupQueries,omitempty"`
+	LookupContacted []int `json:"lookupContacted,omitempty"`
 }
 
 type topicReport struct {
@@ -261,6 +268,10 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 			}
 			r.LookupLatencyMs = append(r.LookupLatencyMs, l.LatencyMs)
 			r.LookupResults = append(r.LookupResults, l.Results)
+			if l.Queries >= 0 {
+				r.LookupQueries = append(r.LookupQueries, l.Queries)
+				r.LookupContacted = append(r.LookupContacted, l.Contacted)
+			}
 			r.Found += l.Results
 			end := l.StartMs + l.LatencyMs - t.SearchAtMs
 			if end > last {
@@ -360,6 +371,33 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 	}
 
 	// Registration coverage, timing, placements from registrar snapshots.
+	// Per-bucket registration completion (advertiser side), ns since regStart.
+	bucketFull := map[string]map[string][]int64{}
+	complete := map[string]map[string]int64{}
+	for _, a := range as {
+		t, ok := traces[a.Idx]
+		if !ok || a.Legacy {
+			continue
+		}
+		th := topicHex(topicOf[a.Idx])
+		if bucketFull[th] == nil {
+			bucketFull[th], complete[th] = map[string][]int64{}, map[string]int64{}
+		}
+		if len(t.RegBucketFull) > 0 {
+			v := make([]int64, len(t.RegBucketFull))
+			for i, ms := range t.RegBucketFull {
+				v[i] = -1
+				if ms >= 0 {
+					v[i] = ns(ms)
+				}
+			}
+			bucketFull[th][t.ID] = v
+		}
+		if t.RegCompleteMs > 0 {
+			complete[th][t.ID] = ns(t.RegCompleteMs)
+		}
+	}
+
 	cov := map[int]coverage{}
 	timing := map[string]map[string]int64{}
 	placements := map[string]map[string]*placeAgg{}
@@ -408,6 +446,7 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 		"perTopic": perTopic, "results": results, "registrationCoverage": map[string]any{"byTopic": cov},
 		"registrationTimingNs": timing, "findCountByTopic": findCounts, "topicIds": topicIds,
 		"registrationStartNs": startNs, "registrationPlacements": placements,
+		"registrationBucketFullNs": bucketFull, "registrationCompleteNs": complete,
 	}
 	f, err := os.Create(filepath.Join(runDir, "metrics.json"))
 	if err != nil {

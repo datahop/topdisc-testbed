@@ -32,6 +32,17 @@ type Search struct {
 	LookupAtMs     []int64 `json:"lookup_at_ms,omitempty"` // scheduled: absolute lookup times, from the seed
 }
 
+// Topic carries the scenario's topic-discovery parameters to the node; zero
+// values mean the fork's defaults.
+type Topic struct {
+	AdLifetimeMs        int64 `json:"ad_lifetime_ms"`
+	AdCacheSize         int   `json:"ad_cache_size"`
+	RegAttemptTimeoutMs int64 `json:"reg_attempt_timeout_ms"`
+	SearchBucketSize    int   `json:"search_bucket_size"`
+	TopicNodesLimit     int   `json:"topic_nodes_limit"`
+	AuxNodesLimit       int   `json:"aux_nodes_limit"`
+}
+
 type Assignment struct {
 	Idx        int           `json:"idx"`
 	Key        string        `json:"key"` // hex secp256k1 private key
@@ -44,6 +55,7 @@ type Assignment struct {
 	DialRatio  int           `json:"dial_ratio"`
 	Phases     Phases        `json:"phases"`
 	Search     Search        `json:"search"`
+	Topic      Topic         `json:"topic"`
 	Legacy     bool          `json:"legacy"`     // stock upstream geth, no topic discovery
 	SampleMs   int64         `json:"sample_ms"`  // period of the node's counter/cache samples (series.json); 0 = off
 	Churn      []churn.Event `json:"churn"`      // seconds from search start
@@ -127,6 +139,9 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 			a.Legacy = true
 		}
 		a.SampleMs = cfg.Testbed.Traces.OverheadSeriesPeriod.Milliseconds()
+		a.Topic = Topic{AdLifetimeMs: sc.Topic.AdLifetime.Milliseconds(), AdCacheSize: sc.Topic.AdCacheSize,
+			RegAttemptTimeoutMs: sc.Topic.RegAttemptTimeout.Milliseconds(), SearchBucketSize: sc.Topic.SearchBucketSize,
+			TopicNodesLimit: sc.Topic.TopicNodesLimit, AuxNodesLimit: sc.Topic.AuxNodesLimit}
 		if sc.Search.Model == "scheduled" && sc.Search.Intervals > 0 {
 			a.Search.LookupAtMs = LookupTimes(rand.New(rand.NewSource(sc.Population.Seed+int64(i)*40503)), a.Phases.SearchAt, stopAt, sc.Search.Intervals)
 		}

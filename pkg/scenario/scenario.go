@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"time"
@@ -20,6 +21,43 @@ type Config struct {
 	Name       string         `yaml:"name"`
 	Scenario   ScenarioConfig `yaml:"scenario"`
 	Testbed    TestbedConfig  `yaml:"testbed"`
+	Build      BuildInfo      `yaml:"build"`
+}
+
+// BuildInfo records what the run was built from, so every result traces back
+// to a testbed commit and a go-ethereum fork tag. Filled in by PrepareRun.
+type BuildInfo struct {
+	Testbed string `yaml:"testbed"` // vcs revision, "+dirty" when modified
+	Fork    string `yaml:"fork"`    // module version of the replaced go-ethereum, e.g. v1.17.2-testbed.1
+}
+
+func readBuildInfo() BuildInfo {
+	var b BuildInfo
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return b
+	}
+	dirty := false
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			b.Testbed = s.Value
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+	if dirty && b.Testbed != "" {
+		b.Testbed += "+dirty"
+	}
+	for _, d := range bi.Deps {
+		if d.Path == "github.com/ethereum/go-ethereum" {
+			b.Fork = d.Version
+			if d.Replace != nil {
+				b.Fork = d.Replace.Path + "@" + d.Replace.Version
+			}
+		}
+	}
+	return b
 }
 
 // ScenarioConfig describes the experiment; it means the same on any testbed.
@@ -474,6 +512,7 @@ func PrintReference() {
 var FlushLog = func() {}
 
 func PrepareRun(c *Config) (string, error) {
+	c.Build = readBuildInfo()
 	dir := fmt.Sprintf("%s-%s", c.Name, time.Now().Format("20060102-150405"))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
