@@ -44,9 +44,9 @@ given by where you run it and what you check out.
 Figures, once a run has finished:
 
 ```sh
-python3 figures/figures.py <run>/m.json --out-dir figs --label baseline
+python3 figures/figures.py <run>/metrics.json --out-dir figs --label baseline
 python3 figures/figures_overhead.py <run>/series.json \
-    --metrics <run>/m.json --overhead <run>/oh.json --out-dir figs --label baseline
+    --metrics <run>/metrics.json --overhead <run>/oh.json --out-dir figs --label baseline
 ```
 
 ## Phase 3 coverage

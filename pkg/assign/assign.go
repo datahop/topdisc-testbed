@@ -45,6 +45,7 @@ type Assignment struct {
 	Phases     Phases        `json:"phases"`
 	Search     Search        `json:"search"`
 	Legacy     bool          `json:"legacy"`     // stock upstream geth, no topic discovery
+	SampleMs   int64         `json:"sample_ms"`  // period of the node's counter/cache samples (series.json); 0 = off
 	Churn      []churn.Event `json:"churn"`      // seconds from search start
 	TraceFile  string        `json:"trace_file"` // where the node writes its trace at StopAt
 }
@@ -125,6 +126,7 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 		if legacy[i] {
 			a.Legacy = true
 		}
+		a.SampleMs = cfg.Testbed.Traces.OverheadSeriesPeriod.Milliseconds()
 		if sc.Search.Model == "scheduled" && sc.Search.Intervals > 0 {
 			a.Search.LookupAtMs = LookupTimes(rand.New(rand.NewSource(sc.Population.Seed+int64(i)*40503)), a.Phases.SearchAt, stopAt, sc.Search.Intervals)
 		}

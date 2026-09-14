@@ -125,12 +125,72 @@ func main() {
 		BootstrapNodesV5: bootnodes, Protocols: []p2p.Protocol{proto}, Logger: log.Root(),
 	}}
 	discover.EnableWireStats()
+	discover.EnableWaitStats()
 	if err := srv.Start(); err != nil {
 		fmt.Fprintln(os.Stderr, "start:", err)
 		os.Exit(1)
 	}
 	srv.LocalNode().SetFallbackIP(net.ParseIP(*ip))
 	srv.LocalNode().Set(svcOf(*topicName)) // the service, readable by legacy nodes too
+
+	// Registrar side: every second, which advertisers' ads this node holds,
+	// per topic. First-seen times give registration timing and placements;
+	// the last snapshot gives coverage. This is what simnet's harness probes
+	// from outside; here the registrar reports it.
+	adsFirst := map[string]map[string]int64{} // topic hex -> advertiser id -> unix ms
+	adsLast := map[string][]string{}
+	var adsMu sync.Mutex
+	go func() {
+		d := srv.DiscoveryV5()
+		for range time.Tick(time.Second) {
+			_, _, byTopic := d.TopicCacheOccupancy()
+			now := time.Now().UnixMilli()
+			adsMu.Lock()
+			adsLast = map[string][]string{}
+			for tid, n := range byTopic {
+				if n == 0 {
+					continue
+				}
+				key := tid.String()
+				if adsFirst[key] == nil {
+					adsFirst[key] = map[string]int64{}
+				}
+				for _, ad := range d.LocalTopicNodes(tid) {
+					id := ad.ID().String()
+					if _, ok := adsFirst[key][id]; !ok {
+						adsFirst[key][id] = now
+					}
+					adsLast[key] = append(adsLast[key], id)
+				}
+			}
+			adsMu.Unlock()
+		}
+	}()
+	// Periodic counters and cache occupancy for the time series.
+	type sample struct {
+		AtMs      int64                           `json:"at_ms"`
+		Wire      map[string]discover.WireCounter `json:"wire"`
+		CacheHeld int                             `json:"cache_held"`
+		CacheCap  int                             `json:"cache_cap"`
+		ByTopic   map[string]int                  `json:"cache_by_topic"`
+	}
+	samples := []sample{}
+	var samplesMu sync.Mutex
+	if asg.SampleMs > 0 {
+		go func() {
+			d := srv.DiscoveryV5()
+			for range time.Tick(time.Duration(asg.SampleMs) * time.Millisecond) {
+				held, capacity, byTopic := d.TopicCacheOccupancy()
+				bt := map[string]int{}
+				for tid, n := range byTopic {
+					bt[tid.String()] = n
+				}
+				samplesMu.Lock()
+				samples = append(samples, sample{AtMs: time.Now().UnixMilli(), Wire: d.WireStats(), CacheHeld: held, CacheCap: capacity, ByTopic: bt})
+				samplesMu.Unlock()
+			}
+		}()
+	}
 
 	// Refill latency from the server's own peer events: an outbound drop
 	// starts a clock, the next outbound add stops it.
@@ -211,10 +271,25 @@ func main() {
 		if ws := srv.DiscoveryV5().WireStats(); len(ws) > 0 {
 			wire = ws
 		}
+		wait := map[string]discover.WaitTimeStats{}
+		for tid, st := range discover.WaitTimeStatsSnapshot() {
+			wait[tid.String()] = st
+		}
+		adsMu.Lock()
+		first, last := adsFirst, adsLast
+		adsMu.Unlock()
+		samplesMu.Lock()
+		smp := samples
+		samplesMu.Unlock()
+		if lookups == nil {
+			lookups = []workload.Lookup{}
+		}
 		b, _ := json.MarshalIndent(map[string]any{
 			"idx": asg.Idx, "id": srv.Self().ID().String(), "outbound": out, "inbound": in,
 			"peer_drops": drops, "refill_ms": refills, "lookups": lookups, "first_capable_ms": firstCapableMs, "legacy": false,
 			"ads_held": len(srv.DiscoveryV5().LocalTopicNodes(topic)), "wire": wire,
+			"topic": topic.String(), "topics": asg.Topics, "register_at_ms": asg.Phases.RegisterAt, "search_at_ms": asg.Phases.SearchAt,
+			"ads_first_seen_ms": first, "ads_final": last, "wait": wait, "samples": smp,
 		}, "", " ")
 		os.WriteFile(asg.TraceFile, b, 0o644)
 	}

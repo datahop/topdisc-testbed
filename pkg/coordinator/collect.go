@@ -32,7 +32,8 @@ type NodeTrace struct {
 
 // Collect reads the per-node traces, prints the run summary and writes
 // nodes.json plus oh.json in the format figures_overhead.py reads.
-func Collect(trDir, runDir string, n int) error {
+func Collect(trDir, runDir string, as []assign.Assignment) error {
+	n := len(as)
 	var traces []NodeTrace
 	for i := 0; i < n; i++ {
 		b, err := os.ReadFile(filepath.Join(trDir, fmt.Sprintf("node%d.json", i)))
@@ -119,7 +120,15 @@ func Collect(trDir, runDir string, n int) error {
 	b, _ := json.Marshal(traces)
 	os.WriteFile(filepath.Join(runDir, "nodes.json"), b, 0o644)
 	b, _ = json.Marshal(oh)
-	return os.WriteFile(filepath.Join(runDir, "oh.json"), b, 0o644)
+	if err := os.WriteFile(filepath.Join(runDir, "oh.json"), b, 0o644); err != nil {
+		return err
+	}
+	if err := writeMetrics(trDir, runDir, as); err != nil {
+		fmt.Println("metrics:", err)
+	} else {
+		fmt.Printf("metrics written to: %s/metrics.json, series.json, oh.json\n", runDir)
+	}
+	return nil
 }
 
 func planned(as []assign.Assignment) int {

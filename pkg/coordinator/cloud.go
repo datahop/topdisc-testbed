@@ -143,7 +143,7 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 		})
 		hostSummary(all)
 	}
-	return Collect(trDir, runDir, len(as))
+	return Collect(trDir, runDir, as)
 }
 
 type prepareRequest struct {

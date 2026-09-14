@@ -19,6 +19,7 @@ import (
 func RunLocal(cfg scenario.Config, runDir string) error {
 	sc, lc := cfg.Scenario, cfg.Testbed.Local
 	n := sc.Population.Nodes
+	_ = n
 	trDir := filepath.Join(runDir, "traces")
 	if err := os.MkdirAll(trDir, 0o755); err != nil {
 		return err
@@ -60,5 +61,5 @@ func RunLocal(cfg scenario.Config, runDir string) error {
 	if err := drive(as, ctl, lc.Grace); err != nil {
 		return err
 	}
-	return Collect(trDir, runDir, n)
+	return Collect(trDir, runDir, as)
 }
