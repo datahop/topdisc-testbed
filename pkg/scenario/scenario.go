@@ -114,7 +114,6 @@ type NetworkConfig struct {
 type PhasesConfig struct {
 	BootstrapWait   time.Duration `yaml:"bootstrap_wait"`
 	StartWindow     time.Duration `yaml:"start_window"`
-	RegisterWindow  time.Duration `yaml:"register_window"`
 	RegisterStagger time.Duration `yaml:"register_stagger"`
 	RegisterWait    time.Duration `yaml:"register_wait"`
 	SearchStagger   time.Duration `yaml:"search_stagger"`
@@ -291,9 +290,8 @@ var paramDocs = []paramDoc{
 	{"scenario.network.node_regions", "cloud: pin nodes, index -> region, e.g. {0: us-east-1, 7: sa-east-1}; the rest follow regions"},
 	{"scenario.network.model", "emulated backends: regions = per-pair latency from rtt_table by region; star = the plan's model, each node draws a one-way delay from testbed.wan (pair RTT 8-91 ms)"},
 	{"scenario.network.rtt_table", "emulated backends (Grid'5000/Distem): inter-region RTT table used for per-pair latency; relative to this file"},
-	{"scenario.phases.start_window", "spread node starts uniformly at random over this window (seeded, bootnode first); 0 = all at once"},
+	{"scenario.phases.start_window", "each node starts at a uniformly random time in this window (seeded, bootnode first) and registers bootstrap_wait later, so registrations and ad expiries spread over it; set to the ad lifetime for even expiries. simnet: nodes are in the DHT from the start, registrations follow the same schedule. 0 = all at once, register_stagger applies"},
 	{"scenario.phases.bootstrap_wait", "after spawning, before registrations start"},
-	{"scenario.phases.register_window", "each node starts registering at a uniformly random point in this window (seeded); set it to the ad lifetime so expiries spread evenly; 0 = use register_stagger"},
 	{"scenario.phases.register_stagger", "gap between consecutive nodes starting to register"},
 	{"scenario.phases.register_wait", "after the last node starts registering, before searches start"},
 	{"scenario.phases.search_stagger", "gap between consecutive searchers starting"},

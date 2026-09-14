@@ -17,8 +17,7 @@ scenario:
     regions: {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}
   phases:
     bootstrap_wait: 2m
-    start_window: 5m           # node starts spread over 5 minutes
-    register_window: 15m       # = E: registrations, and so ad expiries, spread over a full lifetime
+    start_window: 15m          # = E: node starts, and so registrations and ad expiries, spread over a full lifetime
     register_wait: 22m30s      # 1.5 x E: registrations settle before lookups start
     search_stagger: 10ms
     search_timeout: 60m

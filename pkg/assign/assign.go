@@ -116,14 +116,21 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 		}
 	}
 	ph := sc.Phases
-	registerAt := t0 + ph.StartWindow.Milliseconds() + ph.BootstrapWait.Milliseconds()
+	// Registration phase begins bootstrap_wait after the run starts. With a
+	// start window each node registers bootstrap_wait after its own start;
+	// without one, node i registers i x register_stagger into the phase.
+	registerAt := t0 + ph.BootstrapWait.Milliseconds()
+	startOff := StartOffsets(sc.Population.Seed, n, ph.StartWindow)
+	regOff := make([]int64, n)
 	regSpan := int64(n) * ph.RegisterStagger.Milliseconds()
-	if ph.RegisterWindow > 0 {
-		regSpan = ph.RegisterWindow.Milliseconds()
+	for i := range regOff {
+		regOff[i] = int64(i) * ph.RegisterStagger.Milliseconds()
+	}
+	if ph.StartWindow > 0 {
+		copy(regOff, startOff)
+		regSpan = ph.StartWindow.Milliseconds()
 	}
 	searchAt := registerAt + regSpan + ph.RegisterWait.Milliseconds()
-	startOff := StartOffsets(sc.Population.Seed, n, ph.StartWindow)
-	regOff := RegisterOffsets(sc.Population.Seed, n, ph.RegisterWindow, ph.RegisterStagger)
 	stopAt := searchAt + ph.SearchTimeout.Milliseconds()
 	// Node 0 is the bootnode for everyone.
 	h0 := hosts(0)
@@ -258,26 +265,13 @@ func (z *Zipf) Draw(rng *rand.Rand) int {
 }
 
 // StartOffsets spreads node starts uniformly at random over window (ms since
-// the run's start), in ascending order by node index so the bootnode (node 0)
-// starts first. A zero window starts everyone at once.
+// the run's start), ascending by node index so the bootnode (node 0) starts
+// first. A node registers bootstrap_wait after its start, so the same offsets
+// spread registrations and ad expiries. A zero window starts everyone at once.
 func StartOffsets(seed int64, n int, window time.Duration) []int64 {
 	o := sortedUniform(seed+7919, n, window)
 	if n > 0 {
 		o[0] = 0
-	}
-	return o
-}
-
-// RegisterOffsets gives each node's registration start (ms after the
-// registration phase begins): uniformly random over window when it is set, so
-// ad expiries spread over the same window; otherwise index x stagger.
-func RegisterOffsets(seed int64, n int, window, stagger time.Duration) []int64 {
-	if window > 0 {
-		return sortedUniform(seed+104729, n, window)
-	}
-	o := make([]int64, n)
-	for i := range o {
-		o[i] = int64(i) * stagger.Milliseconds()
 	}
 	return o
 }

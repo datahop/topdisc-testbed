@@ -52,9 +52,8 @@ scenario:
     model: regions                     # emulated backends: regions = per-pair latency from rtt_table by region; star = the plan's model, each node draws a one-way delay from testbed.wan (pair RTT 8-91 ms)
     rtt_table: models/region-rtt.json  # emulated backends (Grid'5000/Distem): inter-region RTT table used for per-pair latency; relative to this file
   phases:
-    start_window: 0s                   # spread node starts uniformly at random over this window (seeded, bootnode first); 0 = all at once
+    start_window: 0s                   # each node starts at a uniformly random time in this window (seeded, bootnode first) and registers bootstrap_wait later, so registrations and ad expiries spread over it; set to the ad lifetime for even expiries. simnet: nodes are in the DHT from the start, registrations follow the same schedule. 0 = all at once, register_stagger applies
     bootstrap_wait: 3s                 # after spawning, before registrations start
-    register_window: 0s                # each node starts registering at a uniformly random point in this window (seeded); set it to the ad lifetime so expiries spread evenly; 0 = use register_stagger
     register_stagger: 0s               # gap between consecutive nodes starting to register
     register_wait: 5s                  # after the last node starts registering, before searches start
     search_stagger: 0s                 # gap between consecutive searchers starting

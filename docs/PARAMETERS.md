@@ -67,8 +67,7 @@ Real backends pass the protocol parameters to every node through its assignment 
 | Parameter | Meaning | Scenario key |
 |---|---|---|
 | Bootstrap wait | Time for routing tables to fill before anyone registers. | `phases.bootstrap_wait` |
-| Start window | Node starts spread uniformly at random over this window, from the seed, bootnode first. | `phases.start_window` |
-| Register window | Each node starts registering at a random point in this window. Set to the ad lifetime so 10k nodes do not register, and their ads do not expire, at the same moment. Replaces the index-based `register_stagger` when set. | `phases.register_window` |
+| Start window | Each node starts at a random time in this window, from the seed, bootnode first, and registers `bootstrap_wait` after its own start, so registrations and ad expiries spread over the same window. Set it to the ad lifetime so 10k nodes do not register, and their ads do not expire, together. On simnet nodes are in the DHT from the beginning and registrations follow the same per-node schedule. When unset, `register_stagger` applies. | `phases.start_window` |
 | Register stagger and wait | Spacing between nodes starting to register, and how long registration runs before lookups begin (1.5 × E by default so the network reaches a steady state). | `phases.register_stagger`, `register_wait` |
 | Search stagger and timeout | Spacing between nodes starting to search, and the length of the search phase. | `phases.search_stagger`, `search_timeout` |
 
