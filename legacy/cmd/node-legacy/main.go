@@ -47,7 +47,6 @@ type assignment struct {
 	Search struct {
 		Model          string  `json:"model"`
 		TargetCount    int     `json:"target_count"`
-		RequestDelayMs int64   `json:"request_delay_ms"`
 		RequestTimeout int64   `json:"request_timeout_ms"`
 		LookupAtMs     []int64 `json:"lookup_at_ms"`
 	} `json:"search"`
@@ -156,8 +155,12 @@ func main() {
 		},
 		DialCandidates: &lazyIter{ready: ready, open: func() enode.Iterator { return srv.DiscoveryV5().RandomNodes() }},
 	}
+	if asg.Search.Model == "continuous" {
+		// The node only consumes its own walk: no dialer, so no second walk.
+		proto.DialCandidates = enode.IterNodes(nil)
+	}
 	srv = &p2p.Server{Config: p2p.Config{
-		PrivateKey: key, Name: "topdisc-node-legacy", MaxPeers: asg.MaxPeers, DialRatio: asg.DialRatio,
+		PrivateKey: key, Name: "topdisc-node-legacy", MaxPeers: asg.MaxPeers, DialRatio: asg.DialRatio, NoDial: asg.Search.Model == "continuous",
 		ListenAddr: fmt.Sprintf("%s:%d", asg.IP, asg.Port), DiscoveryV4: false, DiscoveryV5: true,
 		BootstrapNodesV5: bootnodes, Protocols: []p2p.Protocol{proto}, Logger: log.Root(),
 	}}
@@ -227,16 +230,13 @@ func main() {
 						return
 					}
 					time.Sleep(time.Until(t))
-					rec(randomWalk(disc, isProvider, asg.Search.TargetCount, timeout, deadline))
+					rec(randomWalk(disc, isProvider, asg.Search.TargetCount, timeout, deadline, nil))
 				}
 				return
 			}
-			for time.Now().Before(deadline) {
-				rec(randomWalk(disc, isProvider, asg.Search.TargetCount, timeout, deadline))
-				if d := time.Duration(asg.Search.RequestDelayMs) * time.Millisecond; d > 0 {
-					time.Sleep(d)
-				}
-			}
+			// continuous: one walk for the whole phase, reported as a single lookup.
+			set := func(l lookup) { mu.Lock(); lookups = []lookup{l}; mu.Unlock() }
+			set(randomWalk(disc, isProvider, 0, 0, deadline, set))
 		}()
 	}
 	writeTrace := func() {
@@ -276,11 +276,11 @@ func main() {
 // randomWalk is what a topic-unaware client can do to find providers: check
 // the nodes it already knows, then run random-target Kademlia lookups (each
 // costs real FINDNODE traffic) until target providers are seen, the timeout
-// or the deadline.
+// or the deadline. progress, if set, gets the lookup so far after each round.
 func randomWalk(disc interface {
 	AllNodes() []*enode.Node
 	Lookup(enode.ID) []*enode.Node
-}, isProvider func(*enode.Node) bool, target int, timeout time.Duration, deadline time.Time) lookup {
+}, isProvider func(*enode.Node) bool, target int, timeout time.Duration, deadline time.Time, progress func(lookup)) lookup {
 	start := time.Now()
 	stop := deadline
 	if timeout > 0 && start.Add(timeout).Before(stop) {
@@ -312,6 +312,9 @@ func randomWalk(disc interface {
 		case nodes := <-res:
 			if add(nodes) {
 				return done(true)
+			}
+			if progress != nil {
+				progress(done(false))
 			}
 		case <-time.After(time.Until(stop)):
 			return done(false)

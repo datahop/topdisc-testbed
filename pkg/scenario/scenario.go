@@ -136,7 +136,6 @@ type TopicConfig struct {
 // SearchConfig: how nodes search.
 type SearchConfig struct {
 	Model          string        `yaml:"model"`
-	RequestDelay   time.Duration `yaml:"request_delay"`
 	RequestTimeout time.Duration `yaml:"request_timeout"`
 	TargetCount    int           `yaml:"target_count"`
 	Intervals      int           `yaml:"intervals"`
@@ -305,11 +304,10 @@ var paramDocs = []paramDoc{
 	{"scenario.topic.aux_nodes_limit", "closest-to-topic nodes attached to TOPICQUERY and REGTOPIC replies; 0 = default 8"},
 	{"scenario.topic.nodes_per_source_bucket", "cap per source per bucket; 0 = default 1 (inert on topdisc)"},
 	{"scenario.topic.remove_on_expiry", "drop ads at expiry instead of renewing (inert on topdisc)"},
-	{"scenario.search.model", "conn: search only while outbound slots are empty; continuous: lookups back to back; scheduled: one lookup per node at a random time in each of `intervals` equal slices of the search phase (plan §1)"},
+	{"scenario.search.model", "conn: search only while outbound slots are empty; continuous: one search for the whole search phase that keeps consuming results, without dialing; scheduled: one lookup per node at a random time in each of `intervals` equal slices of the search phase (plan §1)"},
 	{"scenario.search.intervals", "scheduled: number of equal intervals L the search phase is divided into"},
-	{"scenario.search.request_delay", "continuous: pause between lookups"},
-	{"scenario.search.request_timeout", "continuous: give up on a lookup after this; 0 = only target_count ends it"},
-	{"scenario.search.target_count", "conn: stop a searcher after this many distinct registrants; continuous: end each lookup at this many. 0 = never"},
+	{"scenario.search.request_timeout", "scheduled: give up on a lookup after this; 0 = only target_count ends it"},
+	{"scenario.search.target_count", "conn: stop a searcher after this many distinct registrants; scheduled: end each lookup at this many. 0 = never"},
 	{"scenario.conn_model.enabled", ""},
 	{"scenario.conn_model.max_peers", "total slots per node"},
 	{"scenario.conn_model.dial_ratio", "1/N of slots are outbound"},

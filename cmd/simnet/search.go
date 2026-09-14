@@ -53,11 +53,11 @@ type searchPacing struct {
 	Conns *connTable
 
 	// Model selects when a node searches. "conn": only while it has empty
-	// outbound slots, parking when full. "continuous": lookups back to back
-	// for the whole phase, each ending at TargetCount distinct registrants or
-	// RequestTimeout, with RequestDelay between them.
+	// outbound slots, parking when full. "continuous": one search for the
+	// whole phase that keeps consuming results and never dials. "scheduled": one
+	// lookup in each of Intervals equal slices of the phase, each ending at
+	// TargetCount distinct registrants or RequestTimeout.
 	Model          string
-	RequestDelay   time.Duration
 	Intervals      int           // scheduled: L
 	SearchTimeout  time.Duration // scheduled: length of the search phase
 	RequestTimeout time.Duration
@@ -111,7 +111,7 @@ type searchResult struct {
 	DialRefused     int   `json:"dialRefused"`     // refused because the target's inbound slots were full
 	SlotsFilledAtMs int64 `json:"slotsFilledAtMs"` // ms from search start until outbound was full (0 = never)
 
-	// Continuous search model: one entry per lookup this node ran.
+	// Scheduled search model: one entry per lookup this node ran.
 	Lookups          int     `json:"lookups"`
 	LookupsHitTarget int     `json:"lookupsHitTarget"`
 	LookupLatencyMs  []int64 `json:"lookupLatencyMs"`
@@ -284,7 +284,7 @@ func runMultiTopicSearches(all []nodeRec, nodeTopics [][]int, topics []topicinde
 	wg.Wait()
 	close(checkpointStop)
 	<-checkpointDone
-	if pacing.Model == "continuous" || pacing.Model == "scheduled" {
+	if pacing.Model == "scheduled" {
 		printLookupSummary(results, pacing)
 	}
 	return results
@@ -308,7 +308,7 @@ func printLookupSummary(results []searchResult, pacing searchPacing) {
 		}
 		return v[(p*(len(v)-1))/100]
 	}
-	fmt.Printf("=== continuous lookups (target=%d delay=%s timeout=%s) ===\n", pacing.TargetCount, pacing.RequestDelay, pacing.RequestTimeout)
+	fmt.Printf("=== scheduled lookups (target=%d timeout=%s) ===\n", pacing.TargetCount, pacing.RequestTimeout)
 	fmt.Printf("lookups=%d per node p50=%d hit-target=%d (%.1f%%) latency ms p50=%d p95=%d max=%d\n",
 		total, medOrZero(per), hit, 100*float64(hit)/float64(max(total, 1)), pct(lat, 50), pct(lat, 95), pct(lat, 100))
 }
@@ -399,7 +399,7 @@ func runOneSearcher(n nodeRec, topicIdx int, topic topicindex.TopicID, deadlineA
 		lastDial        = make(map[enode.ID]time.Time)
 
 		scheduled        = pacing.Model == "scheduled"
-		continuous       = pacing.Model == "continuous" || scheduled
+		continuous       = pacing.Model == "continuous"
 		schedule         []time.Time
 		scheduleIdx      int
 		lookupStart      time.Time
@@ -431,7 +431,7 @@ sessions:
 			scheduleIdx++
 		}
 		openSearch()
-		if continuous {
+		if scheduled {
 			lookupStart = time.Now()
 			lookupSeen = make(map[enode.ID]struct{})
 			lookupTimer = nil
@@ -465,7 +465,7 @@ sessions:
 			novel := false
 			isReg := has(id, topicIdx)
 			if isReg {
-				if continuous {
+				if scheduled {
 					lookupSeen[id] = struct{}{}
 				}
 				if _, dup := seenReg[id]; !dup {
@@ -497,10 +497,10 @@ sessions:
 			// A stale wake can reopen a search on a node that is already full
 			// (a departure that fired before its searcher started, say). Park
 			// again rather than walk the whole network for nothing.
-			if pacing.Conns != nil && (continuous && pacing.Conns.isOffline(n.idx) || !continuous && pacing.Conns.shouldPark(n.idx)) {
+			if pacing.Conns != nil && ((scheduled || continuous) && pacing.Conns.isOffline(n.idx) || !scheduled && !continuous && pacing.Conns.shouldPark(n.idx)) {
 				break consume
 			}
-			if isReg && pacing.Conns != nil && !recentlyDialed(lastDial, id, pacing.RedialWait) {
+			if isReg && !continuous && pacing.Conns != nil && !recentlyDialed(lastDial, id, pacing.RedialWait) {
 				lastDial[id] = time.Now()
 				dialAttempts++
 				if ok, targetFull := pacing.Conns.dial(n.idx, id); ok {
@@ -509,7 +509,7 @@ sessions:
 						if slotsFilledAtMs == 0 {
 							slotsFilledAtMs = time.Since(start).Milliseconds()
 						}
-						if !continuous {
+						if !scheduled && !continuous {
 							break consume
 						}
 					}
@@ -517,11 +517,11 @@ sessions:
 					dialRefused++
 				}
 			}
-			if continuous {
+			if scheduled {
 				if pacing.TargetCount > 0 && len(lookupSeen) >= pacing.TargetCount {
 					break consume
 				}
-			} else if pacing.TargetCount > 0 && len(seenReg) >= pacing.TargetCount {
+			} else if !continuous && pacing.TargetCount > 0 && len(seenReg) >= pacing.TargetCount {
 				break sessions
 			}
 			if pacing.MaxPause > 0 && (novel || !pacing.PauseNovelOnly) {
@@ -537,6 +537,13 @@ sessions:
 		// makes a churn-free run go quiet, then wait for a peer to drop.
 		closeIter()
 		if continuous {
+			// Only a departure ends the search early: wait for the node to
+			// rejoin, then search again.
+			if pacing.Conns == nil || !pacing.Conns.isOffline(n.idx) {
+				break sessions
+			}
+		}
+		if scheduled {
 			lookups++
 			hit := pacing.TargetCount > 0 && len(lookupSeen) >= pacing.TargetCount
 			if hit {
@@ -544,14 +551,8 @@ sessions:
 			}
 			lookupLatencyMs = append(lookupLatencyMs, time.Since(lookupStart).Milliseconds())
 			lookupResults = append(lookupResults, len(lookupSeen))
-			if pacing.RequestDelay > 0 && !scheduled {
-				select {
-				case <-deadline:
-					hitDeadline = true
-					break sessions
-				case <-time.After(pacing.RequestDelay):
-				}
-			}
+		}
+		if scheduled || continuous {
 			// A departed node waits for its rejoin before looking up again.
 			for pacing.Conns != nil && pacing.Conns.isOffline(n.idx) {
 				select {

@@ -1,4 +1,5 @@
-# smoke-500 with the continuous search model: F_lookup=30 per lookup, 5s between lookups.
+# smoke-500 with the continuous search model: every node keeps one search running for
+# the whole search phase and consumes its results without dialing.
 name: smoke-500-continuous
 scenario:
   population:
@@ -17,16 +18,8 @@ scenario:
     search_timeout: 3m
   topic:
     ad_cache_size: 5000
-  conn_model:
-    enabled: true
-    max_peers: 50
-    dial_ratio: 3
-    redial_wait: 35s
   search:
     model: continuous
-    target_count: 30
-    request_delay: 5s
-    request_timeout: 20s
 testbed:
   simulator:
     link_buf: 8192
