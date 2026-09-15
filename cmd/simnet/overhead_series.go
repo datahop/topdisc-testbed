@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -190,6 +191,18 @@ func (o *overheadSeries) sample(start time.Time) {
 	o.mu.Lock()
 	o.samples = append(o.samples, s)
 	o.mu.Unlock()
+
+	// One progress line per sample, so a long run can be watched for a steady state.
+	sum := func(name string) (n int64) {
+		if bw := s.ByType[name]; bw != nil {
+			for _, v := range bw.TxMsgs {
+				n += v
+			}
+		}
+		return n
+	}
+	fmt.Printf("[series t=%.0fs] ads=%d cap=%d topicquery_tx=%d regtopic_tx=%d regtopic_renewal_tx=%d nodes=%d\n",
+		s.TSec, s.CacheHeld, s.CacheCap, sum("TOPICQUERY/v5"), sum("REGTOPIC/v5"), sum("REGTOPIC(renewal)/v5"), s.numNodes)
 }
 
 // dump stops sampling and writes the series, plus the final per-topic

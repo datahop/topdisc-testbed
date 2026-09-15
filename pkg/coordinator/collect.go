@@ -28,6 +28,8 @@ type NodeTrace struct {
 	Wire           map[string]map[string]int64 `json:"wire"`
 	Legacy         bool                        `json:"legacy"`
 	FirstCapableMs int64                       `json:"first_capable_ms"`
+	Ops            []map[string]any            `json:"ops"`
+	TopicLoad      map[string]any              `json:"topic_load"`
 }
 
 // Collect reads the per-node traces, prints the run summary and writes
@@ -88,7 +90,7 @@ func Collect(trDir, runDir string, as []assign.Assignment) error {
 			tx, rx, txp, rxp = tx+v["txBytes"], rx+v["rxBytes"], txp+v["txMsgs"], rxp+v["rxMsgs"]
 			bt[k] = v
 		}
-		oh = append(oh, map[string]any{"idx": t.Idx, "id": t.ID, "txBytes": tx, "rxBytes": rx, "txPkts": txp, "rxPkts": rxp, "byType": bt})
+		oh = append(oh, map[string]any{"idx": t.Idx, "id": t.ID, "txBytes": tx, "rxBytes": rx, "txPkts": txp, "rxPkts": rxp, "byType": bt, "ops": t.Ops, "topicLoad": t.TopicLoad})
 	}
 	full := 0
 	for _, o := range out {

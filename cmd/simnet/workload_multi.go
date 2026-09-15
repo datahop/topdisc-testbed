@@ -84,13 +84,13 @@ func runMultiTopicWorkload(all []nodeRec, numTopics int, zipfS float64, seed int
 		seed = time.Now().UnixNano()
 	}
 	rng := rand.New(rand.NewSource(seed))
-	var zipf *rand.Zipf
+	var zipf *assign.Zipf
 	if numTopics > 1 {
-		zmax := numTopics - 1
+		n := numTopics
 		if commonTopicMode {
-			zmax = numTopics - 2 // second topic drawn from 1..numTopics-1
+			n = numTopics - 1 // second topic drawn from 1..numTopics-1
 		}
-		zipf = rand.NewZipf(rng, zipfS, 1.0, uint64(zmax))
+		zipf = assign.NewZipf(zipfS, n)
 	}
 
 	topics := make([]topicindex.TopicID, numTopics)
@@ -114,9 +114,9 @@ func runMultiTopicWorkload(all []nodeRec, numTopics int, zipfS float64, seed int
 		}
 		var ts []int
 		if commonTopicMode {
-			ts = []int{0, 1 + int(zipf.Uint64())}
+			ts = []int{0, 1 + zipf.Draw(rng)}
 		} else if numTopics > 1 {
-			ts = []int{int(zipf.Uint64())}
+			ts = []int{zipf.Draw(rng)}
 		} else {
 			ts = []int{0}
 		}
@@ -204,7 +204,14 @@ func runMultiTopicWorkload(all []nodeRec, numTopics int, zipfS float64, seed int
 	printMultiTopicCoverage(allCov, registrantsByTopic, len(all))
 
 	// Phase 2: searches.
-	results := runMultiTopicSearches(all, nodeTopics, topics, registrantsByTopic, searchTimeout, pacing, nil)
+	if pacing.Dead != nil {
+		pacing.Dead.begin()
+	}
+	results := runMultiTopicSearches(all, nodeTopics, topics, registrantsByTopic, searchTimeout, pacing, pacing.Dead)
+	if pacing.Dead != nil {
+		pacing.Dead.report()
+		deadResults = pacing.Dead.snapshot()
+	}
 	reportMultiTopic(results, registrantsByTopic, topics, regTimingNs, metricsOut, allCov)
 	if reachOut != "" {
 		dumpReach(reachOut, all, topics)

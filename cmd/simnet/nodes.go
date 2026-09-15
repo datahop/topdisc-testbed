@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/ecdsa"
 	"encoding/binary"
+	"github.com/datahop/topdisc-testbed/pkg/scenario"
 	"math"
 	"math/rand"
 	"net"
@@ -32,6 +33,7 @@ var (
 	nodeAdCacheSize          int
 	nodeTopicNodesLimit      int
 	nodeAuxNodesLimit        int
+	nodeTopic                scenario.TopicConfig // table depths and registration bucket sizes
 )
 
 // makeTopic returns a deterministic 32-byte topic ID for index i.
@@ -141,6 +143,10 @@ func spawnNode(sim *simnet.Simnet, settings simnet.NodeBiDiLinkSettings, idx int
 	if nodeRegAttemptTimeout > 0 {
 		cfg.Topic.RegAttemptTimeout = nodeRegAttemptTimeout
 	}
+	cfg.Topic.SearchTableDepth = nodeTopic.SearchTableDepth
+	cfg.Topic.RegTableDepth = nodeTopic.RegTableDepth
+	cfg.Topic.RegBucketSize = nodeTopic.RegBucketSize
+	cfg.Topic.RegBucketStandbyLimit = nodeTopic.RegBucketStandby
 
 	disc, err := discover.ListenV5(conn, ln, cfg)
 	if err != nil {

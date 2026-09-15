@@ -124,17 +124,19 @@ router produced timing numbers that include queueing delay.
 
 | # | Stem | Question |
 |---|---|---|
-| 8 | `01_topic_distribution` | registrants per topic — the Zipf popularity draw itself |
+| 8 | `01_topic_distribution` | registrants per topic — the Zipf popularity draw itself (not in the per-run report, which shows a table) |
 | 4 | `02_recall_reached` | distinct peers found over time, and where each searcher finished |
 | 3 | `02b_time_to_first_cdf` | time to a searcher's first result, per topic |
-| — | `03_unique_found_over_time` | absolute unique-found over time (superseded by 4) |
+| — | `03_time_to_fraction` | time for each searcher to find 50/90/99% of its topic's registrants |
+| — | `08_lookup_latency_cdf` | lookup latency to F_lookup distinct registrants, per topic |
+| — | `09_lookup_contacts_cdf` | distinct nodes and TOPICQUERY requests per lookup, per topic |
+| — | `10_dead_results` | dead share of returned results over time, and their age (churn runs) |
 | 11 | `04_id_space_registrants` | where registrants sit in ID space, by how widely they placed |
 | 12 | `04b_id_space_registrars` | where registrars sit, by how many ads they hold |
 | 14 | `05_id_space_found_vs_missed` | how many searchers found each registrant, banded by completeness |
 | 10 | `06_fanout_both_views` | fan-out and ads-per-host distributions per topic |
 | 9 | `07_registration_latency_bar` | time to first remote admission, per topic |
 | 13 | `07_placement_time_idspace` | time to place an ad *anywhere*, across ID space |
-| 13 | `07b_placement_mean_idspace` | mean time to place across *all* its registrars |
 
 `figures_overhead.py` (needs `-overhead-series-out`; `--overhead` and
 `--metrics` unlock the rest):
@@ -145,12 +147,13 @@ router produced timing numbers that include queueing delay.
 | 17 | `oh_02_idspace_peak_rate` | peak sustained per-node rate across ID space |
 | 18 | `oh_03_idspace_msgtype` | per-node bytes by message type across ID space |
 | 19 | `oh_04_idspace_peak_msgtype` | peak rate by message type across ID space |
-| 2 | `oh_05_wait_time_cdf` | registrar-quoted waiting times, per topic |
-| 15 | `oh_06_idspace_found_time` | ad-placed → first-discovered latency on the common clock |
-| 7 | `oh_07_load_vs_topic_distance` | load against XOR distance to the topic ID |
+| 2 | `oh_05_wait_time_cdf` | registrar-quoted waiting times, and total time of every successful registration, per topic |
+| 15 | `oh_06_idspace_found_time` | from ad placement or search start (whichever later) to first discovery |
+| 7 | `oh_07_load_vs_topic_distance` | received and sent per node against XOR distance to the topic ID |
 | 1 | `oh_08_cache_utilisation` | ad-cache utilisation over time, network-wide and per topic |
 | 5 | `oh_09_cost_per_lookup` | lookup traffic per searcher vs topic popularity |
 | 6 | `oh_10_reg_vs_lookup` | registration vs lookup traffic per node, across ID space |
+| — | `oh_11_topic_load` | per-topic load distribution (requests received, reply bytes, member traffic); writes `load_summary.md` |
 
 `report_plots.py` (cross-run; needs several run logs plus their JSON):
 
@@ -186,6 +189,16 @@ Real backends add to `metrics.json`:
 | `results[].lookupQueries`, `results[].lookupContacted` | TOPICQUERY requests sent and distinct nodes queried, per lookup |
 | `registrationBucketFullNs{}` | topic hex → registrant → per registration bucket (far to close), ns since registration start when the bucket first held its target number of ads; -1 = never |
 | `registrationCompleteNs{}` | topic hex → registrant → ns when every bucket was full or out of candidates |
+
+Every backend adds, from fork tag `v1.17.2-testbed.4` on:
+
+| File | Field | Contents |
+|---|---|---|
+| `oh.json` | `ops[]` | per topic operation of the node (`msg` REGTOPIC/TOPICQUERY, `opid`): requests sent, replies received, distinct nodes asked |
+| `oh.json` | `topicLoad{}` | topic hex → REGTOPIC and TOPICQUERY received for that topic, and reply bytes sent |
+| `metrics.json` | `results[].fLookup`, `targetQueries`, `targetContacted`, `searchQueries`, `searchContacted` | simnet: contacts until the search first had F_lookup registrants, and over the whole search |
+| `metrics.json` | `deadResults` | churn runs: per topic, results returned and dead, dead-age histogram (s), counts over time |
+| `run.log` | `[series t=]` lines | per series sample: ads held, cumulative TOPICQUERY and REGTOPIC sent (`figures/stability.py` reads them) |
 
 Wire counters on every backend split REGTOPIC requests to a registrar that
 already admitted the advertiser once into `REGTOPIC(renewal)/v5`; first

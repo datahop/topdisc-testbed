@@ -8,8 +8,10 @@ import (
 	"github.com/datahop/topdisc-testbed/pkg/scenario"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/ethereum/go-ethereum/p2p/discover"
@@ -111,6 +113,7 @@ func main() {
 	nodeTopicNodesLimit = *topicNodesLimit
 	nodeAuxNodesLimit = *auxNodesLimit
 	nodeRegAttemptTimeout = *regAttemptTimeout
+	nodeTopic = cfg.Scenario.Topic
 	nodeNodesPerSourceBucket = *nodesPerSourceBucket
 
 	// Absolute watchdog: guarantee the process exits even if the workload or
@@ -282,12 +285,28 @@ func main() {
 		RequestTimeout: *searchRequestTimeout,
 		Intervals:      cfg.Scenario.Search.Intervals,
 		SearchTimeout:  cfg.Scenario.Phases.SearchTimeout,
+		AdLifetime:     *adLifetime,
+		InitialResults: cfg.Scenario.Search.InitialResults,
+		ResultInterval: cfg.Scenario.Search.ResultInterval,
 	}
+	// The first SIGTERM or SIGINT ends the search phase and lets the run
+	// write its reports; a second one exits at once.
+	sigs := make(chan os.Signal, 2)
+	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-sigs
+		fmt.Println("stop signal: ending searches, writing reports")
+		close(stopSearches)
+		<-sigs
+		os.Exit(1)
+	}()
 	if *connModel {
 		pacing.Conns = newConnTable(all, *connMaxPeers, *connDialRatio)
 		defer pacing.Conns.report()
 		pacing.Resumable = *disconnectInterval > 0 || *churnInterval > 0 || *sessionChurn
 		if *sessionChurn {
+			pacing.Dead = newDeadResultTracker(*adLifetime)
+			pacing.Conns.dead = pacing.Dead
 			scStop := make(chan struct{})
 			scDone := make(chan struct{})
 			if mp := cfg.Scenario.SessionChurn.Model; mp != "" {

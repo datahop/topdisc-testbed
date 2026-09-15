@@ -29,6 +29,7 @@ type connTable struct {
 	outPeers []map[int]struct{} // directed: nodes this one dialed
 	wake     []chan struct{}    // signalled when this node loses an outbound slot
 	offline  []bool             // node is away for a churn session gap
+	dead     *deadResultTracker // told when nodes leave and return; nil = no dead-result counting
 	lostAt   [][]time.Time      // when each still-unfilled outbound slot was lost
 	maxOut   int
 	maxIn    int
@@ -358,6 +359,9 @@ func (c *connTable) depart(i int) {
 	}
 	c.offline[i] = true
 	c.departs++
+	if c.dead != nil {
+		c.dead.markOffline(c.ids[i], time.Now())
+	}
 	c.lostAt[i] = nil // a returning node fills from empty; that is not a refill
 	c.mu.Unlock()
 
@@ -373,6 +377,9 @@ func (c *connTable) depart(i int) {
 func (c *connTable) rejoin(i int) {
 	c.mu.Lock()
 	c.offline[i] = false
+	if c.dead != nil {
+		c.dead.markOnline(c.ids[i])
+	}
 	ch := c.wake[i]
 	c.mu.Unlock()
 	select {

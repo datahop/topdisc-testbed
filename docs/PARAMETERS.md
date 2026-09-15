@@ -29,7 +29,7 @@ process per node, per-node traces). Status: ✓ done, ◐ partial, ✗ missing,
 | Ad lifetime E | How long an advertisement stays in a registrar's cache; 15 min in the plan. Advertisers renew before expiry. | `topic.ad_lifetime` | ◐ | ◐ | Renewal on expiry (#77) is not on `topdisc`; without it the registration count sawtooths every E |
 | Cache capacity C | Ads a registrar holds in total; plan value 1000, code default 5000. | `topic.ad_cache_size` | ✓ | ✓ | Decision on #12 |
 | K_lookup | Entries per distance bucket of the search table; plan 5, code default 16. | `topic.search_bucket_size` | ✓ | ✓ | #12 |
-| K_register | Registrations kept per bucket by an advertiser; plan 3. | `topic.nodes_per_source_bucket` (closest existing knob) | ◐ | ◐ | Mapping to the code's registration table depth to be settled on #12 |
+| K_register | Registrations kept per bucket by an advertiser; plan 3, code default 5. | `topic.reg_bucket_size` | ✓ | ✓ | Also `reg_bucket_standby` (default 20), `reg_table_depth` and `search_table_depth` (default 10 distance buckets each); #12 |
 | F_return | Registrants returned per TOPICQUERY reply; plan 10, code default 16. | `topic.topic_nodes_limit` | ✓ | ✓ | |
 | Aux nodes | Closest-to-topic nodes attached to replies (protocol constant, not in the plan). | `topic.aux_nodes_limit` | ✓ | ✓ | |
 | Registration attempt timeout | Give up on a registrar after this; defaults to 1.5 × E. | `topic.reg_attempt_timeout` | ✓ | ✓ | |
@@ -41,7 +41,7 @@ Real backends pass the protocol parameters to every node through its assignment 
 | Parameter | Meaning | Scenario key | simnet | real | Notes |
 |---|---|---|---|---|---|
 | F_lookup | A lookup ends once this many distinct providers of the service are found; 30 in the plan. | `search.target_count: 30` | ✓ | ✓ | |
-| Lookup schedule | Plan: the run is divided into L equal intervals and every node does one lookup at a uniformly random time in each. | `search.model: scheduled`, `search.intervals` | ✓ | ✓ | Times drawn from the seed in the assignment. Also: `conn` (one search while outbound peer slots are empty, the geth behaviour) and `continuous` (one search for the whole search phase that keeps consuming results without dialing, for the performance limit) |
+| Lookup schedule | Plan: the run is divided into L equal intervals and every node does one lookup at a uniformly random time in each. | `search.model: scheduled`, `search.intervals` | ✓ | ✓ | Times drawn from the seed in the assignment. Also: `conn` (one search while outbound peer slots are empty, the geth behaviour) and `continuous` (one search for the whole search phase that keeps consuming results without dialing, for the performance limit; on simnet `search.initial_results` and `search.result_interval` pace how fast it takes new registrants) |
 | Lookup timeout | Give up on a lookup after this even if F_lookup is not reached. | `search.request_timeout` | ✓ | ✓ | |
 | Connection model | Peer slots a node fills from search results: geth's 50 peers, one third outbound. On real backends this is the actual `p2p.Server`; on simnet a model. | `conn_model.max_peers`, `dial_ratio`, `redial_wait` | ✓ | ✓ inherent | |
 

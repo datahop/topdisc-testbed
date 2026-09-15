@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"time"
@@ -261,7 +262,7 @@ func reportMultiTopic(results []searchResult, registrantsByTopic map[int]map[eno
 			if variance < 0 {
 				variance = 0
 			}
-			fmt.Printf("%-6d %12d %12.1f %12.1f\n", t, len(vals), mean, variance)
+			fmt.Printf("%-6d %12d %12.1f %12.1f\n", t, len(vals), mean, math.Sqrt(variance))
 		}
 	}
 
@@ -282,6 +283,7 @@ func reportMultiTopic(results []searchResult, registrantsByTopic map[int]map[eno
 			"topicIds":               topicIDs,
 			"registrationStartNs":    registrationStartNs,
 			"registrationPlacements": registrationPlacements,
+			"deadResults":            deadResults,
 		}
 		f, err := os.Create(metricsOut)
 		if err != nil {
