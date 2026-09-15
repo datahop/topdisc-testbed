@@ -53,6 +53,7 @@ SECTIONS = [
         "figures": [
             ("02_recall_reached", "figures.py", "Distinct registrants found over time and where each searcher finished (1.0 = every registrant of its topic)."),
             ("03_time_to_fraction", "figures.py", "Time for each searcher to find 50%, 90% and 99% of its topic's registrants."),
+            ("11_discovery_rate", "figures.py", "Discovery rate of long-lived searches (continuous, conn): new registrants per searcher per minute, absolute and as a share of the topic."),
             ("02b_time_to_first_cdf", "figures.py", "CDF of time to the first result, per topic."),
             ("08_lookup_latency_cdf", "figures.py", "Lookup latency: time to reach F_lookup distinct registrants, per topic."),
             ("09_lookup_contacts_cdf", "figures.py", "Registrars contacted per lookup: distinct nodes asked and TOPICQUERY requests sent to reach F_lookup, per topic."),
@@ -93,6 +94,9 @@ SECTIONS = [
         ],
     },
 ]
+
+# Figures drawn only for some runs: absent is not missing.
+OPTIONAL = {"11_discovery_rate", "10_dead_results"}
 
 # Figures the scripts draw that the report leaves out on purpose.
 EXCLUDED = {"01_topic_distribution"}  # the topic assignment is a scenario input, shown as a table
@@ -441,7 +445,7 @@ def main():
                 L.append(f"### {stem}\n")
                 L.append(f"![{stem}](figures/{stem}.png)\n")
                 L.append(f"*{caption}*\n")
-            else:
+            elif stem not in OPTIONAL:
                 missing.append((stem, f"not produced by {script} (see gen.log)"))
         if sec.get("summary"):
             heading, fname = sec["summary"]
