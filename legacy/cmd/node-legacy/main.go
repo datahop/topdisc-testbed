@@ -45,10 +45,12 @@ type assignment struct {
 		StopAt     int64 `json:"stop_at_ms"`
 	} `json:"phases"`
 	Search struct {
-		Model          string  `json:"model"`
-		TargetCount    int     `json:"target_count"`
-		RequestTimeout int64   `json:"request_timeout_ms"`
-		LookupAtMs     []int64 `json:"lookup_at_ms"`
+		Model            string  `json:"model"`
+		TargetCount      int     `json:"target_count"`
+		RequestTimeout   int64   `json:"request_timeout_ms"`
+		LookupAtMs       []int64 `json:"lookup_at_ms"`
+		InitialResults   int     `json:"initial_results"`
+		ResultIntervalMs int64   `json:"result_interval_ms"`
 	} `json:"search"`
 	TraceFile string `json:"trace_file"`
 }
@@ -86,14 +88,26 @@ func (c *capableEntry) DecodeRLP(s *rlp.Stream) error {
 type lazyIter struct {
 	ready <-chan struct{}
 	open  func() enode.Iterator
+	seen  func(*enode.Node) // called for every node handed to the dialer
 	once  sync.Once
 	it    enode.Iterator
 }
 
 func (l *lazyIter) Next() bool {
 	l.once.Do(func() { <-l.ready; l.it = l.open() })
-	return l.it.Next()
+	ok := l.it.Next()
+	if ok && l.seen != nil {
+		l.seen(l.it.Node())
+	}
+	return ok
 }
+
+// found is a provider first seen at AtMs after the search started.
+type found struct {
+	ID   string `json:"id"`
+	AtMs int64  `json:"at_ms"`
+}
+
 func (l *lazyIter) Node() *enode.Node { return l.it.Node() }
 func (l *lazyIter) Close() {
 	if l.it != nil {
@@ -144,6 +158,20 @@ func main() {
 	wait(asg.Phases.StartAt)
 	ready := make(chan struct{})
 	var srv *p2p.Server
+	isProvider := func(n *enode.Node) bool {
+		var s svcEntry
+		return n.Load(&s) == nil && s == svc
+	}
+	// Lookup-only models never dial; the connection-driven model records the
+	// providers the dialer's random walk handed out and when slots filled.
+	lookupOnly := asg.Search.Model == "continuous" || asg.Search.Model == "scheduled"
+	var (
+		connMu     sync.Mutex
+		connStart  time.Time
+		connSeen         = map[enode.ID]struct{}{}
+		connFound        = []found{}
+		connFullMs int64 = -1
+	)
 	proto := p2p.Protocol{
 		Name: "topdisc-test", Version: 1, Length: 1, // same capability as cmd/node so RLPx peers stay
 		Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
@@ -153,14 +181,31 @@ func main() {
 				}
 			}
 		},
-		DialCandidates: &lazyIter{ready: ready, open: func() enode.Iterator { return srv.DiscoveryV5().RandomNodes() }},
+		DialCandidates: &lazyIter{ready: ready,
+			open: func() enode.Iterator {
+				connMu.Lock()
+				connStart = time.Now()
+				connMu.Unlock()
+				return srv.DiscoveryV5().RandomNodes()
+			},
+			seen: func(n *enode.Node) {
+				if !isProvider(n) {
+					return
+				}
+				connMu.Lock()
+				defer connMu.Unlock()
+				if _, ok := connSeen[n.ID()]; !ok {
+					connSeen[n.ID()] = struct{}{}
+					connFound = append(connFound, found{ID: n.ID().String(), AtMs: time.Since(connStart).Milliseconds()})
+				}
+			}},
 	}
-	if asg.Search.Model == "continuous" {
-		// The node only consumes its own walk: no dialer, so no second walk.
+	if lookupOnly {
+		// The node only consumes its own walks: no dialer, so no second walk.
 		proto.DialCandidates = enode.IterNodes(nil)
 	}
 	srv = &p2p.Server{Config: p2p.Config{
-		PrivateKey: key, Name: "topdisc-node-legacy", MaxPeers: asg.MaxPeers, DialRatio: asg.DialRatio, NoDial: asg.Search.Model == "continuous",
+		PrivateKey: key, Name: "topdisc-node-legacy", MaxPeers: asg.MaxPeers, DialRatio: asg.DialRatio, NoDial: lookupOnly,
 		ListenAddr: fmt.Sprintf("%s:%d", asg.IP, asg.Port), DiscoveryV4: false, DiscoveryV5: true,
 		BootstrapNodesV5: bootnodes, Protocols: []p2p.Protocol{proto}, Logger: log.Root(),
 	}}
@@ -195,6 +240,19 @@ func main() {
 					refills = append(refills, time.Since(lostAt[0]).Milliseconds())
 					lostAt = lostAt[1:]
 				}
+				if !lookupOnly {
+					outbound := 0
+					for _, p := range srv.Peers() {
+						if !p.Inbound() {
+							outbound++
+						}
+					}
+					connMu.Lock()
+					if connFullMs < 0 && !connStart.IsZero() && outbound >= srv.MaxDialedConns() {
+						connFullMs = time.Since(connStart).Milliseconds()
+					}
+					connMu.Unlock()
+				}
 				if firstCapableMs < 0 {
 					for _, p := range srv.Peers() {
 						var c capableEntry
@@ -217,10 +275,6 @@ func main() {
 		}
 		timeout := time.Duration(asg.Search.RequestTimeout) * time.Millisecond
 		rec := func(l lookup) { mu.Lock(); lookups = append(lookups, l); mu.Unlock() }
-		isProvider := func(n *enode.Node) bool {
-			var s svcEntry
-			return n.Load(&s) == nil && s == svc
-		}
 		disc := srv.DiscoveryV5()
 		go func() {
 			if asg.Search.Model == "scheduled" {
@@ -230,13 +284,13 @@ func main() {
 						return
 					}
 					time.Sleep(time.Until(t))
-					rec(randomWalk(disc, isProvider, asg.Search.TargetCount, timeout, deadline, nil))
+					rec(randomWalk(disc, isProvider, asg.Search.TargetCount, timeout, deadline, nil, 0, 0))
 				}
 				return
 			}
 			// continuous: one walk for the whole phase, reported as a single lookup.
 			set := func(l lookup) { mu.Lock(); lookups = []lookup{l}; mu.Unlock() }
-			set(randomWalk(disc, isProvider, 0, 0, deadline, set))
+			set(randomWalk(disc, isProvider, 0, 0, deadline, set, asg.Search.InitialResults, time.Duration(asg.Search.ResultIntervalMs)*time.Millisecond))
 		}()
 	}
 	writeTrace := func() {
@@ -256,8 +310,15 @@ func main() {
 		if refills == nil {
 			refills = []int64{}
 		}
+		var conn map[string]any
+		connMu.Lock()
+		if !lookupOnly && !connStart.IsZero() {
+			conn = map[string]any{"start_ms": connStart.UnixMilli(), "found": connFound, "slots_filled_ms": connFullMs}
+		}
+		connMu.Unlock()
 		b, _ := json.MarshalIndent(map[string]any{
-			"idx": asg.Idx, "id": srv.Self().ID().String(), "legacy": true, "outbound": out, "inbound": in,
+			"conn": conn,
+			"idx":  asg.Idx, "id": srv.Self().ID().String(), "legacy": true, "outbound": out, "inbound": in,
 			"peer_drops": drops, "refill_ms": refills, "lookups": lookups, "first_capable_ms": firstCapableMs,
 			"ads_held": 0, "wire": map[string]any{},
 		}, "", " ")
@@ -280,13 +341,14 @@ func main() {
 func randomWalk(disc interface {
 	AllNodes() []*enode.Node
 	Lookup(enode.ID) []*enode.Node
-}, isProvider func(*enode.Node) bool, target int, timeout time.Duration, deadline time.Time, progress func(lookup)) lookup {
+}, isProvider func(*enode.Node) bool, target int, timeout time.Duration, deadline time.Time, progress func(lookup), initial int, interval time.Duration) lookup {
 	start := time.Now()
 	stop := deadline
 	if timeout > 0 && start.Add(timeout).Before(stop) {
 		stop = start.Add(timeout)
 	}
 	seen := map[enode.ID]struct{}{}
+	var paceStart time.Time
 	add := func(nodes []*enode.Node) bool {
 		for _, n := range nodes {
 			if isProvider(n) {
@@ -315,6 +377,16 @@ func randomWalk(disc interface {
 			}
 			if progress != nil {
 				progress(done(false))
+			}
+			if over := len(seen) - initial; interval > 0 && over > 0 {
+				if paceStart.IsZero() {
+					paceStart = time.Now()
+				}
+				select {
+				case <-time.After(time.Until(paceStart.Add(time.Duration(over) * interval))):
+				case <-time.After(time.Until(stop)):
+					return done(false)
+				}
 			}
 		case <-time.After(time.Until(stop)):
 			return done(false)

@@ -238,6 +238,36 @@ def metrics_tables(metrics):
     return t
 
 
+def search_progress(mpath):
+    """Per-topic medians of the searches' progress counters, and a note when
+    searches kept re-walking their tables with nothing new to return."""
+    if not os.path.exists(mpath):
+        return ""
+    by = {}
+    for r in json.load(open(mpath)).get("results", []):
+        st = r.get("searchStats")
+        if st and st.get("passes"):
+            by.setdefault(r["topic"], []).append(st)
+    if not by:
+        return ""
+    keys = ["passes", "queries", "contacted", "received", "duplicate", "filtered", "yielded"]
+    med = lambda v: sorted(v)[len(v) // 2]
+    rows = ["| topic | searches | " + " | ".join(keys) + " | filtered / received |", "|---:|---:|" + "---:|" * (len(keys) + 1)]
+    rewalk = []
+    for t in sorted(by):
+        m = {k: med([x.get(k, 0) for x in by[t]]) for k in keys}
+        share = m["filtered"] / m["received"] if m["received"] else 0
+        rows.append(f"| {t} | {len(by[t])} | " + " | ".join(str(m[k]) for k in keys) + f" | {100 * share:.0f}% |")
+        if m["filtered"] > m["yielded"]:
+            rewalk.append(str(t))
+    out = "Median per search over the run; `filtered` counts results dropped as recently returned.\n\n" + "\n".join(rows) + "\n"
+    if rewalk:
+        out += (f"\n> **Search re-walk:** on topic(s) {', '.join(rewalk)} searches dropped more results as recently returned than they handed out: "
+                "with no new registrants left they re-walk their tables every pass (datahop/go-ethereum#142). "
+                "Query traffic and registrar load on these topics measure that loop.\n")
+    return out
+
+
 def parse_tables(log):
     tables = {}
     blocks = re.split(r"^=== (.+?) ===$", log, flags=re.M)
@@ -401,6 +431,10 @@ def main():
             if prov:
                 L.append("### Search provenance and bucket occupancy\n")
                 L.append(code("\n".join(prov)))
+            progress = search_progress(mpath)
+            if progress:
+                L.append("### Search progress\n")
+                L.append(progress)
         for stem, script, caption in sec["figures"]:
             listed.add(stem)
             if stem in present:

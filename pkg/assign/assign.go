@@ -28,10 +28,12 @@ type Phases struct {
 }
 
 type Search struct {
-	Model          string  `json:"model"`
-	TargetCount    int     `json:"target_count"`
-	RequestTimeout int64   `json:"request_timeout_ms"`
-	LookupAtMs     []int64 `json:"lookup_at_ms,omitempty"` // scheduled: absolute lookup times, from the seed
+	Model            string  `json:"model"`
+	TargetCount      int     `json:"target_count"`
+	RequestTimeout   int64   `json:"request_timeout_ms"`
+	LookupAtMs       []int64 `json:"lookup_at_ms,omitempty"` // scheduled: absolute lookup times, from the seed
+	InitialResults   int     `json:"initial_results,omitempty"`
+	ResultIntervalMs int64   `json:"result_interval_ms,omitempty"`
 }
 
 // Topic carries the scenario's topic-discovery parameters to the node; zero
@@ -149,7 +151,8 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 			Idx: i, Key: hex.EncodeToString(crypto.FromECDSA(keys[i])), IP: h.IP, Port: h.BasePort, StatusPort: h.BasePort + h.StatusOff, TraceFile: h.TraceFile,
 			Topics: topics[i], MaxPeers: sc.ConnModel.MaxPeers, DialRatio: sc.ConnModel.DialRatio,
 			Phases: Phases{StartAt: t0 + startOff[i], RegisterBase: registerAt, RegisterAt: registerAt + regOff[i], SearchAt: searchAt + int64(i)*ph.SearchStagger.Milliseconds(), StopAt: stopAt},
-			Search: Search{Model: sc.Search.Model, TargetCount: sc.Search.TargetCount, RequestTimeout: sc.Search.RequestTimeout.Milliseconds()},
+			Search: Search{Model: sc.Search.Model, TargetCount: sc.Search.TargetCount, RequestTimeout: sc.Search.RequestTimeout.Milliseconds(),
+				InitialResults: sc.Search.InitialResults, ResultIntervalMs: sc.Search.ResultInterval.Milliseconds()},
 		}
 		if i != 0 {
 			a.Bootnodes = []string{boot}

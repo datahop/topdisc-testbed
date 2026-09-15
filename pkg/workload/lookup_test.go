@@ -20,7 +20,7 @@ func testNode(b byte) *enode.Node {
 func TestContinuous(t *testing.T) {
 	nodes := []*enode.Node{testNode(1), testNode(2), testNode(1), testNode(3), testNode(2)}
 	var updates []Lookup
-	Continuous(func() enode.Iterator { return enode.IterNodes(nodes) }, nil, time.Now().Add(time.Minute), func(l Lookup) {
+	Continuous(func() enode.Iterator { return enode.IterNodes(nodes) }, nil, 0, 0, time.Now().Add(time.Minute), func(l Lookup) {
 		updates = append(updates, l)
 	})
 	if len(updates) != 4 {
@@ -34,5 +34,26 @@ func TestContinuous(t *testing.T) {
 		if l.Results != i+1 {
 			t.Fatalf("update %d has %d results, want %d", i, l.Results, i+1)
 		}
+	}
+}
+
+// A paced continuous search takes the initial registrants at once, then waits
+// one interval before each further new registrant.
+func TestContinuousPacing(t *testing.T) {
+	nodes := []*enode.Node{testNode(1), testNode(2), testNode(3), testNode(4)}
+	const interval = 40 * time.Millisecond
+	start := time.Now()
+	var final Lookup
+	Continuous(func() enode.Iterator { return enode.IterNodes(nodes) }, nil, 2, interval, time.Now().Add(time.Minute), func(l Lookup) {
+		final = l
+	})
+	if final.Results != 4 {
+		t.Fatalf("got %d results, want 4", final.Results)
+	}
+	if d := time.Since(start); d < 2*interval {
+		t.Fatalf("paced search took %v, want at least %v", d, 2*interval)
+	}
+	if at := final.Found[1].AtMs; at > 20 {
+		t.Fatalf("second registrant (within initial) found after %d ms", at)
 	}
 }

@@ -40,16 +40,58 @@ type rawTrace struct {
 	RegBucketFull  []int64                     `json:"reg_bucket_full_ms"`
 	RegCompleteMs  int64                       `json:"reg_complete_ms"`
 	Wire           map[string]map[string]int64 `json:"wire"`
+	Outbound       int                         `json:"outbound"`
+	Conn           *rawConn                    `json:"conn"`
+}
+
+// rawConn is the connection-driven model's record: the dialer's search.
+type rawConn struct {
+	StartMs int64 `json:"start_ms"`
+	Found   []struct {
+		ID   string `json:"id"`
+		AtMs int64  `json:"at_ms"`
+	} `json:"found"`
+	SlotsFilledMs int64        `json:"slots_filled_ms"`
+	Search        *searchStats `json:"search"`
+}
+
+// searchStats mirrors discover.TopicSearchStats.
+type searchStats struct {
+	Passes    int `json:"passes"`
+	Queries   int `json:"queries"`
+	Contacted int `json:"contacted"`
+	Received  int `json:"received"`
+	Duplicate int `json:"duplicate"`
+	Filtered  int `json:"filtered"`
+	Yielded   int `json:"yielded"`
+}
+
+func addStats(dst *searchStats, st *searchStats) *searchStats {
+	if st == nil {
+		return dst
+	}
+	if dst == nil {
+		dst = &searchStats{}
+	}
+	dst.Passes += st.Passes
+	dst.Queries += st.Queries
+	dst.Contacted += st.Contacted
+	dst.Received += st.Received
+	dst.Duplicate += st.Duplicate
+	dst.Filtered += st.Filtered
+	dst.Yielded += st.Yielded
+	return dst
 }
 
 type rawLookup struct {
-	StartMs   int64 `json:"start_ms"`
-	LatencyMs int64 `json:"latency_ms"`
-	FirstMs   int64 `json:"first_ms"`
-	Results   int   `json:"results"`
-	HitTarget bool  `json:"hit_target"`
-	Queries   int   `json:"queries"`
-	Contacted int   `json:"contacted"`
+	StartMs   int64        `json:"start_ms"`
+	LatencyMs int64        `json:"latency_ms"`
+	FirstMs   int64        `json:"first_ms"`
+	Results   int          `json:"results"`
+	HitTarget bool         `json:"hit_target"`
+	Queries   int          `json:"queries"`
+	Contacted int          `json:"contacted"`
+	Search    *searchStats `json:"search"`
 	Found     []struct {
 		ID   string `json:"id"`
 		AtMs int64  `json:"at_ms"`
@@ -103,8 +145,9 @@ type searchResult struct {
 	LookupResults       []int    `json:"lookupResults"`
 	SearchStartMs       int64    `json:"searchStartMs"`
 	// Real backends only: TOPICQUERY requests and distinct nodes per lookup.
-	LookupQueries   []int `json:"lookupQueries,omitempty"`
-	LookupContacted []int `json:"lookupContacted,omitempty"`
+	LookupQueries   []int        `json:"lookupQueries,omitempty"`
+	LookupContacted []int        `json:"lookupContacted,omitempty"`
+	SearchStats     *searchStats `json:"searchStats,omitempty"`
 }
 
 type topicReport struct {
@@ -275,6 +318,7 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 				r.LookupQueries = append(r.LookupQueries, l.Queries)
 				r.LookupContacted = append(r.LookupContacted, l.Contacted)
 			}
+			r.SearchStats = addStats(r.SearchStats, l.Search)
 			r.Found += l.Results
 			end := l.StartMs + l.LatencyMs - t.SearchAtMs
 			if end > last {
@@ -294,6 +338,35 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 				r.UniqueFoundAtMs = append(r.UniqueFoundAtMs, at)
 				r.NewFoundAtMs = append(r.NewFoundAtMs, at)
 			}
+		}
+		if c := t.Conn; c != nil {
+			// Connection-driven: the dialer's search is the node's one session.
+			for _, f := range c.Found {
+				if !registrants[th][f.ID] {
+					continue
+				}
+				at := c.StartMs + f.AtMs - t.SearchAtMs
+				r.Found++
+				r.FoundRegistrant++
+				if first < 0 || at < first {
+					first = at
+				}
+				if at > last {
+					last = at
+				}
+				if seen[f.ID] {
+					continue
+				}
+				seen[f.ID] = true
+				r.UniqueFoundIDs = append(r.UniqueFoundIDs, short(f.ID))
+				r.UniqueFoundAtMs = append(r.UniqueFoundAtMs, at)
+				r.NewFoundAtMs = append(r.NewFoundAtMs, at)
+			}
+			r.OutboundConns = t.Outbound
+			if c.SlotsFilledMs >= 0 {
+				r.SlotsFilledAtMs = c.StartMs + c.SlotsFilledMs - t.SearchAtMs
+			}
+			r.SearchStats = addStats(r.SearchStats, c.Search)
 		}
 		r.UniqueRegistrant, r.NewRegistrant = len(seen), len(seen)
 		r.FoundRegistrantIDs = append(r.FoundRegistrantIDs, r.UniqueFoundIDs...)

@@ -32,6 +32,6 @@ require (
 	golang.org/x/time v0.12.0 // indirect
 )
 
-replace github.com/ethereum/go-ethereum => github.com/datahop/go-ethereum v1.17.2-testbed.5
+replace github.com/ethereum/go-ethereum => github.com/datahop/go-ethereum v1.17.2-testbed.6
 
 replace github.com/marcopolo/simnet => github.com/datahop/simnet v0.0.0-20260904122752-904836695aaa

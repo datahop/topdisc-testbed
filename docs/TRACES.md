@@ -198,6 +198,8 @@ Every backend adds, from fork tag `v1.17.2-testbed.4` on:
 | `oh.json` | `topicLoad{}` | topic hex → REGTOPIC and TOPICQUERY received for that topic, and reply bytes sent |
 | `metrics.json` | `results[].fLookup`, `targetQueries`, `targetContacted`, `searchQueries`, `searchContacted` | simnet: contacts until the search first had F_lookup registrants, and over the whole search |
 | `metrics.json` | `deadResults` | churn runs: per topic, results returned and dead, dead-age histogram (s), counts over time |
+| `metrics.json` | `results[].searchStats` | the node's topic searches: passes, TOPICQUERY sent, distinct nodes, results received, duplicates within a pass, dropped as recently returned, handed to the reader (fork `v1.17.2-testbed.6`) |
+| node trace | `conn` | real backends, `search.model: conn`: registrants the dialer's search handed out with first-seen times, `slots_filled_ms`, and the search stats; the coordinator maps it to `results[]` |
 | `run.log` | `[series t=]` lines | per series sample: ads held, cumulative TOPICQUERY and REGTOPIC sent (`figures/stability.py` reads them) |
 
 Wire counters on every backend split REGTOPIC requests to a registrar that

@@ -4,6 +4,7 @@
 package workload
 
 import (
+	"github.com/ethereum/go-ethereum/p2p/discover"
 	"time"
 
 	"github.com/ethereum/go-ethereum/p2p/enode"
@@ -12,14 +13,15 @@ import (
 // Lookup is one search: how long it took to reach the target, how many
 // distinct registrants it returned, and whether it got there before timing out.
 type Lookup struct {
-	StartMs   int64   `json:"start_ms"`
-	LatencyMs int64   `json:"latency_ms"`
-	FirstMs   int64   `json:"first_ms"` // to the first result; -1 = none
-	Results   int     `json:"results"`
-	HitTarget bool    `json:"hit_target"`
-	Found     []Found `json:"found"`     // distinct registrants in the order seen
-	Queries   int     `json:"queries"`   // TOPICQUERY requests sent; -1 = not reported
-	Contacted int     `json:"contacted"` // distinct nodes queried; -1 = not reported
+	StartMs   int64                      `json:"start_ms"`
+	LatencyMs int64                      `json:"latency_ms"`
+	FirstMs   int64                      `json:"first_ms"` // to the first result; -1 = none
+	Results   int                        `json:"results"`
+	HitTarget bool                       `json:"hit_target"`
+	Found     []Found                    `json:"found"`            // distinct registrants in the order seen
+	Queries   int                        `json:"queries"`          // TOPICQUERY requests sent; -1 = not reported
+	Contacted int                        `json:"contacted"`        // distinct nodes queried; -1 = not reported
+	Search    *discover.TopicSearchStats `json:"search,omitempty"` // search progress; nil = not reported
 }
 
 // Found is one distinct registrant a lookup returned and when (ms since the
@@ -31,10 +33,11 @@ type Found struct {
 
 // Continuous runs one search until the deadline and reports it as a single
 // lookup, passed to update each time a new registrant is found and when the
-// search ends. isRegistrant filters what counts as a result; nil counts every
-// node.
-func Continuous(open func() enode.Iterator, isRegistrant func(enode.ID) bool, deadline time.Time, update func(Lookup)) {
-	update(runOne(open, isRegistrant, 0, 0, deadline, update))
+// search ends. It takes initial new registrants at once, then one per interval
+// (0 = as fast as they come). isRegistrant filters what counts as a result; nil
+// counts every node.
+func Continuous(open func() enode.Iterator, isRegistrant func(enode.ID) bool, initial int, interval time.Duration, deadline time.Time, update func(Lookup)) {
+	update(runOne(open, isRegistrant, 0, 0, deadline, update, initial, interval))
 }
 
 // Scheduled runs one lookup at each of the given times (a lookup that overruns
@@ -49,16 +52,17 @@ func Scheduled(open func() enode.Iterator, isRegistrant func(enode.ID) bool, tar
 		case <-time.After(time.Until(deadline)):
 			return
 		}
-		record(runOne(open, isRegistrant, target, timeout, deadline, nil))
+		record(runOne(open, isRegistrant, target, timeout, deadline, nil, 0, 0))
 	}
 }
 
-func runOne(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target int, timeout time.Duration, deadline time.Time, progress func(Lookup)) Lookup {
+func runOne(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target int, timeout time.Duration, deadline time.Time, progress func(Lookup), initial int, interval time.Duration) Lookup {
 	start := time.Now()
 	it := open()
 	defer func() { go it.Close() }() // Close can block on a busy search; do not hold the loop
 	seen := map[enode.ID]struct{}{}
 	found := []Found{}
+	var paceStart time.Time
 	stop := deadline
 	if timeout > 0 && start.Add(timeout).Before(stop) {
 		stop = start.Add(timeout)
@@ -67,6 +71,12 @@ func runOne(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target
 		l := Lookup{StartMs: start.UnixMilli(), LatencyMs: time.Since(start).Milliseconds(), FirstMs: -1, Results: len(seen), HitTarget: hit, Found: found, Queries: -1, Contacted: -1}
 		if c, ok := it.(interface{ Contacts() (int, int) }); ok {
 			l.Queries, l.Contacted = c.Contacts()
+		}
+		if s, ok := it.(interface {
+			Stats() discover.TopicSearchStats
+		}); ok {
+			st := s.Stats()
+			l.Search = &st
 		}
 		if len(found) > 0 {
 			l.FirstMs = found[0].AtMs
@@ -91,6 +101,16 @@ func runOne(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target
 				found = append(found, Found{ID: id.String(), AtMs: time.Since(start).Milliseconds()})
 				if progress != nil {
 					progress(done(false))
+				}
+				if over := len(seen) - initial; interval > 0 && over >= 0 {
+					if paceStart.IsZero() {
+						paceStart = time.Now()
+					}
+					select {
+					case <-time.After(time.Until(paceStart.Add(time.Duration(over) * interval))):
+					case <-time.After(time.Until(stop)):
+						return done(false)
+					}
 				}
 			}
 		}

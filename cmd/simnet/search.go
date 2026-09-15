@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/datahop/topdisc-testbed/pkg/assign"
+	"github.com/ethereum/go-ethereum/p2p/discover"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -135,11 +136,12 @@ type searchResult struct {
 	// Topic-query contacts: TOPICQUERY requests sent and distinct nodes asked
 	// until the search first had FLookup distinct registrants (-1 = never),
 	// and over the whole search.
-	FLookup         int `json:"fLookup"`
-	TargetQueries   int `json:"targetQueries"`
-	TargetContacted int `json:"targetContacted"`
-	SearchQueries   int `json:"searchQueries"`
-	SearchContacted int `json:"searchContacted"`
+	FLookup         int                       `json:"fLookup"`
+	TargetQueries   int                       `json:"targetQueries"`
+	TargetContacted int                       `json:"targetContacted"`
+	SearchQueries   int                       `json:"searchQueries"`
+	SearchContacted int                       `json:"searchContacted"`
+	SearchStats     discover.TopicSearchStats `json:"searchStats"`
 
 	// SearchStartMs is this searcher's start offset from the run's common
 	// epoch (registration start). UniqueFoundAtMs is relative to this
@@ -384,8 +386,10 @@ func runOneSearcher(n nodeRec, topicIdx int, topic topicindex.TopicID, deadlineA
 	// leaked shutdown goroutine is reaped by main()'s teardown watchdog.
 	// Contacts summed over closed sessions, and those of the last one closed.
 	var searchQueries, searchContacted, lastQueries, lastContacted int
+	var searchStats discover.TopicSearchStats
 	closeIter := func() {
 		if iter != nil {
+			addSearchStats(&searchStats, iterStats(iter))
 			lastQueries, lastContacted = iterContacts(iter)
 			searchQueries += lastQueries
 			searchContacted += lastContacted
@@ -553,7 +557,7 @@ sessions:
 			if pacing.Conns != nil && ((scheduled || continuous) && pacing.Conns.isOffline(n.idx) || !scheduled && !continuous && pacing.Conns.shouldPark(n.idx)) {
 				break consume
 			}
-			if isReg && !continuous && pacing.Conns != nil && !recentlyDialed(lastDial, id, pacing.RedialWait) {
+			if isReg && !scheduled && !continuous && pacing.Conns != nil && !recentlyDialed(lastDial, id, pacing.RedialWait) {
 				lastDial[id] = time.Now()
 				dialAttempts++
 				if ok, targetFull := pacing.Conns.dial(n.idx, id); ok {
@@ -679,6 +683,7 @@ sessions:
 		TargetContacted:     targetContacted,
 		SearchQueries:       searchQueries,
 		SearchContacted:     searchContacted,
+		SearchStats:         searchStats,
 		OutboundConns:       outboundConns,
 		DialAttempts:        dialAttempts,
 		DialRefused:         dialRefused,
@@ -947,3 +952,24 @@ func iterContacts(it enode.Iterator) (queries, nodes int) {
 // stopSearches is closed on SIGTERM or SIGINT: every search ends as if its
 // deadline had passed, so the run still writes its reports.
 var stopSearches = make(chan struct{})
+
+// iterStats returns a search's progress counters, or zeros when the iterator
+// does not report them.
+func iterStats(it enode.Iterator) discover.TopicSearchStats {
+	if s, ok := it.(interface {
+		Stats() discover.TopicSearchStats
+	}); ok {
+		return s.Stats()
+	}
+	return discover.TopicSearchStats{}
+}
+
+func addSearchStats(dst *discover.TopicSearchStats, st discover.TopicSearchStats) {
+	dst.Passes += st.Passes
+	dst.Queries += st.Queries
+	dst.Contacted += st.Contacted
+	dst.Received += st.Received
+	dst.Duplicate += st.Duplicate
+	dst.Filtered += st.Filtered
+	dst.Yielded += st.Yielded
+}
