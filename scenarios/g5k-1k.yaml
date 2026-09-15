@@ -1,4 +1,4 @@
-# Grid'5000: 1000 Distem virtual nodes, 250 per machine, emulated geography from the
+# Grid'5000: 1000 nodes (netns'd, see testbed.wan), 250 per machine, emulated geography from the
 # RTT table (network.model: regions). deploy/g5k/g5k.py up scenarios/g5k-1k.yaml
 name: g5k-1k
 scenario:
@@ -26,4 +26,5 @@ testbed:
     cluster: gros
     vnodes_per_machine: 250
   wan:
+    enabled: true
     rate_kbps: 160

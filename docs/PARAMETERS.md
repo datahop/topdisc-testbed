@@ -49,7 +49,7 @@ Real backends pass the protocol parameters to every node through its assignment 
 
 | Parameter | Meaning | Scenario key | simnet | real | Notes |
 |---|---|---|---|---|---|
-| WAN latency | Plan: pair RTTs between 8 and 91 ms, mean 34 ms (from the paper's testbed). | simnet: `network.latency_ms` (one value for every pair); local: `testbed.wan` star model (one-way 4–45 ms per node, netns + netem); Grid'5000: `network.model: star` (per-pair matrix from the same draws) or `regions` (RTT table) | ◐ single latency, no distribution (#115) | local ◐ untested (needs a root Linux host); AWS = real network; Grid'5000 ✓ layout, pending Distem validation | |
+| WAN latency | Plan: pair RTTs between 8 and 91 ms, mean 34 ms (from the paper's testbed). | simnet: `network.latency_ms` (one value for every pair); local: `testbed.wan` star model (one-way 4–45 ms per node, netns + netem); Grid'5000: `network.model: star` (per-pair matrix from the same draws) or `regions` (RTT table) | ◐ single latency, no distribution (#115) | local ◐ untested (needs a root Linux host); AWS = real network; Grid'5000 ✓ validated on nancy/gros (see deploy/README.md) | |
 | Bandwidth | Plan: 20 KB/s per node. | simnet: `network.bandwidth_mibps` (per link); local/Grid'5000: `testbed.wan.rate_kbps: 160` | ✓ | ◐ | AWS: not capped |
 | Node locations | Where nodes live. On AWS: real regions, weights per region and pins per node. On Grid'5000: emulated with an inter-region RTT table. | `network.regions`, `network.node_regions`, `network.rtt_table` | — | ✓ AWS; Grid'5000 step 6 | `scenarios/models/region-rtt.json`; to be replaced by RTTs measured on AWS |
 
