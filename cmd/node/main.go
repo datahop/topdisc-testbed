@@ -132,6 +132,8 @@ func main() {
 			AdLifetime: time.Duration(asg.Topic.AdLifetimeMs) * time.Millisecond, AdCacheSize: asg.Topic.AdCacheSize,
 			RegAttemptTimeout: time.Duration(asg.Topic.RegAttemptTimeoutMs) * time.Millisecond, SearchBucketSize: asg.Topic.SearchBucketSize,
 			TopicNodesLimit: asg.Topic.TopicNodesLimit, AuxNodesLimit: asg.Topic.AuxNodesLimit,
+			SearchTableDepth: asg.Topic.SearchTableDepth, RegTableDepth: asg.Topic.RegTableDepth,
+			RegBucketSize: asg.Topic.RegBucketSize, RegBucketStandbyLimit: asg.Topic.RegBucketStandby,
 		},
 	}}
 	discover.EnableWireStats()
@@ -327,6 +329,14 @@ func main() {
 		if lookups == nil {
 			lookups = []workload.Lookup{}
 		}
+		ops := []map[string]any{}
+		for k, v := range srv.DiscoveryV5().OpStats() {
+			ops = append(ops, map[string]any{"msg": k.Msg, "opid": k.OpID, "txMsgs": v.TxMsgs, "txBytes": v.TxBytes, "rxMsgs": v.RxMsgs, "rxBytes": v.RxBytes, "nodes": v.Nodes})
+		}
+		topicLoad := map[string]discover.TopicLoad{}
+		for t, l := range srv.DiscoveryV5().TopicLoadStats() {
+			topicLoad[t.String()] = l
+		}
 		b, _ := json.MarshalIndent(map[string]any{
 			"idx": asg.Idx, "id": srv.Self().ID().String(), "outbound": out, "inbound": in,
 			"peer_drops": drops, "refill_ms": refills, "lookups": lookups, "first_capable_ms": firstCapableMs, "legacy": false,
@@ -334,6 +344,7 @@ func main() {
 			"topic": topic.String(), "topics": asg.Topics, "register_at_ms": asg.Phases.RegisterAt, "search_at_ms": asg.Phases.SearchAt,
 			"ads_first_seen_ms": first, "ads_final": last, "wait": wait, "samples": smp,
 			"reg_bucket_full_ms": bFull, "reg_complete_ms": rComplete, "reg_buckets_final": bLast,
+			"ops": ops, "topic_load": topicLoad,
 		}, "", " ")
 		os.WriteFile(asg.TraceFile, b, 0o644)
 	}

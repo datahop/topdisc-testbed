@@ -322,6 +322,170 @@ def plot_unique_found_over_time(per_topic, results, ax, label):
     ax.set_ylim(bottom=0)
 
 
+def plot_time_to_fraction(per_topic, results, fig, label, fractions=(0.5, 0.9, 0.99)):
+    """03: time for each searcher to find a share of its topic's registrants.
+
+    One panel per share, a CDF over searchers per topic. Searchers that never
+    reach the share leave their curve below 1, so the height where a curve
+    ends is the fraction of searchers that got there.
+    """
+    targets = {r["topic"]: r["target"] for r in per_topic}
+    by_topic = collections.defaultdict(list)
+    for r in results:
+        by_topic[r["topic"]].append(r.get("uniqueFoundAtMs") or [])
+    if not any(ts for runs in by_topic.values() for ts in runs):
+        return False
+    axes = fig.subplots(1, len(fractions), sharey=True, squeeze=False)[0]
+    for ax, frac in zip(axes, fractions):
+        for t in sorted(by_topic):
+            need = int(np.ceil(frac * targets.get(t, 0)))
+            runs = by_topic[t]
+            if need <= 0 or not runs:
+                continue
+            reached = np.sort([max(ts[need - 1], 1) / 1000.0 for ts in runs if len(ts) >= need])
+            if reached.size:
+                ax.plot(reached, np.arange(1, reached.size + 1) / len(runs), linewidth=1.8,
+                        color=plt.cm.tab10(t % 10),
+                        label=f"topic {t} ({100 * reached.size / len(runs):.0f}% reach, median {np.median(reached):.1f}s)")
+        ax.set_title(f"{frac:.0%} of the topic's registrants")
+        ax.set_xlabel("search time (s)")
+        ax.set_xscale("log")
+        ax.grid(alpha=0.3, which="both")
+        ax.set_ylim(0, 1.0)
+        ax.legend(fontsize=7, loc="lower right")
+    axes[0].set_ylabel("CDF over searchers")
+    fig.suptitle(f"{label}: time to find a share of the topic's registrants")
+    return True
+
+
+def plot_lookup_latency(results, ax, label):
+    """08: lookup latency, the time to reach F_lookup distinct registrants.
+
+    Scheduled runs record each lookup, and the CDF is over lookups. Other
+    models run one search per node, so the latency is when that search found
+    its F_lookup-th distinct registrant. Lookups or searches that never got
+    there keep their curve below 1.
+    """
+    scheduled = any(r.get("lookups") for r in results)
+    by_topic = collections.defaultdict(list)
+    missed = collections.Counter()
+    for r in results:
+        t, f = r["topic"], r.get("fLookup") or 30
+        f = min(f, r.get("target") or f)  # a topic smaller than F_lookup: all its registrants
+        if scheduled:
+            for lat, n in zip(r.get("lookupLatencyMs") or [], r.get("lookupResults") or []):
+                if n >= f:
+                    by_topic[t].append(lat / 1000.0)
+                else:
+                    missed[t] += 1
+        else:
+            ts = r.get("uniqueFoundAtMs") or []
+            if len(ts) >= f:
+                by_topic[t].append(ts[f - 1] / 1000.0)
+            else:
+                missed[t] += 1
+    if not by_topic:
+        return False
+    for t in sorted(by_topic):
+        xs = np.sort(by_topic[t])
+        total = xs.size + missed[t]
+        ax.plot(xs, np.arange(1, xs.size + 1) / total, linewidth=1.8, color=plt.cm.tab10(t % 10),
+                label=f"topic {t} (median {np.median(xs):.2f}s, {100 * xs.size / total:.0f}% reach)")
+    ax.set_xlabel("time to F_lookup distinct registrants (s)")
+    ax.set_ylabel("CDF over " + ("lookups" if scheduled else "searchers"))
+    ax.set_title(f"{label}: lookup latency, by topic" + ("" if scheduled else " (first F_lookup results of each search)"))
+    ax.grid(alpha=0.3)
+    ax.set_ylim(0, 1.0)
+    ax.set_xlim(left=0)
+    ax.legend(fontsize=8, loc="lower right")
+    return True
+
+
+def plot_lookup_contacts(results, fig, label):
+    """09: registrars contacted per lookup, by topic.
+
+    Distinct nodes asked and TOPICQUERY requests sent. Scheduled runs count
+    each lookup; other models count what a search needed to reach F_lookup
+    distinct registrants.
+    """
+    scheduled = any(r.get("lookupContacted") for r in results)
+    nodes_by, queries_by = collections.defaultdict(list), collections.defaultdict(list)
+    for r in results:
+        t = r["topic"]
+        if scheduled:
+            nodes_by[t] += r.get("lookupContacted") or []
+            queries_by[t] += r.get("lookupQueries") or []
+        elif r.get("targetContacted", -1) >= 0:
+            nodes_by[t].append(r["targetContacted"])
+            queries_by[t].append(r["targetQueries"])
+    if not any(nodes_by.values()):
+        return False
+    axes = fig.subplots(1, 2, squeeze=False)[0]
+    suffix = " per lookup" if scheduled else " to reach F_lookup"
+    for ax, data, what in ((axes[0], nodes_by, "distinct nodes contacted"),
+                           (axes[1], queries_by, "TOPICQUERY requests sent")):
+        for t in sorted(data):
+            xs = np.sort(data[t])
+            if xs.size:
+                ax.plot(xs, np.arange(1, xs.size + 1) / xs.size, linewidth=1.8, color=plt.cm.tab10(t % 10),
+                        label=f"topic {t} (median {np.median(xs):.0f})")
+        ax.set_xlabel(what + suffix)
+        ax.grid(alpha=0.3)
+        ax.set_ylim(0, 1.0)
+        ax.set_xlim(left=0)
+        ax.legend(fontsize=8, loc="lower right")
+    axes[0].set_ylabel("CDF over " + ("lookups" if scheduled else "searchers"))
+    fig.suptitle(f"{label}: registrars contacted per lookup, by topic")
+    return True
+
+
+def plot_dead_results(dead, fig, label):
+    """10: search results pointing at registrants that were offline (churn runs).
+
+    (a) Share of returned results that were dead, over time, per topic.
+    (b) How long each dead result had been offline, against the ad lifetime.
+    """
+    topics = [t for t in ((dead or {}).get("perTopic") or []) if t.get("returned")]
+    if not topics:
+        return False
+    ax_a, ax_b = fig.subplots(1, 2, squeeze=False)[0]
+    life_s = (dead.get("adLifetimeMs") or 0) / 1000.0
+    for rec in topics:
+        t = rec["topic"]
+        color = plt.cm.tab10(t % 10)
+        ot = [p for p in rec.get("overTime") or [] if p[1] > 0]
+        if ot:
+            ax_a.plot([p[0] / 1000.0 for p in ot], [100.0 * p[2] / p[1] for p in ot], linewidth=1.5, color=color,
+                      label=f"topic {t} ({100.0 * rec['dead'] / rec['returned']:.2f}% overall)")
+        hist = {int(k): v for k, v in (rec.get("ageHistS") or {}).items()}
+        if hist:
+            ages = np.array(sorted(hist))
+            counts = np.array([hist[a] for a in ages])
+            ax_b.plot(ages, np.cumsum(counts) / counts.sum(), linewidth=1.8, color=color,
+                      label=f"topic {t} ({counts.sum()} dead)")
+    ax_a.set_xlabel("time since search start (s)")
+    ax_a.set_ylabel("dead results (% of returned)")
+    ax_a.set_title("Dead share of returned results")
+    ax_a.grid(alpha=0.3)
+    ax_a.set_ylim(bottom=0)
+    ax_a.legend(fontsize=8)
+    max_age = max((int(k) for rec in topics for k in (rec.get("ageHistS") or {})), default=0)
+    if life_s and life_s <= 3 * max_age:
+        ax_b.axvline(life_s, color="#7B1FA2", ls=":", linewidth=1.6, label=f"ad lifetime ({life_s / 60:.0f} min)")
+    elif life_s:
+        ax_b.set_title(f"Age of dead results (all under {max_age + 1} s; ad lifetime {life_s / 60:.0f} min)")
+    ax_b.set_xlim(0, max(max_age * 1.05, 1))
+    ax_b.set_xlabel("time offline when returned (s)")
+    ax_b.set_ylabel("CDF over dead results")
+    if not ax_b.get_title():
+        ax_b.set_title("Age of dead results")
+    ax_b.grid(alpha=0.3)
+    ax_b.set_ylim(0, 1.0)
+    ax_b.legend(fontsize=8, loc="lower right")
+    fig.suptitle(f"{label}: results pointing at offline registrants")
+    return True
+
+
 def plot_id_space_registrants(per_topic, cov_by_topic, fig, label, tpos=None):
     """04: admitted registrants across the ID space, by how widely they placed.
 
@@ -785,16 +949,25 @@ def main():
     ok = plot_time_to_first_cdf(results, ax, label)
     emit(fig, out, "02b_time_to_first_cdf", ok)
 
-    # 03 unique-found over time (only if per-find timestamps were captured)
-    has_unique_timestamps = any(r.get("uniqueFoundAtMs") for r in results)
-    if has_unique_timestamps:
-        fig, ax = plt.subplots(figsize=(8, 5))
-        plot_unique_found_over_time(per_topic, results, ax, label)
-        fig.savefig(os.path.join(out, "03_unique_found_over_time.png"))
-        fig.savefig(os.path.join(out, "03_unique_found_over_time.pdf"))
-        plt.close(fig)
-    else:
-        print(f"[{label}] skipping figure 03 (no uniqueFoundAtMs in metrics — predates instrumentation)")
+    # 03 time to find 50/90/99% of the topic's registrants
+    fig = plt.figure(figsize=(16, 4.8), constrained_layout=True)
+    ok = plot_time_to_fraction(per_topic, results, fig, label)
+    emit(fig, out, "03_time_to_fraction", ok)
+
+    # 08 lookup latency: time to F_lookup distinct registrants
+    fig, ax = plt.subplots(figsize=(8, 4.6), constrained_layout=True)
+    ok = plot_lookup_latency(results, ax, label)
+    emit(fig, out, "08_lookup_latency_cdf", ok)
+
+    # 09 registrars contacted per lookup
+    fig = plt.figure(figsize=(13, 4.6), constrained_layout=True)
+    ok = plot_lookup_contacts(results, fig, label)
+    emit(fig, out, "09_lookup_contacts_cdf", ok)
+
+    # 10 dead results (churn runs)
+    fig = plt.figure(figsize=(13, 4.6), constrained_layout=True)
+    ok = plot_dead_results(data.get("deadResults"), fig, label)
+    emit(fig, out, "10_dead_results", ok)
 
     tpos = topic_positions(data)
 
@@ -810,8 +983,7 @@ def main():
 
     # 07 / 07b placement time across the ID space
     tmap = topic_index_map(data)
-    for mode, stem in (("min", "07_placement_time_idspace"),
-                       ("mean", "07b_placement_mean_idspace")):
+    for mode, stem in (("min", "07_placement_time_idspace"),):
         fig = plt.figure(figsize=(10, 2.0 * len(per_topic) + 1.5), constrained_layout=True)
         ok = plot_placement_time_idspace(per_topic, reg_timing, tmap, fig, label, tpos,
                                          data.get("registrationStartNs"),

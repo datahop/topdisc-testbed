@@ -64,6 +64,10 @@ scenario:
     ad_cache_size: 0                   # ads a registrar holds; 0 = default 5000
     reg_attempt_timeout: 0s            # give up on a registrar after this; 0 = 1.5 x ad_lifetime
     search_bucket_size: 0              # search table entries per distance bucket; 0 = spec default 16
+    search_table_depth: 0              # distance buckets in the search table; 0 = default 10
+    reg_table_depth: 0                 # distance buckets in the registration table; 0 = default 10
+    reg_bucket_size: 0                 # registrations kept per registration bucket (K_register); 0 = default 5
+    reg_bucket_standby: 0              # standby registrars per registration bucket; 0 = default 20
     topic_nodes_limit: 0               # topic nodes in a TOPICQUERY reply; 0 = default 16
     aux_nodes_limit: 0                 # closest-to-topic nodes attached to TOPICQUERY and REGTOPIC replies; 0 = default 8
     nodes_per_source_bucket: 0         # cap per source per bucket; 0 = default 1 (inert on topdisc)
@@ -73,6 +77,8 @@ scenario:
     intervals: 10                      # scheduled: number of equal intervals L the search phase is divided into
     request_timeout: 0s                # scheduled: give up on a lookup after this; 0 = only target_count ends it
     target_count: 0                    # conn: stop a searcher after this many distinct registrants; scheduled: end each lookup at this many. 0 = never
+    initial_results: 0                 # continuous, simnet: new registrants a searcher takes at once before result_interval pacing starts
+    result_interval: 0s                # continuous, simnet: after initial_results, take one new registrant per interval; 0 = unpaced
   conn_model:
     enabled: false
     max_peers: 50                      # total slots per node

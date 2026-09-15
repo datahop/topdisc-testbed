@@ -43,6 +43,11 @@ func registerConn(c *simUDPConn) {
 // breakdown from the codec layer when wire stats are enabled. Node IDs are
 // included so consumers can place each node in the ID space.
 func dumpOverhead(path string, tqByIdx map[int]int64, idByIdx map[int]string) {
+	type opRec struct {
+		Msg  string `json:"msg"`
+		OpID uint64 `json:"opid"`
+		discover.OpCounter
+	}
 	type rec struct {
 		Idx     int                             `json:"idx"`
 		ID      string                          `json:"id"`
@@ -52,14 +57,30 @@ func dumpOverhead(path string, tqByIdx map[int]int64, idByIdx map[int]string) {
 		RxBytes int64                           `json:"rxBytes"`
 		TQRcv   int64                           `json:"tqRcv"`
 		ByType  map[string]discover.WireCounter `json:"byType,omitempty"`
+		// Per topic operation (the node's registration and searches) and per
+		// topic it serves as a registrar.
+		Ops       []opRec                       `json:"ops,omitempty"`
+		TopicLoad map[string]discover.TopicLoad `json:"topicLoad,omitempty"`
 	}
 	wire := make(map[int]map[string]discover.WireCounter)
+	ops := make(map[int][]opRec)
+	loads := make(map[int]map[string]discover.TopicLoad)
 	for _, nr := range liveNodeRecs() {
 		if nr.disc == nil {
 			continue
 		}
 		if ws := nr.disc.WireStats(); len(ws) > 0 {
 			wire[nr.idx] = ws
+		}
+		for k, v := range nr.disc.OpStats() {
+			ops[nr.idx] = append(ops[nr.idx], opRec{k.Msg, k.OpID, v})
+		}
+		if tl := nr.disc.TopicLoadStats(); len(tl) > 0 {
+			m := make(map[string]discover.TopicLoad, len(tl))
+			for t, l := range tl {
+				m[t.String()] = l
+			}
+			loads[nr.idx] = m
 		}
 	}
 	connRegistryMu.Lock()
@@ -70,6 +91,7 @@ func dumpOverhead(path string, tqByIdx map[int]int64, idByIdx map[int]string) {
 			TxPkts: c.txPkts.Load(), TxBytes: c.txBytes.Load(),
 			RxPkts: c.rxPkts.Load(), RxBytes: c.rxBytes.Load(),
 			TQRcv: tqByIdx[c.idx], ByType: wire[c.idx],
+			Ops: ops[c.idx], TopicLoad: loads[c.idx],
 		})
 	}
 	connRegistryMu.Unlock()

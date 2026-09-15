@@ -138,15 +138,15 @@ func runChurnWorkload(sim *simnet.Simnet, settings simnet.NodeBiDiLinkSettings, 
 		seed = time.Now().UnixNano()
 	}
 	rng := rand.New(rand.NewSource(seed))
-	var zipf *rand.Zipf
+	var zipf *assign.Zipf
 	if numTopics > 1 {
-		zipf = rand.NewZipf(rng, zipfS, 1.0, uint64(numTopics-1))
+		zipf = assign.NewZipf(zipfS, numTopics)
 	}
 	drawTopic := func() int {
 		if zipf == nil {
 			return 0
 		}
-		return int(zipf.Uint64())
+		return zipf.Draw(rng)
 	}
 
 	topics := make([]topicindex.TopicID, numTopics)
@@ -217,7 +217,7 @@ func runChurnWorkload(sim *simnet.Simnet, settings simnet.NodeBiDiLinkSettings, 
 
 	// Live population state + dead-result tracker.
 	cs := newChurnState(all, activeIdx, len(all))
-	deadTracker := newDeadResultTracker()
+	deadTracker := newDeadResultTracker(pacing.AdLifetime)
 
 	// Search phase: all searchers share one absolute deadline so late
 	// joiners stop with everyone else. Joiners are launched dynamically by
@@ -303,7 +303,7 @@ func runChurnWorkload(sim *simnet.Simnet, settings simnet.NodeBiDiLinkSettings, 
 						exhausted = true // kill-only: pool drained
 						break
 					}
-					deadTracker.markKilled(rec.ln.ID(), now)
+					deadTracker.markOffline(rec.ln.ID(), now)
 					go rec.disc.Close() // detached: Close can be slow at scale
 					leaves++
 				}
@@ -414,6 +414,7 @@ func runChurnWorkload(sim *simnet.Simnet, settings simnet.NodeBiDiLinkSettings, 
 	fmt.Printf("  nodes killed during run:                           %d\n", killed)
 	fmt.Printf("  alive nodes at end:                                %d (of %d ever created)\n", alive, total)
 	deadTracker.report()
+	deadResults = deadTracker.snapshot()
 	reportMultiTopic(results, mem.snapshot(), topics, regTimingNs, metricsOut, allCov)
 
 	// Best-effort eviction-health probe LAST. The per-host topic-table walk is

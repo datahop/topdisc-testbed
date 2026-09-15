@@ -1,127 +1,232 @@
 # Figures and metrics
 
-Every plot the Phase 3 plan asks for, what it measures, which trace it is
-computed from, and where it stands per backend. Stems are the file names
-written by `figures/figures.py` (reads `metrics.json`), `figures/figures_overhead.py`
-(reads `series.json`, `oh.json`, `metrics.json`) and `figures/report_plots.py`
-(cross-run). `docs/TRACES.md` describes the trace files.
+Every plot the Phase 3 plan asks for, the figure that answers it, where it
+stands per backend, and how the implementation differs from the plan. Each
+section ends with a **Differences and gaps** subsection.
 
-Backends: **simnet** writes all three traces from its global view. **real**
-(local, AWS, Grid'5000) writes per-node traces that the coordinator turns into
-the same three files (`pkg/coordinator/metrics.go`): lookups carry result ids
-and found-at times, registrars snapshot the ads they hold every second, nodes
-report quoted/admitted waits and periodic counters; the coordinator joins them
-with the assignments. All 21 per-run figures render from a real-backend run. Status: ✓ done,
-◐ partial, ✗ missing.
+Figures come from three scripts, all reading the files a run directory holds
+(`metrics.json`, `series.json`, `oh.json`, `run.log`; `docs/TRACES.md`):
+
+- `figures/report_run.py <run-dir>` builds the **per-run report**
+  (`<run-dir>/report/report.md` plus `figures/`): it runs `figures.py` and
+  `figures_overhead.py`, copies the log tables (or rebuilds them from
+  `metrics.json` on real backends) and lists anything it could not produce.
+- `figures/compare_runs.py --out DIR a=RUN b=RUN` overlays **runs of the same
+  scenario** (e.g. simnet vs AWS) with a summary table.
+- `figures/report_plots.py` draws the older **cross-run churn plots** from
+  simnet sweep logs.
+
+Backends: **simnet**, and **real** = local processes, AWS, Grid'5000.
+Status: ✓ done, ◐ partial, ✗ missing. "Report" = drawn automatically in the
+per-run report.
+
+## Per-run report layout
+
+| Section | Contents |
+|---|---|
+| Scenario | Parameters (unset protocol parameters shown with their fork default), topic assignment table, actual search duration when stopped early |
+| 1. Registration and cache | Coverage and registration-latency tables; `06`, `04`, `04b`, `07_registration_latency_bar`, `07_placement_time_idspace`, `oh_05`, `oh_08` |
+| 2. Discovery | Per-topic search results, find counts, scheduled lookups, final coverage, search provenance; `02`, `03_time_to_fraction`, `02b`, `08`, `09`, `05`, `oh_06` |
+| 3. Overhead and load | `oh_01`, `oh_03`, `oh_10`, `oh_02`, `oh_04`, `oh_07`, `oh_09`, `oh_11` and the load summary table |
+| 4. Peer connections | Connection-model table (only when the run models peer slots) |
+| 5. Churn | Dead-result and churn tables, `10_dead_results` (only churn runs) |
+| Run health | Simnet buffer peaks and drops, or host CPU/RSS/UDP drops on real backends |
+| Not in this report | Every expected figure or table the run could not produce, with the reason |
+
+## §2 Functional correctness checks
+
+| Plan check | Status | Where |
+|---|---|---|
+| Advertisements are stored correctly | ✗ | #122 |
+| Advertisements expire and are renewed correctly | ✗ | #122; renewal itself is #77 |
+| Caches never exceed capacity C | ✗ | #122 (data: `oh_08` samples) |
+| Lookups return advertisements for the requested service | ✗ | #122 (data: result ids vs assignments) |
+| Ticket and waiting-time behaviour is correct | ✗ | #122 |
+| Registration state is maintained over time | ✗ | #122 |
+
+#### Differences and gaps
+
+- No check script exists; all six are assertions to evaluate over traces (#122).
+- The plan also asks to compare cache utilisation and waiting times against the
+  Python simulator. That comparison is outside this repo.
 
 ## §2 Registration and cache behaviour
 
-| Plot | Measures | Computed from | Stem | simnet | real |
-|---|---|---|---|---|---|
-| Cache utilisation over time | Ads held network-wide and per service against capacity C, sampled periodically; the plan compares it with the Python simulator under the same workload. | `series.json` `samples[].cacheHeld / cacheCap / cacheByTopic` | `oh_08_cache_utilisation` | ✓ | ✓ |
-| Registration waiting time vs popularity | The wait a registrar quotes an advertiser (every quote) and the cumulative wait until admission (one per successful registration), per service. | `series.json` `waitTime[].quotedMs / admittedMs` | `oh_05_wait_time_cdf` | ✓ | ✓ |
-| Time to first registration and to complete the intended registrations across buckets, by popularity | From an advertiser's start until its ad is first admitted by a remote registrar, and until every bucket of its registration table holds an ad. | `metrics.json` `registrationTimingNs`, `registrationStartNs`; per-bucket completion not recorded | `07_registration_latency_bar`, `07_placement_time_idspace`, `07b_placement_mean_idspace` | ◐ first admission only (#116) | ◐ first admission plotted; per-bucket completion recorded (`registrationBucketFullNs`, `registrationCompleteNs`), no figure yet |
-| Registrars per advertiser, ads per registrar | Fan-out: how many registrars hold each advertiser's ad; load: how many ads each registrar holds. | `metrics.json` `registrationCoverage.byRegistrant / byHost` | `06_fanout_both_views`, `04b_id_space_registrars`, `04_id_space_registrants` | ✓ | ✓ |
+| Plan plot | Figure | simnet | real | Report |
+|---|---|---|---|---|
+| Cache utilisation over time, compared with the Python simulator | `oh_08_cache_utilisation` | ✓ | ✓ | yes |
+| Registration waiting time vs service popularity | `oh_05_wait_time_cdf`: quoted waits, and total time of every successful registration, per topic | ◐ | ◐ | yes |
+| Time to first successful registration, and to complete the intended registrations across buckets, by popularity | `07_registration_latency_bar`, `07_placement_time_idspace` (first admission) | ◐ | ◐ | yes |
+| Registrars storing each advertiser's ad, ads stored per registrar | `06_fanout_both_views`, `04_id_space_registrants`, `04b_id_space_registrars` | ✓ | ✓ | yes |
+
+#### Differences and gaps
+
+- **Popularity** is shown per topic, ranked by the Zipf draw. Binning services
+  into small, medium and popular (#113) is missing; it only matters once runs
+  use many topics (the plan's 300).
+- **Completing all buckets:** real backends record `registrationBucketFullNs`
+  and `registrationCompleteNs`, but no figure draws them and simnet does not
+  record them.
+- **Python simulator comparison:** not in this repo.
+- **Renewal (#77)** is not in the fork, so ads held drop about half an ad
+  lifetime after synchronised starts (`oh_08`); `phases.start_window` spreads
+  them.
+- `06_fanout_both_views` panel (b) is unreadable at scale (box collapses at 0).
+- `oh_05` and `oh_08` label topics by hash where other figures use 0–4.
+- On AWS, first admission took a 28.6 s median against 0.5 s on simnet
+  (500-node comparison); not explained yet.
 
 ## §2 Search performance and discovery
 
-| Plot | Measures | Computed from | Stem | simnet | real |
-|---|---|---|---|---|---|
-| Lookup latency vs popularity | Time from a lookup's start to its first result and to completion (F_lookup reached or timeout). | `metrics.json` `results[].timeToFirstNs / timeToCompletionNs`; real traces: `lookups[].latency_ms` | `02b_time_to_first_cdf` | ✓ | ✓ |
-| Fraction of advertisers discovered vs popularity | Distinct registrants found over time and at the end, against the number that exist for the service. | `metrics.json` `results[].uniqueFoundAtMs`, `perTopic[].meanRecall / fullRecall` | `02_recall_reached`, `03_unique_found_over_time` | ✓ | ✓ |
-| Registrars / nodes contacted per lookup vs popularity | How many nodes a lookup queried before finishing. | not recorded | — | ✗ (#116) | ◐ recorded (`lookupQueries`, `lookupContacted`), no figure yet |
-| Times each advertiser is discovered | Over all searchers of a service, how many found each registrant; shows the never-found tail. | `metrics.json` `findCountByTopic`, `results[].foundRegistrantIds` | `05_id_space_found_vs_missed` | ✓ | ✓ |
-| Placement to first discovery | From an ad's first admission to the first time any searcher returns it, on the common clock. | `metrics.json` `registrationTimingNs` × `results[].uniqueFoundAtMs + searchStartMs` | `oh_06_idspace_found_time` | ✓ | ✓ |
+| Plan plot | Figure | simnet | real | Report |
+|---|---|---|---|---|
+| Lookup latency vs service popularity | `08_lookup_latency_cdf`: time to F_lookup distinct registrants, per topic | ✓ | ✓ | yes |
+| Number/fraction of available advertisers discovered vs popularity | `02_recall_reached`, `03_time_to_fraction` (time to 50/90/99% of registrants) | ✓ | ✓ | yes |
+| Registrars/nodes contacted per lookup vs popularity | `09_lookup_contacts_cdf`: distinct nodes and TOPICQUERY requests | ✓ | ◐ | yes |
+| Number of times each advertiser is discovered | `05_id_space_found_vs_missed` | ✓ | ✓ | yes |
+| Time from successful ad placement to first discovery | `oh_06_idspace_found_time` | ◐ | ◐ | yes |
+
+#### Differences and gaps
+
+- **Lookup latency** exists per lookup only in `scheduled` runs. In
+  `continuous` runs it is the time a search took to its first F_lookup
+  registrants; in `conn` runs real backends record nothing (#114).
+- **Contacts per lookup** on real backends come from the node's own lookups;
+  geth's dialer runs a second search next to them in `conn` and `scheduled`
+  (#114), whose contacts are not counted.
+- **Placement to first discovery** counts from the later of the ad's placement
+  and the search start. The plan's quantity needs a scenario where searches
+  overlap registration; with a long `register_wait` the figure only shows
+  discovery of ads that already exist.
+- **Repeated results:** the fork under test includes the search filter
+  (datahop/go-ethereum#140). A continuous search on a topic with no new
+  registrants re-walks its table every 20 s–1.5 min; no figure shows repeats
+  per searcher yet.
 
 ## §2 Load distribution
 
-| Plot | Measures | Computed from | Stem | simnet | real |
-|---|---|---|---|---|---|
-| Registration and lookup contacts across the service-centred ID space | Which nodes, by XOR distance from the service id, get contacted by registrations and by lookups. | contacts are not recorded; traffic is | — | ◐ traffic proxy | ◐ |
-| Total messages / bytes sent and received per node | Per-node totals across the ID space. | `oh.json` `txBytes / rxBytes / txPkts / rxPkts` | `oh_01_idspace_traffic` | ✓ | ✓ |
-| Per-node traffic by registration, renewal and lookup | Same split by message type; renewal is not distinguished from a fresh REGTOPIC. | `oh.json` `byType{}` | `oh_03_idspace_msgtype`, `oh_10_reg_vs_lookup` | ✓ `REGTOPIC(renewal)/v5` | ✓ `REGTOPIC(renewal)/v5` |
-| Peak per-node rate across the ID space, total and by type | Highest sustained send/receive rate per node over a sliding window. | `series.json` `samples[]` differenced | `oh_02_idspace_peak_rate`, `oh_04_idspace_peak_msgtype` | ✓ | ✓ |
-| Load vs node distance from service ids | Traffic against XOR distance to the topics a node is close to. | `oh.json` × `metrics.json` `topicIds` | `oh_07_load_vs_topic_distance` | ✓ | ✓ |
-| Lookup traffic per searcher vs popularity | Cost of a lookup as a function of the service's size. | `oh.json` × `metrics.json` `perTopic` | `oh_09_cost_per_lookup` | ✓ | ✓ |
-| Summary statistics: median, p95, p99, max, coefficient of variation | One line per run for the load distribution. | `oh.json` | — (coordinator prints percentiles) | ✗ | ◐ |
+| Plan plot | Figure | simnet | real | Report |
+|---|---|---|---|---|
+| Registration and lookup contacts across the service-centred ID space | `oh_11_topic_load` (requests received per registrar per topic), `oh_07_load_vs_topic_distance` | ◐ | ◐ | yes |
+| Total messages/bytes sent and received per node | `oh_01_idspace_traffic` | ✓ | ✓ | yes |
+| Per-node traffic by registration, renewal and lookup | `oh_03_idspace_msgtype`, `oh_10_reg_vs_lookup` | ✓ | ✓ | yes |
+| Registration and lookup load vs node distance from service IDs | `oh_07_load_vs_topic_distance`: received and sent | ◐ | ◐ | yes |
+| Summary statistics: median, p95, p99, max, coefficient of variation | Load summary table (from `oh_11`) | ✓ | ✓ | yes |
+
+#### Differences and gaps
+
+- **Service-centred ID space:** `oh_11` gives the distribution of per-topic
+  load, not load placed by distance to each service ID. Per-topic counters are
+  in `oh.json` (`topicLoad`), so an ID-space version needs only a figure.
+- **Load vs distance:** `oh_07` uses whole-node totals, so every topic's line
+  includes traffic caused by other topics, and it does not split registration
+  from lookup traffic.
+- `oh_09_cost_per_lookup` is flat by construction (network lookup traffic
+  divided equally); per-topic cost is in `oh_11` and should replace it.
+- On AWS, geth's dialer search (#114) is most of the lookup traffic, so load
+  figures are not comparable with simnet until it is fixed.
 
 ## §2 Churn resilience
 
-| Plot | Measures | Computed from | Stem | simnet | real |
-|---|---|---|---|---|---|
-| Fraction of returned ads referring to unavailable nodes vs churn rate | Of the registrants a lookup returns, how many were down at that moment. | result ids × the churn schedule (harness-known on simnet, coordinator-known on real backends) | `churn_deadresult` | ✓ | ◐ ids and times are in the traces; the cross-run script still reads simnet's churn log |
-| Age of stale ads vs churn rate | How long ago a dead registrant left when it was returned. | same | `churn_deadage` | ✓ | ◐ same |
-| Lookup success rate and latency vs churn rate | Share of lookups reaching F_lookup, and their latency, overlaid by rate. | `metrics.json` `results[]` per run | `search_ttf_by_rate`, `search_discovery_by_rate` | ✓ | ✓ per run |
-| Registrations maintained per advertiser vs churn rate | Registrars holding a live ad for each advertiser over time. | `registrationCoverage` sampled; needs renewal | `reg_fanout_by_rate`, `reg_hostload_by_rate` | ◐ renewal (#77) | ◐ same |
+| Plan plot | Figure | simnet | real | Report |
+|---|---|---|---|---|
+| Fraction of returned ads referring to unavailable nodes vs churn rate | `10_dead_results` (per run); `churn_deadresult` (across rates) | ◐ | ✗ | per run |
+| Age distribution of stale ads vs churn rate | `10_dead_results` panel (b); `churn_deadage` | ◐ | ✗ | per run |
+| Lookup success rate and latency vs churn rate | `08_lookup_latency_cdf` and the scheduled-lookups table per run | ◐ | ◐ | per run |
+| Successful registrations maintained per advertiser vs churn rate | — | ✗ | ✗ | no |
+
+#### Differences and gaps
+
+- **Churn-rate axis:** per-run figures exist; the across-rates figures come from
+  `report_plots.py`, which reads simnet logs of the older steady-state churn
+  sweeps, not session-churn runs or real backends.
+- **Dead results** count every returned result, including repeats, and a node
+  that comes back counts as live again. Real backends do not compute them yet.
+- **Registrations maintained** needs periodic per-advertiser counts and
+  renewal (#77).
+- The rate multiplier `session_churn.scale` is ignored when a fitted churn
+  model file is set (#116).
 
 ## §3 TopDisc vs legacy discv5
 
-All six plots compare the same metric between a TopDisc run and a legacy run
-of the same population. Legacy nodes are stock upstream geth (`legacy/`),
-finding providers by table scan plus random-target lookups filtered on the
-`svc` ENR entry; their lookups land in the same trace record, so latency and
-fraction discovered are ✓ on real backends, contacts and bytes per lookup are
-still ✗ (#116).
+| Plan plot | simnet | real |
+|---|---|---|
+| Lookup latency, TopDisc vs Discv5, by popularity | ✗ | ✗ |
+| Fraction of available peers discovered, by popularity | ✗ | ✗ |
+| Nodes contacted per lookup, by popularity | ✗ | ✗ |
+| Messages/bytes per lookup | ✗ | ✗ |
+| Distribution of per-node lookup traffic | ✗ | ✗ |
+| Total TopDisc background registration/renewal overhead | ✗ | ✗ |
 
-| Plot | Measures |
-|---|---|
-| Lookup latency, by popularity | Time to find F_lookup providers by topic search vs by random-walk discovery filtered on the ENR service entry |
-| Fraction of peers discovered, by popularity | Providers found within the timeout |
-| Nodes contacted per lookup, by popularity | Queries per lookup (#116) |
-| Messages / bytes per lookup | Wire cost attributed to the lookup |
-| Per-node lookup traffic distribution | Across nodes |
-| Background registration / renewal overhead | TopDisc's extra cost: total REGTOPIC/REGCONFIRMATION traffic (`oh_10_reg_vs_lookup`, ✓ on every backend) |
+#### Differences and gaps
+
+- No comparison script for a TopDisc run against a legacy run.
+  `compare_runs.py` overlays two runs but assumes both are TopDisc: the
+  coordinator leaves legacy nodes out of `results[]`.
+- Legacy lookups record latency and results, not contacts.
+- Bytes per lookup: nodes now export per-operation counters (`ops` in
+  `oh.json`), but all of a node's lookups share one operation ID, so the cost is
+  per node, not per lookup.
+- Registration overhead exists per run (`oh_10`); the side-by-side does not.
 
 ## §4 Partial deployment
 
-| Plot | Measures | simnet | real |
-|---|---|---|---|
-| Startup to first TopDisc-capable peer via legacy discv5, vs deployment % | How long a node takes to get an RLPx peer whose ENR carries the `ng` key. | ✗ | ✓ `first_capable_ms` in every trace |
-| Start of registration to first successful registration, vs deployment % | As §2, per deployment level. | ◐ visibility runs exist | ✓ |
-| Fraction of advertisers discovered, vs deployment % | As §2. | ✓ (incremental-deployment runs, 10–100 %) | ✓ |
-| Lookup latency, vs deployment % | As §2. | ✓ | ✓ |
-| Registrars contacted per registration and per lookup, vs deployment % | Contacts (#116). | ✗ | ✗ |
-| Messages / bytes per lookup, vs deployment % | Wire cost. | ◐ | ◐ |
-| Per-node load, vs deployment % | `oh_01` per run. | ✓ | ✓ |
-| Small / medium / popular services separately | Every plot above split by popularity bin (#113). | ✗ | ✗ |
+| Plan plot | simnet | real |
+|---|---|---|
+| Startup to first TopDisc-capable peer via legacy Discv5, vs deployment % | ✗ | ◐ `first_capable_ms` recorded |
+| Start of registration to first successful registration, vs deployment % | ✗ | ✗ |
+| Fraction of available advertisers discovered, vs deployment % | ✗ | ✗ |
+| Lookup latency, vs deployment % | ✗ | ✗ |
+| Registrars contacted per registration and per lookup, vs deployment % | ✗ | ✗ |
+| Messages/bytes per lookup, vs deployment % | ✗ | ✗ |
+| Per-node load, vs deployment % | ✗ | ✗ |
+| Separate results for small, medium and popular services | ✗ | ✗ |
 
-## §5 Standalone registrar overhead — not covered
+#### Differences and gaps
 
-Memory vs cache capacity and occupancy, registration and lookup processing
-latency vs occupancy, CPU vs request rate, throughput vs offered rate,
-lower-bound-state overhead, validation cost. These need a load generator
-driving a single registrar at controlled rates with a chosen advertiser IP
-distribution, plus pprof profiles (#121, a future `cmd/regbench`). The host
-monitoring planned for the hostagent (CPU, RSS, fds, UDP drops per node)
-supplies the resource axes but not the driver.
+- No sweep script over `population.legacy_frac`; every per-run figure exists
+  for a single deployment level.
+- Registrars contacted per registration: nodes export distinct nodes per
+  registration operation (`ops`), but no figure uses it.
+- Popularity bins: #113.
 
-## §6 Admission-control security — not testbed work
+## §5 Standalone registrar overhead, §6 Admission-control security
 
-Six plots from the Python simulator (#123, #124).
+Not testbed work: §5 needs a registrar load generator (#121); §6 uses the
+Python simulator (#123, #124).
 
-## What real backends must export for parity
+## Not in the plan
 
-The coordinator already holds the ground truth (which node registers which
-service, when each node is up or down, node ids and topic ids). To build
-`metrics.json` and `series.json` in the format above, each node must report:
+| Figure | Why it is kept |
+|---|---|
+| `02b_time_to_first_cdf` | Time to the first result, per topic |
+| `oh_02_idspace_peak_rate`, `oh_04_idspace_peak_msgtype` | Peak sustained rate per node, total and by type |
+| `oh_09_cost_per_lookup` | To be replaced by a per-topic cost (see load) |
+| `cmp_01`–`cmp_13` (`compare_runs.py`) | Same scenario on two backends: lookups, discovery, registration, cache, registrar load, traffic, load vs distance |
+| Run health, peer connections tables | Separate testbed problems from protocol behaviour |
 
-- per registration attempt: service, registrar id, bucket or distance, quoted
-  wait, admission time, whether it was a renewal;
-- per lookup: start, end, result ids with the time each was first seen, nodes
-  contacted, messages and bytes attributed to the lookup;
-- periodic snapshot of the ad cache: service and advertiser id of every ad
-  held, and the counters already in `wire{}`;
-- the first time a TopDisc-capable peer was seen (§4).
+Removed from the per-run report: `01_topic_distribution` (now a table),
+`03_unique_found_over_time` (replaced by `03_time_to_fraction`),
+`07b_placement_mean_idspace` (mixed admissions over the whole run).
 
-The hostagent samples the periodic items on the series period; the coordinator
-joins everything with the assignments and the churn schedule. Three items are
-missing on simnet as well and need node-side instrumentation in the fork:
-contacts per lookup, the renewal flag on REGTOPIC, and popularity binning
-(#116, #113).
+## Differences between the runs so far and the plan's workload
 
-## Totals, §2–§4
+- **Scale and services:** the plan uses 10,000 nodes and 300 services (Zipf
+  α = 1); runs so far used 500–10,000 nodes and 1 or 5 topics.
+- **Protocol parameters:** the plan's K_lookup 5, K_register 3 and F_return 10
+  are `search_bucket_size`, `reg_bucket_size` and `topic_nodes_limit`; runs so
+  far used the fork defaults 16, 5 and 16 (#12).
+- **Network:** the plan's WAN model (pair RTT 8–91 ms, 20 KB/s per node) is
+  not in simnet, which uses one latency and bandwidth for every link.
+- **Lookup workload:** the plan's `scheduled` model is available on every
+  backend; most runs so far used `continuous` to find the performance limit.
+- **Renewal** (#77) is not in the fork.
+
+## Totals (§2–§4, 32 plan plots)
 
 | | done | partial | missing |
 |---|---|---|---|
-| simnet (34 plots) | 18 | 8 | 8 |
-| real backends (34 plots) | 21 | 6 | 7 |
+| simnet | 9 | 8 | 15 |
+| real backends | 8 | 7 | 17 |
+
+Plus the six §2 correctness checks, all missing (#122).

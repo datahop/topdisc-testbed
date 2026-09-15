@@ -37,7 +37,7 @@ for fr in CHURN_FRACS:
     if not txt:
         print(f"WARN: no completed churn log for frac={fr}"); continue
     d = {"path": path}
-    m = re.search(r"registrant finds: (\d+)\s+dead-when-returned: (\d+) \(([\d.]+)%\)", txt)
+    m = re.search(r"(?:registrant finds|results returned): (\d+)\s+dead-when-returned: (\d+) \(([\d.]+)%\)", txt)
     d["finds"], d["dead"], d["deadpct"] = int(m.group(1)), int(m.group(2)), float(m.group(3))
     m = re.search(r"dead-age.*?min=(\S+) p50=(\S+) p90=(\S+) p99=(\S+) max=(\S+) mean=(\S+)", txt)
     d["age"] = {k: secs(v) for k, v in zip(["min","p50","p90","p99","max","mean"], m.groups())}

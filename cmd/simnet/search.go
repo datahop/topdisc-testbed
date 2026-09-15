@@ -52,6 +52,19 @@ type searchPacing struct {
 	// once its outbound peer slots are full, the way geth's dialer does.
 	Conns *connTable
 
+	// InitialResults and ResultInterval pace a continuous searcher: it takes
+	// InitialResults new registrants at once, then one new registrant per
+	// ResultInterval.
+	InitialResults int
+	ResultInterval time.Duration
+
+	// Dead, if non-nil, counts results returned while their registrant is
+	// offline.
+	Dead *deadResultTracker
+
+	// AdLifetime is the scenario's ad lifetime, for reporting.
+	AdLifetime time.Duration
+
 	// Model selects when a node searches. "conn": only while it has empty
 	// outbound slots, parking when full. "continuous": one search for the
 	// whole phase that keeps consuming results and never dials. "scheduled": one
@@ -116,6 +129,17 @@ type searchResult struct {
 	LookupsHitTarget int     `json:"lookupsHitTarget"`
 	LookupLatencyMs  []int64 `json:"lookupLatencyMs"`
 	LookupResults    []int   `json:"lookupResults"`
+	LookupQueries    []int   `json:"lookupQueries,omitempty"`
+	LookupContacted  []int   `json:"lookupContacted,omitempty"`
+
+	// Topic-query contacts: TOPICQUERY requests sent and distinct nodes asked
+	// until the search first had FLookup distinct registrants (-1 = never),
+	// and over the whole search.
+	FLookup         int `json:"fLookup"`
+	TargetQueries   int `json:"targetQueries"`
+	TargetContacted int `json:"targetContacted"`
+	SearchQueries   int `json:"searchQueries"`
+	SearchContacted int `json:"searchContacted"`
 
 	// SearchStartMs is this searcher's start offset from the run's common
 	// epoch (registration start). UniqueFoundAtMs is relative to this
@@ -334,8 +358,17 @@ func runOneSearcher(n nodeRec, topicIdx int, topic topicindex.TopicID, deadlineA
 	}
 	// Closed (not sent to) so every pump goroutine across sessions observes it.
 	deadline := make(chan struct{})
-	deadlineTimer := time.AfterFunc(time.Until(deadlineAt), func() { close(deadline) })
+	var deadlineOnce sync.Once
+	endSearch := func() { deadlineOnce.Do(func() { close(deadline) }) }
+	deadlineTimer := time.AfterFunc(time.Until(deadlineAt), endSearch)
 	defer deadlineTimer.Stop()
+	go func() {
+		select {
+		case <-stopSearches:
+			endSearch()
+		case <-deadline:
+		}
+	}()
 
 	// A searcher may run several search sessions: it stops consuming when its
 	// outbound slots fill, and opens a fresh search if a peer later drops.
@@ -349,8 +382,13 @@ func runOneSearcher(n nodeRec, topicIdx int, topic topicindex.TopicID, deadlineA
 	// never observe quit. Calling Close in a detached goroutine lets the
 	// searcher's outer goroutine return so the workload can complete; the
 	// leaked shutdown goroutine is reaped by main()'s teardown watchdog.
+	// Contacts summed over closed sessions, and those of the last one closed.
+	var searchQueries, searchContacted, lastQueries, lastContacted int
 	closeIter := func() {
 		if iter != nil {
+			lastQueries, lastContacted = iterContacts(iter)
+			searchQueries += lastQueries
+			searchContacted += lastContacted
 			go iter.Close()
 			iter = nil
 		}
@@ -409,7 +447,20 @@ func runOneSearcher(n nodeRec, topicIdx int, topic topicindex.TopicID, deadlineA
 		lookupsHitTarget int
 		lookupLatencyMs  []int64
 		lookupResults    []int
+		lookupQueries    []int
+		lookupContacted  []int
+		fLookup          = pacing.TargetCount
+		targetQueries    = -1
+		targetContacted  = -1
+		paceStart        time.Time
 	)
+	if fLookup <= 0 {
+		fLookup = 30
+	}
+	if target > 0 && target < fLookup {
+		fLookup = target // a topic with fewer registrants than F_lookup: all of them
+	}
+	dl.topic = topicIdx
 	selfID := n.ln.ID()
 	if scheduled && pacing.Intervals > 0 {
 		for _, ms := range assign.LookupTimes(rng, time.Now().UnixMilli(), time.Now().Add(pacing.SearchTimeout).UnixMilli(), pacing.Intervals) {
@@ -465,12 +516,19 @@ sessions:
 			novel := false
 			isReg := has(id, topicIdx)
 			if isReg {
+				if deadTracker != nil {
+					dl.record(deadTracker, id, time.Now())
+				}
 				if scheduled {
 					lookupSeen[id] = struct{}{}
 				}
 				if _, dup := seenReg[id]; !dup {
 					novel = true
 					seenReg[id] = struct{}{}
+					if len(seenReg) == fLookup && targetQueries < 0 {
+						q, c := iterContacts(iter)
+						targetQueries, targetContacted = searchQueries+q, searchContacted+c
+					}
 					uniqueAtMs = append(uniqueAtMs, time.Since(start).Milliseconds())
 					uniqueIDs = append(uniqueIDs, id.TerminalString())
 					if _, already := connected[id]; already {
@@ -480,11 +538,6 @@ sessions:
 						newAtMs = append(newAtMs, time.Since(start).Milliseconds())
 					}
 					stats.recordUniqueFind(topicIdx, id)
-					// Record whether this registrant was already dead when first
-					// returned to this searcher, and how stale it was.
-					if deadTracker != nil {
-						dl.record(deadTracker, id, time.Now())
-					}
 				}
 				registered++
 			} else {
@@ -518,11 +571,26 @@ sessions:
 				}
 			}
 			if scheduled {
-				if pacing.TargetCount > 0 && len(lookupSeen) >= pacing.TargetCount {
+				if pacing.TargetCount > 0 && len(lookupSeen) >= fLookup {
 					break consume
 				}
 			} else if !continuous && pacing.TargetCount > 0 && len(seenReg) >= pacing.TargetCount {
 				break sessions
+			}
+			if continuous && novel && pacing.ResultInterval > 0 {
+				if over := len(seenReg) - pacing.InitialResults; over >= 0 {
+					if paceStart.IsZero() {
+						paceStart = time.Now()
+					}
+					if over > 0 {
+						select {
+						case <-deadline:
+							hitDeadline = true
+							break sessions
+						case <-time.After(time.Until(paceStart.Add(time.Duration(over) * pacing.ResultInterval))):
+						}
+					}
+				}
 			}
 			if pacing.MaxPause > 0 && (novel || !pacing.PauseNovelOnly) {
 				select {
@@ -545,12 +613,14 @@ sessions:
 		}
 		if scheduled {
 			lookups++
-			hit := pacing.TargetCount > 0 && len(lookupSeen) >= pacing.TargetCount
+			hit := pacing.TargetCount > 0 && len(lookupSeen) >= fLookup
 			if hit {
 				lookupsHitTarget++
 			}
 			lookupLatencyMs = append(lookupLatencyMs, time.Since(lookupStart).Milliseconds())
 			lookupResults = append(lookupResults, len(lookupSeen))
+			lookupQueries = append(lookupQueries, lastQueries)
+			lookupContacted = append(lookupContacted, lastContacted)
 		}
 		if scheduled || continuous {
 			// A departed node waits for its rejoin before looking up again.
@@ -574,13 +644,14 @@ sessions:
 			break sessions
 		}
 	}
+	closeIter()
 	elapsed := time.Since(start)
 	foundRegIDs := make([]string, 0, len(seenReg))
 	for rid := range seenReg {
 		foundRegIDs = append(foundRegIDs, rid.TerminalString())
 	}
 	if deadTracker != nil {
-		deadTracker.merge(dl.total, dl.dead, dl.ages)
+		deadTracker.merge(&dl)
 	}
 	return searchResult{
 		NodeIdx:             n.idx,
@@ -601,6 +672,13 @@ sessions:
 		LookupsHitTarget:    lookupsHitTarget,
 		LookupLatencyMs:     lookupLatencyMs,
 		LookupResults:       lookupResults,
+		LookupQueries:       lookupQueries,
+		LookupContacted:     lookupContacted,
+		FLookup:             fLookup,
+		TargetQueries:       targetQueries,
+		TargetContacted:     targetContacted,
+		SearchQueries:       searchQueries,
+		SearchContacted:     searchContacted,
 		OutboundConns:       outboundConns,
 		DialAttempts:        dialAttempts,
 		DialRefused:         dialRefused,
@@ -856,3 +934,16 @@ func (ls *liveStats) printCheckpoint(tag string) {
 			tag, int(elapsed.Seconds()), t, assigned, founders, coveragePct, neverFound, p50, p95, maxC)
 	}
 }
+
+// iterContacts returns the TOPICQUERY requests a search sent and the distinct
+// nodes it asked, or zeros when the iterator does not report them.
+func iterContacts(it enode.Iterator) (queries, nodes int) {
+	if c, ok := it.(interface{ Contacts() (int, int) }); ok {
+		return c.Contacts()
+	}
+	return 0, 0
+}
+
+// stopSearches is closed on SIGTERM or SIGINT: every search ends as if its
+// deadline had passed, so the run still writes its reports.
+var stopSearches = make(chan struct{})

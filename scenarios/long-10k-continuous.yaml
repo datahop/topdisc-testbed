@@ -1,0 +1,37 @@
+# 10k nodes, 5 topics (Zipf s=1), continuous search with no pacing: every node
+# keeps reading its topic search as fast as it returns results, to measure the
+# most lookup load providers and registrars carry. Node starts are spread over
+# one ad lifetime so registrations and expiries reach a steady state.
+# The search phase runs until stopped: SIGTERM to the simnet process ends the
+# searches and the run writes its reports.
+name: long-10k-continuous
+scenario:
+  population:
+    nodes: 10000
+    topics: 5
+    zipf_s: 1.0
+    seed: 1
+  network:
+    latency_ms: 30
+    bandwidth_mibps: 1000
+  phases:
+    bootstrap_wait: 180s
+    start_window: 15m
+    register_wait: 22m30s
+    search_stagger: 10ms
+    search_timeout: 48h
+  topic:
+    ad_cache_size: 5000
+  search:
+    model: continuous
+testbed:
+  simulator:
+    link_buf: 8192
+    router_buf: 32768
+    router_shards: 16
+  traces:
+    metrics: metrics.json
+    overhead: oh.json
+    overhead_series: series.json
+    overhead_series_period: 5m
+    checkpoint_interval: 10m

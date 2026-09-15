@@ -127,6 +127,10 @@ type TopicConfig struct {
 	AdCacheSize          int           `yaml:"ad_cache_size"`
 	RegAttemptTimeout    time.Duration `yaml:"reg_attempt_timeout"`
 	SearchBucketSize     int           `yaml:"search_bucket_size"`
+	SearchTableDepth     int           `yaml:"search_table_depth"`
+	RegTableDepth        int           `yaml:"reg_table_depth"`
+	RegBucketSize        int           `yaml:"reg_bucket_size"`
+	RegBucketStandby     int           `yaml:"reg_bucket_standby"`
 	TopicNodesLimit      int           `yaml:"topic_nodes_limit"`
 	AuxNodesLimit        int           `yaml:"aux_nodes_limit"`
 	NodesPerSourceBucket int           `yaml:"nodes_per_source_bucket"`
@@ -139,6 +143,8 @@ type SearchConfig struct {
 	RequestTimeout time.Duration `yaml:"request_timeout"`
 	TargetCount    int           `yaml:"target_count"`
 	Intervals      int           `yaml:"intervals"`
+	InitialResults int           `yaml:"initial_results"`
+	ResultInterval time.Duration `yaml:"result_interval"`
 }
 
 // ConnModelConfig: geth peer slots: a node stops searching once its outbound slots are full.
@@ -300,6 +306,10 @@ var paramDocs = []paramDoc{
 	{"scenario.topic.ad_cache_size", "ads a registrar holds; 0 = default 5000"},
 	{"scenario.topic.reg_attempt_timeout", "give up on a registrar after this; 0 = 1.5 x ad_lifetime"},
 	{"scenario.topic.search_bucket_size", "search table entries per distance bucket; 0 = spec default 16"},
+	{"scenario.topic.search_table_depth", "distance buckets in the search table; 0 = default 10"},
+	{"scenario.topic.reg_table_depth", "distance buckets in the registration table; 0 = default 10"},
+	{"scenario.topic.reg_bucket_size", "registrations kept per registration bucket (K_register); 0 = default 5"},
+	{"scenario.topic.reg_bucket_standby", "standby registrars per registration bucket; 0 = default 20"},
 	{"scenario.topic.topic_nodes_limit", "topic nodes in a TOPICQUERY reply; 0 = default 16"},
 	{"scenario.topic.aux_nodes_limit", "closest-to-topic nodes attached to TOPICQUERY and REGTOPIC replies; 0 = default 8"},
 	{"scenario.topic.nodes_per_source_bucket", "cap per source per bucket; 0 = default 1 (inert on topdisc)"},
@@ -308,6 +318,8 @@ var paramDocs = []paramDoc{
 	{"scenario.search.intervals", "scheduled: number of equal intervals L the search phase is divided into"},
 	{"scenario.search.request_timeout", "scheduled: give up on a lookup after this; 0 = only target_count ends it"},
 	{"scenario.search.target_count", "conn: stop a searcher after this many distinct registrants; scheduled: end each lookup at this many. 0 = never"},
+	{"scenario.search.initial_results", "continuous, simnet: new registrants a searcher takes at once before result_interval pacing starts"},
+	{"scenario.search.result_interval", "continuous, simnet: after initial_results, take one new registrant per interval; 0 = unpaced"},
 	{"scenario.conn_model.enabled", ""},
 	{"scenario.conn_model.max_peers", "total slots per node"},
 	{"scenario.conn_model.dial_ratio", "1/N of slots are outbound"},

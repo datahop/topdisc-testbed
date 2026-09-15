@@ -1,0 +1,37 @@
+# 500 nodes on AWS, one per instance, compared with the same scenario on simnet
+# (compare-500-simnet.yaml). The scenario block is identical in both files.
+# deploy/aws.sh up scenarios/compare-500-aws.yaml && deploy/aws.sh run scenarios/compare-500-aws.yaml
+name: compare-500-aws
+scenario:
+  population:
+    nodes: 500
+    topics: 5
+    zipf_s: 1.0
+    seed: 1
+  network:
+    latency_ms: 50              # simnet only: one delay for every pair, about the mean one-way delay across the regions below
+    bandwidth_mibps: 1000
+    regions: {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}
+  phases:
+    bootstrap_wait: 60s
+    register_stagger: 20ms
+    register_wait: 5m
+    search_stagger: 10ms
+    search_timeout: 10m
+  topic:
+    ad_cache_size: 5000
+  conn_model:
+    enabled: true
+    max_peers: 50
+    dial_ratio: 3
+    redial_wait: 35s
+  search:
+    model: scheduled
+    intervals: 5
+    target_count: 30
+    request_timeout: 60s
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json
+    home_region: us-east-1
