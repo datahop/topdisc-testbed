@@ -33,13 +33,18 @@ import (
 type lazyIter struct {
 	ready <-chan struct{}
 	open  func() enode.Iterator
+	seen  func(*enode.Node) // called for every node handed to the dialer
 	once  sync.Once
 	it    enode.Iterator
 }
 
 func (l *lazyIter) Next() bool {
 	l.once.Do(func() { <-l.ready; l.it = l.open() })
-	return l.it.Next()
+	ok := l.it.Next()
+	if ok && l.seen != nil {
+		l.seen(l.it.Node())
+	}
+	return ok
 }
 func (l *lazyIter) Node() *enode.Node { return l.it.Node() }
 func (l *lazyIter) Close() {
@@ -105,6 +110,18 @@ func main() {
 	wait(asg.Phases.StartAt) // spread startups; a churn restart is past it and starts at once
 	ready := make(chan struct{})
 	var srv *p2p.Server
+	// Lookup-only models never dial; the connection-driven model records the
+	// dialer's search: registrants handed to the dialer, its progress, and when
+	// the outbound slots first filled.
+	lookupOnly := asg.Search.Model == "continuous" || asg.Search.Model == "scheduled"
+	var (
+		connMu     sync.Mutex
+		connStart  time.Time
+		connIt     enode.Iterator
+		connSeen         = map[enode.ID]struct{}{}
+		connFound        = []workload.Found{}
+		connFullMs int64 = -1
+	)
 	proto := p2p.Protocol{
 		Name: "topdisc-test", Version: 1, Length: 1,
 		// A connection with no shared capability is dropped as useless, so
@@ -116,16 +133,29 @@ func main() {
 				}
 			}
 		},
-		DialCandidates: &lazyIter{ready: ready, open: func() enode.Iterator {
-			return srv.DiscoveryV5().TopicSearch(topic, uint64(*port))
-		}},
+		DialCandidates: &lazyIter{ready: ready,
+			open: func() enode.Iterator {
+				it := srv.DiscoveryV5().TopicSearch(topic, uint64(*port))
+				connMu.Lock()
+				connStart, connIt = time.Now(), it
+				connMu.Unlock()
+				return it
+			},
+			seen: func(n *enode.Node) {
+				connMu.Lock()
+				defer connMu.Unlock()
+				if _, ok := connSeen[n.ID()]; !ok {
+					connSeen[n.ID()] = struct{}{}
+					connFound = append(connFound, workload.Found{ID: n.ID().String(), AtMs: time.Since(connStart).Milliseconds()})
+				}
+			}},
 	}
-	if asg.Search.Model == "continuous" {
-		// The node only consumes its own search: no dialer, so no second search.
+	if lookupOnly {
+		// The node only consumes its own lookups: no dialer, so no second search.
 		proto.DialCandidates = enode.IterNodes(nil)
 	}
 	srv = &p2p.Server{Config: p2p.Config{
-		PrivateKey: key, Name: "topdisc-node", MaxPeers: *maxPeers, DialRatio: *dialRatio, NoDial: asg.Search.Model == "continuous",
+		PrivateKey: key, Name: "topdisc-node", MaxPeers: *maxPeers, DialRatio: *dialRatio, NoDial: lookupOnly,
 		ListenAddr: fmt.Sprintf("%s:%d", *ip, *port), DiscoveryV4: false, DiscoveryV5: true,
 		BootstrapNodesV5: bootnodes, Protocols: []p2p.Protocol{proto}, Logger: log.Root(),
 		DiscoveryV5Topic: topicindex.Config{
@@ -264,6 +294,19 @@ func main() {
 					refills = append(refills, time.Since(lostAt[0]).Milliseconds())
 					lostAt = lostAt[1:]
 				}
+				if !lookupOnly {
+					outbound := 0
+					for _, p := range srv.Peers() {
+						if !p.Inbound() {
+							outbound++
+						}
+					}
+					connMu.Lock()
+					if connFullMs < 0 && !connStart.IsZero() && outbound >= srv.MaxDialedConns() {
+						connFullMs = time.Since(connStart).Milliseconds()
+					}
+					connMu.Unlock()
+				}
 				if firstCapableMs < 0 {
 					for _, p := range srv.Peers() {
 						if p.ID() == ev.Peer && topicindex.SupportsTopicDiscovery(p.Node()) {
@@ -294,7 +337,7 @@ func main() {
 			}
 			go workload.Scheduled(open, nil, asg.Search.TargetCount, timeout, at, deadline, rec)
 		} else {
-			go workload.Continuous(open, nil, deadline, func(l workload.Lookup) { mu.Lock(); lookups = []workload.Lookup{l}; mu.Unlock() })
+			go workload.Continuous(open, nil, asg.Search.InitialResults, time.Duration(asg.Search.ResultIntervalMs)*time.Millisecond, deadline, func(l workload.Lookup) { mu.Lock(); lookups = []workload.Lookup{l}; mu.Unlock() })
 		}
 	}
 	writeTrace := func() {
@@ -333,6 +376,17 @@ func main() {
 		for k, v := range srv.DiscoveryV5().OpStats() {
 			ops = append(ops, map[string]any{"msg": k.Msg, "opid": k.OpID, "txMsgs": v.TxMsgs, "txBytes": v.TxBytes, "rxMsgs": v.RxMsgs, "rxBytes": v.RxBytes, "nodes": v.Nodes})
 		}
+		var conn map[string]any
+		connMu.Lock()
+		if !lookupOnly && !connStart.IsZero() {
+			conn = map[string]any{"start_ms": connStart.UnixMilli(), "found": connFound, "slots_filled_ms": connFullMs}
+			if s, ok := connIt.(interface {
+				Stats() discover.TopicSearchStats
+			}); ok {
+				conn["search"] = s.Stats()
+			}
+		}
+		connMu.Unlock()
 		topicLoad := map[string]discover.TopicLoad{}
 		for t, l := range srv.DiscoveryV5().TopicLoadStats() {
 			topicLoad[t.String()] = l
@@ -344,7 +398,7 @@ func main() {
 			"topic": topic.String(), "topics": asg.Topics, "register_at_ms": asg.Phases.RegisterAt, "search_at_ms": asg.Phases.SearchAt,
 			"ads_first_seen_ms": first, "ads_final": last, "wait": wait, "samples": smp,
 			"reg_bucket_full_ms": bFull, "reg_complete_ms": rComplete, "reg_buckets_final": bLast,
-			"ops": ops, "topic_load": topicLoad,
+			"ops": ops, "topic_load": topicLoad, "conn": conn,
 		}, "", " ")
 		os.WriteFile(asg.TraceFile, b, 0o644)
 	}

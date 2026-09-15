@@ -314,12 +314,12 @@ var paramDocs = []paramDoc{
 	{"scenario.topic.aux_nodes_limit", "closest-to-topic nodes attached to TOPICQUERY and REGTOPIC replies; 0 = default 8"},
 	{"scenario.topic.nodes_per_source_bucket", "cap per source per bucket; 0 = default 1 (inert on topdisc)"},
 	{"scenario.topic.remove_on_expiry", "drop ads at expiry instead of renewing (inert on topdisc)"},
-	{"scenario.search.model", "conn: search only while outbound slots are empty; continuous: one search for the whole search phase that keeps consuming results, without dialing; scheduled: one lookup per node at a random time in each of `intervals` equal slices of the search phase (plan §1)"},
+	{"scenario.search.model", "conn: connection-driven, nodes fill peer slots from their topic search (simnet: conn_model; real backends: geth's dialer); scheduled: lookup-only, one lookup per node at a random time in each of `intervals` equal slices of the search phase (plan §1); continuous: lookup-only, one search for the whole search phase consumed at initial_results/result_interval. Lookup-only models never dial"},
 	{"scenario.search.intervals", "scheduled: number of equal intervals L the search phase is divided into"},
 	{"scenario.search.request_timeout", "scheduled: give up on a lookup after this; 0 = only target_count ends it"},
 	{"scenario.search.target_count", "conn: stop a searcher after this many distinct registrants; scheduled: end each lookup at this many. 0 = never"},
-	{"scenario.search.initial_results", "continuous, simnet: new registrants a searcher takes at once before result_interval pacing starts"},
-	{"scenario.search.result_interval", "continuous, simnet: after initial_results, take one new registrant per interval; 0 = unpaced"},
+	{"scenario.search.initial_results", "continuous: new registrants a searcher takes at once before result_interval pacing starts"},
+	{"scenario.search.result_interval", "continuous: after initial_results, take one new registrant per interval; 0 = unpaced"},
 	{"scenario.conn_model.enabled", ""},
 	{"scenario.conn_model.max_peers", "total slots per node"},
 	{"scenario.conn_model.dial_ratio", "1/N of slots are outbound"},
@@ -417,6 +417,14 @@ func Load(path string) (Config, error) {
 		return c, fmt.Errorf("%s: %w", path, err)
 	}
 	c.SourcePath = path
+	switch c.Scenario.Search.Model {
+	case "conn", "scheduled", "continuous":
+	default:
+		return c, fmt.Errorf("%s: search.model %q: want conn, scheduled or continuous", path, c.Scenario.Search.Model)
+	}
+	if c.Scenario.Search.Model != "conn" && c.Scenario.ConnModel.Enabled {
+		return c, fmt.Errorf("%s: search.model %s is lookup-only and never dials; remove conn_model or use search.model conn", path, c.Scenario.Search.Model)
+	}
 	if c.Name == "" {
 		c.Name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	}

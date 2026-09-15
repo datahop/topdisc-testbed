@@ -12,6 +12,10 @@ github.com/datahop/go-ethereum v1.17.2-testbed.3 h1:5URw6TyFNoqytqyyYKCpRJNVkKAl
 github.com/datahop/go-ethereum v1.17.2-testbed.3/go.mod h1:f2EhRwqewIZkGoQekywI2Y2RZAMTSavLNkD9qItFy1A=
 github.com/datahop/go-ethereum v1.17.2-testbed.5 h1:Gxyyg52jJMwi4ydYzqcr16sh4UPeZsjbT7gBclDJ+ew=
 github.com/datahop/go-ethereum v1.17.2-testbed.5/go.mod h1:f2EhRwqewIZkGoQekywI2Y2RZAMTSavLNkD9qItFy1A=
+github.com/datahop/go-ethereum v1.17.2-testbed.6 h1:bvRrfcB39CvvxxXrfLa0GAvjhwPxE3yqaSq6pSp16iA=
+github.com/datahop/go-ethereum v1.17.2-testbed.6/go.mod h1:f2EhRwqewIZkGoQekywI2Y2RZAMTSavLNkD9qItFy1A=
+github.com/datahop/go-ethereum v1.17.2-testbed.7 h1:N2ML7OO9o56aFDlLg41YmMhbx5CBw1cVUdxEnjtIXpc=
+github.com/datahop/go-ethereum v1.17.2-testbed.7/go.mod h1:f2EhRwqewIZkGoQekywI2Y2RZAMTSavLNkD9qItFy1A=
 github.com/datahop/simnet v0.0.0-20260904122752-904836695aaa h1:Fw2HWHSVpIfnK2+c2Vqk3K6xgyKwzKueJL/zUuhmuPw=
 github.com/datahop/simnet v0.0.0-20260904122752-904836695aaa/go.mod h1:tfQF1u2DmaB6WHODMtQaLtClEf3a296CKQLq5gAsIS0=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

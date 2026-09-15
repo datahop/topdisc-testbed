@@ -439,6 +439,52 @@ def plot_lookup_contacts(results, fig, label):
     return True
 
 
+def plot_discovery_rate(per_topic, results, fig, label):
+    """11: discovery rate of long-lived searches (continuous and conn models).
+
+    (a) New distinct registrants per searcher per minute, mean over the topic's
+    searchers, over search time. (b) The same as a share of the topic's
+    registrants, so topics of different size compare. Scheduled runs are
+    skipped: their searches restart every lookup.
+    """
+    if any(r.get("lookups") for r in results):
+        return False
+    targets = {r["topic"]: max(r["target"], 1) for r in per_topic}
+    by_topic = collections.defaultdict(list)
+    end_ms = 0
+    for r in results:
+        ts = r.get("uniqueFoundAtMs") or []
+        by_topic[r["topic"]].append(ts)
+        end_ms = max(end_ms, r.get("timeToCompletionNs", 0) / 1e6, ts[-1] if ts else 0)
+    if not end_ms or not any(ts for runs in by_topic.values() for ts in runs):
+        return False
+    width_ms = max(60_000, end_ms / 80)
+    edges = np.arange(0, end_ms + width_ms, width_ms)
+    ax_a, ax_b = fig.subplots(1, 2, squeeze=False)[0]
+    per_min = 60_000 / width_ms
+    for t in sorted(by_topic):
+        runs = by_topic[t]
+        counts = np.zeros(len(edges) - 1)
+        for ts in runs:
+            counts += np.histogram(ts, bins=edges)[0]
+        rate = counts / len(runs) * per_min
+        mids = (edges[:-1] + width_ms / 2) / 60_000
+        color = plt.cm.tab10(t % 10)
+        ax_a.plot(mids, rate, lw=1.6, color=color, label=f"topic {t} ({targets.get(t, 0)} registrants)")
+        ax_b.plot(mids, 100 * rate / targets.get(t, 1), lw=1.6, color=color, label=f"topic {t}")
+    ax_a.set_ylabel("new registrants per searcher per minute (mean)")
+    ax_b.set_ylabel("% of the topic's registrants found per minute (mean)")
+    for ax in (ax_a, ax_b):
+        ax.set_xlabel("search time (min)")
+        ax.set_yscale("symlog", linthresh=0.1)
+        ax.set_xlim(left=0)
+        ax.set_ylim(bottom=0)
+        ax.grid(alpha=0.3, which="both")
+        ax.legend(fontsize=8)
+    fig.suptitle(f"{label}: discovery rate of long-lived searches, by topic ({width_ms / 60_000:.0f} min bins)")
+    return True
+
+
 def plot_dead_results(dead, fig, label):
     """10: search results pointing at registrants that were offline (churn runs).
 
@@ -953,6 +999,11 @@ def main():
     fig = plt.figure(figsize=(16, 4.8), constrained_layout=True)
     ok = plot_time_to_fraction(per_topic, results, fig, label)
     emit(fig, out, "03_time_to_fraction", ok)
+
+    # 11 discovery rate of long-lived searches
+    fig = plt.figure(figsize=(14, 4.8), constrained_layout=True)
+    ok = plot_discovery_rate(per_topic, results, fig, label)
+    emit(fig, out, "11_discovery_rate", ok)
 
     # 08 lookup latency: time to F_lookup distinct registrants
     fig, ax = plt.subplots(figsize=(8, 4.6), constrained_layout=True)

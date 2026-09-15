@@ -20,11 +20,6 @@ scenario:
     search_timeout: 10m
   topic:
     ad_cache_size: 5000
-  conn_model:
-    enabled: true
-    max_peers: 50
-    dial_ratio: 3
-    redial_wait: 35s
   search:
     model: scheduled
     intervals: 5

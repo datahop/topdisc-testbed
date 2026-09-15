@@ -18,7 +18,7 @@ scenario:
     bootstrap_wait: 180s
     start_window: 15m
     register_wait: 22m30s
-    search_stagger: 10ms
+    search_stagger: 100ms       # searches start over ~17 min, not all within 100 s
     search_timeout: 48h
   topic:
     ad_cache_size: 5000
@@ -26,7 +26,7 @@ scenario:
     model: continuous
 testbed:
   simulator:
-    link_buf: 8192
+    link_buf: 32768
     router_buf: 32768
     router_shards: 16
   traces:

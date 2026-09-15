@@ -30,9 +30,12 @@ type connTable struct {
 	wake     []chan struct{}    // signalled when this node loses an outbound slot
 	offline  []bool             // node is away for a churn session gap
 	dead     *deadResultTracker // told when nodes leave and return; nil = no dead-result counting
-	lostAt   [][]time.Time      // when each still-unfilled outbound slot was lost
-	maxOut   int
-	maxIn    int
+	// lookupOnly: the table only tracks who is offline, so churn must not
+	// wait for connections that are never made.
+	lookupOnly bool
+	lostAt     [][]time.Time // when each still-unfilled outbound slot was lost
+	maxOut     int
+	maxIn      int
 
 	rejectedFull  int // dials refused because the target had no inbound slot
 	dupDropped    int // discovered peers skipped because already connected either way
@@ -437,6 +440,9 @@ func runSessionChurn(c *connTable, window, gap time.Duration, alwaysOn, scale fl
 // waitForTopology blocks until the first connection exists, so churn timers
 // do not start ticking during registration on an empty topology.
 func waitForTopology(c *connTable, stop <-chan struct{}) bool {
+	if c.lookupOnly {
+		return true
+	}
 	for {
 		c.mu.Lock()
 		live := 0

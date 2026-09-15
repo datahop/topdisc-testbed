@@ -41,9 +41,9 @@ Real backends pass the protocol parameters to every node through its assignment 
 | Parameter | Meaning | Scenario key | simnet | real | Notes |
 |---|---|---|---|---|---|
 | F_lookup | A lookup ends once this many distinct providers of the service are found; 30 in the plan. | `search.target_count: 30` | ✓ | ✓ | |
-| Lookup schedule | Plan: the run is divided into L equal intervals and every node does one lookup at a uniformly random time in each. | `search.model: scheduled`, `search.intervals` | ✓ | ✓ | Times drawn from the seed in the assignment. Also: `conn` (one search while outbound peer slots are empty, the geth behaviour) and `continuous` (one search for the whole search phase that keeps consuming results without dialing, for the performance limit; on simnet `search.initial_results` and `search.result_interval` pace how fast it takes new registrants) |
+| Lookup schedule | Plan: the run is divided into L equal intervals and every node does one lookup at a uniformly random time in each. | `search.model: scheduled`, `search.intervals` | ✓ | ✓ | Times drawn from the seed in the assignment. Lookup-only; the other lookup-only variant is `continuous` (one search for the whole search phase consumed at `search.initial_results`, then one new registrant per `search.result_interval`). The connection-driven mode is `conn`: nodes fill peer slots from their topic search (simnet `conn_model`, real backends geth's dialer). Lookup-only runs never dial and reject `conn_model.enabled` |
 | Lookup timeout | Give up on a lookup after this even if F_lookup is not reached. | `search.request_timeout` | ✓ | ✓ | |
-| Connection model | Peer slots a node fills from search results: geth's 50 peers, one third outbound. On real backends this is the actual `p2p.Server`; on simnet a model. | `conn_model.max_peers`, `dial_ratio`, `redial_wait` | ✓ | ✓ inherent | |
+| Connection model | Peer slots a node fills from search results: geth's 50 peers, one third outbound. Only with `search.model: conn`; lookup-only models never dial. On real backends this is the actual `p2p.Server`; on simnet a model. | `conn_model.max_peers`, `dial_ratio`, `redial_wait` | ✓ | ✓ inherent | |
 
 ## Network conditions
 

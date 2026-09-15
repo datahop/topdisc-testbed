@@ -300,9 +300,13 @@ func main() {
 		<-sigs
 		os.Exit(1)
 	}()
-	if *connModel {
+	if *connModel || *sessionChurn {
+		// Lookup-only runs with churn keep the table for who is offline; nothing dials.
 		pacing.Conns = newConnTable(all, *connMaxPeers, *connDialRatio)
-		defer pacing.Conns.report()
+		pacing.Conns.lookupOnly = !*connModel
+		if *connModel {
+			defer pacing.Conns.report()
+		}
 		pacing.Resumable = *disconnectInterval > 0 || *churnInterval > 0 || *sessionChurn
 		if *sessionChurn {
 			pacing.Dead = newDeadResultTracker(*adLifetime)

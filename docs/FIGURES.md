@@ -26,7 +26,7 @@ per-run report.
 |---|---|
 | Scenario | Parameters (unset protocol parameters shown with their fork default), topic assignment table, actual search duration when stopped early |
 | 1. Registration and cache | Coverage and registration-latency tables; `06`, `04`, `04b`, `07_registration_latency_bar`, `07_placement_time_idspace`, `oh_05`, `oh_08` |
-| 2. Discovery | Per-topic search results, find counts, scheduled lookups, final coverage, search provenance; `02`, `03_time_to_fraction`, `02b`, `08`, `09`, `05`, `oh_06` |
+| 2. Discovery | Per-topic search results, find counts, scheduled lookups, final coverage, search provenance, search progress (with a re-walk flag); `02`, `03_time_to_fraction`, `11_discovery_rate` (continuous and conn runs), `02b`, `08`, `09`, `05`, `oh_06` |
 | 3. Overhead and load | `oh_01`, `oh_03`, `oh_10`, `oh_02`, `oh_04`, `oh_07`, `oh_09`, `oh_11` and the load summary table |
 | 4. Peer connections | Connection-model table (only when the run models peer slots) |
 | 5. Churn | Dead-result and churn tables, `10_dead_results` (only churn runs) |
@@ -82,26 +82,33 @@ per-run report.
 |---|---|---|---|---|
 | Lookup latency vs service popularity | `08_lookup_latency_cdf`: time to F_lookup distinct registrants, per topic | ✓ | ✓ | yes |
 | Number/fraction of available advertisers discovered vs popularity | `02_recall_reached`, `03_time_to_fraction` (time to 50/90/99% of registrants) | ✓ | ✓ | yes |
-| Registrars/nodes contacted per lookup vs popularity | `09_lookup_contacts_cdf`: distinct nodes and TOPICQUERY requests | ✓ | ◐ | yes |
+| Registrars/nodes contacted per lookup vs popularity | `09_lookup_contacts_cdf`: distinct nodes and TOPICQUERY requests | ✓ | ✓ | yes |
 | Number of times each advertiser is discovered | `05_id_space_found_vs_missed` | ✓ | ✓ | yes |
 | Time from successful ad placement to first discovery | `oh_06_idspace_found_time` | ◐ | ◐ | yes |
 
 #### Differences and gaps
 
 - **Lookup latency** exists per lookup only in `scheduled` runs. In
-  `continuous` runs it is the time a search took to its first F_lookup
-  registrants; in `conn` runs real backends record nothing (#114).
-- **Contacts per lookup** on real backends come from the node's own lookups;
-  geth's dialer runs a second search next to them in `conn` and `scheduled`
-  (#114), whose contacts are not counted.
+  `continuous` and `conn` runs it is the time the node's search took to its
+  first F_lookup registrants.
+- **Contacts per lookup** come from the lookups themselves: lookup-only runs
+  (`scheduled`, `continuous`) never dial, so no second search runs next to
+  them. In `conn` runs the dialer's search is the node's only search; its
+  passes, queries, results, duplicates and filtered results are in
+  `searchStats` (fork `v1.17.2-testbed.6`).
 - **Placement to first discovery** counts from the later of the ad's placement
   and the search start. The plan's quantity needs a scenario where searches
   overlap registration; with a long `register_wait` the figure only shows
   discovery of ads that already exist.
-- **Repeated results:** the fork under test includes the search filter
-  (datahop/go-ethereum#140). A continuous search on a topic with no new
-  registrants re-walks its table every 20 s–1.5 min; no figure shows repeats
-  per searcher yet.
+- **Search re-walk:** the fork under test includes the search filter
+  (datahop/go-ethereum#140). Once a long-lived search (`conn`, `continuous`)
+  has returned every registrant of its topic, every later result is dropped as
+  recently returned and the search re-walks its table every pass
+  (datahop/go-ethereum#142). Query traffic and registrar load on those topics
+  measure that loop: 184 passes per hour and 940 MB per node on the smallest
+  topic of the 14.6 h 5k run. The report's *Search progress* table flags
+  affected topics (more results filtered than handed out). No figure shows
+  repeats per searcher yet.
 
 ## §2 Load distribution
 
@@ -123,8 +130,9 @@ per-run report.
   from lookup traffic.
 - `oh_09_cost_per_lookup` is flat by construction (network lookup traffic
   divided equally); per-topic cost is in `oh_11` and should replace it.
-- On AWS, geth's dialer search (#114) is most of the lookup traffic, so load
-  figures are not comparable with simnet until it is fixed.
+- The 500-node AWS run predates lookup-only runs without a dialer: geth's
+  dialer search was most of its lookup traffic, so its load figures are not
+  comparable with simnet.
 
 ## §2 Churn resilience
 
@@ -200,6 +208,7 @@ Python simulator (#123, #124).
 | Figure | Why it is kept |
 |---|---|
 | `02b_time_to_first_cdf` | Time to the first result, per topic |
+| `11_discovery_rate` | New registrants per searcher per minute over time, per topic, for long-lived searches (continuous, conn): shows how fast discovery decays and when a topic runs out of new registrants |
 | `oh_02_idspace_peak_rate`, `oh_04_idspace_peak_msgtype` | Peak sustained rate per node, total and by type |
 | `oh_09_cost_per_lookup` | To be replaced by a per-topic cost (see load) |
 | `cmp_01`–`cmp_13` (`compare_runs.py`) | Same scenario on two backends: lookups, discovery, registration, cache, registrar load, traffic, load vs distance |
@@ -218,7 +227,7 @@ Removed from the per-run report: `01_topic_distribution` (now a table),
   far used the fork defaults 16, 5 and 16 (#12).
 - **Network:** the plan's WAN model (pair RTT 8–91 ms, 20 KB/s per node) is
   not in simnet, which uses one latency and bandwidth for every link.
-- **Lookup workload:** the plan's `scheduled` model is available on every
+- **Lookup workload:** the plan's `scheduled` lookups are available on every
   backend; most runs so far used `continuous` to find the performance limit.
 - **Renewal** (#77) is not in the fork.
 
@@ -227,6 +236,6 @@ Removed from the per-run report: `01_topic_distribution` (now a table),
 | | done | partial | missing |
 |---|---|---|---|
 | simnet | 9 | 8 | 15 |
-| real backends | 8 | 7 | 17 |
+| real backends | 9 | 6 | 17 |
 
 Plus the six §2 correctness checks, all missing (#122).
