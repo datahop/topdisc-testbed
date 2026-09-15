@@ -62,28 +62,41 @@ limit raised first. Spot/preemptible is fine for short runs; for 24 h churn
 runs use on-demand, because a reclaimed instance is indistinguishable from
 churn in the traces.
 
-## Grid'5000 (Distem)
+## Grid'5000
 
-Untested until a Grid'5000 account exists; the vnode layer (`cmd/distemctl`,
-`pkg/distem`) is unit-tested against Distem's wire format and can be exercised
-on any root Debian host running a Distem coordinator.
-
-One Distem virtual node (LXC container, own IP from a reserved /22, per-pair
-latency from `scenario.network.rtt_table` or the star model) per TopDisc node,
-`testbed.g5k.vnodes_per_machine` of them per physical machine. `deploy/g5k/g5k.py`
-(EnOSlib) has the same verbs and failure semantics as `deploy/aws.sh`:
+`deploy/g5k/g5k.py` (EnOSlib) has the same verbs and failure semantics as
+`deploy/aws.sh`, validated end to end against `nancy`/`gros`:
 
 ```
 pip install -r deploy/g5k/requirements.txt
-sudo deploy/g5k/build-image.sh ~/topdisc-vnode.tar.gz     # once, on a Debian host with debootstrap
-deploy/g5k/g5k.py up  scenarios/g5k-smoke.yaml   # OAR job + /22 + kadeploy + distem-bootstrap + vnodes + inventory.json
-deploy/g5k/g5k.py run scenarios/g5k-smoke.yaml   # runs on the first machine, waits, pulls into runs/, releases the job
+deploy/g5k/g5k.py up  scenarios/g5k-smoke.yaml   # OAR job + kadeploy + hostagent on every machine + inventory.json
+deploy/g5k/g5k.py run scenarios/g5k-smoke.yaml   # runs on the coordinator, waits, pulls into runs/, releases the job
 deploy/g5k/g5k.py check
 ```
 
-`testbed fleet <scenario>` prints the machine count next to the region
-counts. The walltime is the hard cap. `KEEP=1` keeps the job after `run`; a
-failed pull keeps it too.
+`testbed.g5k.cluster` is required (EnOSlib has no default cluster for a
+site). `testbed fleet <scenario>` prints the machine count next to the
+region counts. The walltime is the hard cap. `KEEP=1` keeps the job after
+`run`; a failed pull keeps it too.
+
+Oversubscription (`testbed.g5k.vnodes_per_machine` logical nodes per
+physical machine) reuses `testbed.wan`'s own machinery -- the same
+netns-per-node + netem bridge that `local` and `cloud`/AWS already use
+(`pkg/host`, driven remotely through `cmd/hostagent`) -- instead of one
+virtual machine or container per node. No per-node IP or subnet reservation
+is needed: hosts route each other's private `/16`s over the ordinary prod
+network hostagent already needs for SSH, so `up` reserves and kadeploys
+`testbed fleet`'s machine count and nothing else.
+
+This replaced an earlier Distem-based design (one LXC vnode per node, own
+IP from a reserved `/22`, driven by `distem-bootstrap`/`distemctl`): Distem
+turned out to have no working install path on any Debian release Grid'5000
+currently deploys (its packaging targets buster/stretch, both EOL, and
+conflicts with newer Ruby on every deployable reference env; the `-g`
+git-build fallback finds no `distem` source package at all). `cmd/distemctl`
+and `pkg/distem` are dead code now -- left in place rather than deleted in
+case Distem's Grid'5000 packaging gets revived, but nothing in `deploy/g5k`
+calls them any more.
 
 ## Provisioner contract
 

@@ -198,7 +198,9 @@ type CloudConfig struct {
 }
 
 // G5kConfig: the Grid'5000 backend (deploy/g5k/g5k.py): a reservation of
-// physical machines running Distem, one virtual node per TopDisc node.
+// physical machines, each running hostagent with vnodes_per_machine node
+// processes in their own netns (testbed.wan), the same oversubscription
+// local/cloud already use elsewhere -- no per-node container or VM.
 type G5kConfig struct {
 	Site             string `yaml:"site"`
 	Cluster          string `yaml:"cluster"`
@@ -207,7 +209,7 @@ type G5kConfig struct {
 	Queue            string `yaml:"queue"`
 	Env              string `yaml:"env"`
 	VnodesPerMachine int    `yaml:"vnodes_per_machine"`
-	Image            string `yaml:"image"`
+	Image            string `yaml:"image"` // unused: left over from a dropped Distem-vnode design
 }
 
 // LocalConfig: the local backend — N node processes on this host.
@@ -267,13 +269,13 @@ var paramDocs = []paramDoc{
 	{"testbed.cloud.verbosity", "cloud backend: node log level"},
 	{"testbed.cloud.grace", "cloud backend: wait after the last StopAt before fetching traces"},
 	{"testbed.g5k.site", "Grid'5000 site of the reservation"},
-	{"testbed.g5k.cluster", "cluster to reserve on; empty = any"},
+	{"testbed.g5k.cluster", "cluster to reserve on; required, EnOSlib has no default"},
 	{"testbed.g5k.walltime", "OAR walltime HH:MM:SS; the hard cap of the run"},
 	{"testbed.g5k.reservation", "advance reservation start, YYYY-mm-dd HH:MM:SS; empty = as soon as possible"},
 	{"testbed.g5k.queue", "OAR queue: default, production, besteffort"},
 	{"testbed.g5k.env", "kadeploy environment for the physical machines"},
-	{"testbed.g5k.vnodes_per_machine", "Distem virtual nodes per physical machine; sizes the reservation (measure on the first one)"},
-	{"testbed.g5k.image", "vnode filesystem image on the Grid'5000 home (deploy/g5k/build-image.sh)"},
+	{"testbed.g5k.vnodes_per_machine", "node processes (netns'd, see testbed.wan) per physical machine; sizes the reservation (measure on the first one)"},
+	{"testbed.g5k.image", "unused; left over from a dropped Distem-vnode design"},
 	{"testbed.wan.enabled", "give each node its own netns shaped by netem (Linux, root)"},
 	{"testbed.wan.delay_min_ms", "star model: min one-way delay per node; plan RTT 8ms -> 4"},
 	{"testbed.wan.delay_max_ms", "star model: max one-way delay per node; plan RTT 91ms -> 45"},
@@ -294,7 +296,7 @@ var paramDocs = []paramDoc{
 	{"scenario.network.regions", "cloud: node placement, region -> weight, e.g. {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}; empty = all in the home region"},
 	{"scenario.network.node_regions", "cloud: pin nodes, index -> region, e.g. {0: us-east-1, 7: sa-east-1}; the rest follow regions"},
 	{"scenario.network.model", "emulated backends: regions = per-pair latency from rtt_table by region; star = the plan's model, each node draws a one-way delay from testbed.wan (pair RTT 8-91 ms)"},
-	{"scenario.network.rtt_table", "emulated backends (Grid'5000/Distem): inter-region RTT table used for per-pair latency; relative to this file"},
+	{"scenario.network.rtt_table", "emulated backends (Grid'5000): inter-region RTT table used for per-pair latency; relative to this file"},
 	{"scenario.phases.start_window", "each node starts at a uniformly random time in this window (seeded, bootnode first) and registers bootstrap_wait later, so registrations and ad expiries spread over it; set to the ad lifetime for even expiries. simnet: nodes are in the DHT from the start, registrations follow the same schedule. 0 = all at once, register_stagger applies"},
 	{"scenario.phases.bootstrap_wait", "after spawning, before registrations start"},
 	{"scenario.phases.register_stagger", "gap between consecutive nodes starting to register"},
