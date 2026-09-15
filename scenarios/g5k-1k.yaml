@@ -23,6 +23,7 @@ testbed:
     home_region: us-east-1
   g5k:
     site: nancy
+    cluster: gros
     vnodes_per_machine: 250
   wan:
     rate_kbps: 160

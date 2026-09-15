@@ -69,9 +69,16 @@ def up(path):
                                     **({"reservation": g["reservation"]} if g["reservation"] else {}))
     conf = conf.add_network(id="prod", type="prod", roles=["prod"], site=g["site"])
     conf = conf.add_network(id="vnet", type="slash_22", roles=["vnet"], site=g["site"])
-    mach = dict(roles=["pnode"], nodes=machines, primary_network="prod")
+    # primary_network is left unset: EnOSlib's Configuration.add_machine_conf()
+    # auto-resolves it to the "prod"-type network added above for this site.
+    # Passing the string "prod" here instead (as this used to) skips that
+    # resolution and crashes later in to_dict(), which expects an object.
+    mach = dict(roles=["pnode"], nodes=machines)
     if g["cluster"]:
         mach["cluster"] = g["cluster"]
+    else:
+        sys.exit(f"g5k: testbed.g5k.cluster is required (site {g['site']}); "
+                  f"EnOSlib's G5kConf needs a specific cluster, not just a site")
     conf = conf.add_machine(**mach)
     provider = en.G5k(conf)
     try:
@@ -83,7 +90,14 @@ def up(path):
         # Distem on the deployed machines: coordinator on the first one.
         nodefile = HERE / "nodes.txt"
         nodefile.write_text("\n".join(pnodes) + "\n")
-        sh(f"distem-bootstrap -f {nodefile} --node-name {coordinator} --debian-version bookworm")
+        # --node-name isn't a real distem-bootstrap flag; -c/--coordinator is.
+        # distem-bootstrap's prebuilt package path only targets buster/stretch
+        # (both EOL, no longer deployable on Grid'5000) and conflicts with the
+        # newer Ruby on any deployable reference env (e.g. bullseye's ruby2.7
+        # vs. the buster package's ruby2.5 pin) -- build from a git snapshot
+        # against the coordinator's actual OS instead of installing the stale
+        # binary package.
+        sh(f"distem-bootstrap -f {nodefile} -c {coordinator} -g")
         # Push the vnode image where Distem reads it (a shared home on Grid'5000).
         img = g["image"]
         if img.startswith("file://") and not os.path.exists(img[7:]):
