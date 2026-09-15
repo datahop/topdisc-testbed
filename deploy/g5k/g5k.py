@@ -12,7 +12,9 @@ running hostagent directly (no Distem).
 
 Runs from a Grid'5000 frontend (no credentials needed) or from outside with
 ~/.python-grid5000.yaml. State (job id, node list) is kept in
-deploy/g5k/state.json next to this file.
+deploy/g5k/state.json next to this file. G5K_CLUSTER=<cluster> overrides
+testbed.g5k.cluster for one run (e.g. when the scenario's usual cluster is
+busy) without editing a tracked scenario file.
 
 Distem (LXC-vnode-per-node, one real IP per node out of a reserved /22) was
 the original design here but has no working install path on any Debian
@@ -52,9 +54,11 @@ def save_state(st):
 def scenario(path):
     cfg = yaml.safe_load(open(path))
     g5k = (cfg.get("testbed") or {}).get("g5k") or {}
-    # defaults as in `testbed reference`
+    # defaults as in `testbed reference`. G5K_CLUSTER overrides the scenario
+    # (same pattern as KEEP below) for picking a different cluster between
+    # runs without editing a tracked scenario file, e.g. when gros is busy.
     return cfg, {
-        "site": g5k.get("site", "nancy"), "cluster": g5k.get("cluster", ""),
+        "site": g5k.get("site", "nancy"), "cluster": os.environ.get("G5K_CLUSTER", g5k.get("cluster", "")),
         "walltime": g5k.get("walltime", "02:00:00"), "reservation": g5k.get("reservation", ""),
         "queue": g5k.get("queue", "default"), "env": g5k.get("env", "debian11-x64-base"),
         "vnodes_per_machine": int(g5k.get("vnodes_per_machine", 250)),
