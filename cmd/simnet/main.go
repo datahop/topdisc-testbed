@@ -38,6 +38,9 @@ func main() {
 		fatalf("%v", err)
 	}
 	fmt.Printf("run directory: %s\n", runDir)
+	if d, _ := time.ParseDuration(os.Getenv("SIMNET_HEAPPROF")); d > 0 {
+		go heapProfiles(runDir, d)
+	}
 	defer scenario.FlushLog()
 	nodes := &cfg.Scenario.Population.Nodes
 	numTopics := &cfg.Scenario.Population.Topics

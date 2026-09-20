@@ -1,0 +1,41 @@
+# Memory measurement ahead of a 12 h run: 7500 nodes over the 100 largest
+# chains of the 2026-09-18 crawl, connection-driven search, crawl churn in
+# real time, 1 h of search. Run with SIMNET_HEAPPROF=15m for heap profiles.
+name: crawl-7k5-100t-1h
+scenario:
+  population:
+    nodes: 7500
+    topics: 100
+    topic_model: models/crawl-2026-09-18.json
+    seed: 1
+  network:
+    latency_ms: 30
+    bandwidth_mibps: 1000
+  phases:
+    bootstrap_wait: 180s
+    start_window: 15m
+    register_wait: 22m30s
+    search_stagger: 100ms
+    search_timeout: 1h
+  topic:
+    ad_cache_size: 5000
+  search:
+    model: conn
+    target_count: 0
+  conn_model:
+    enabled: true
+  session_churn:
+    enabled: true
+    model: models/crawl-2026-09-18.json
+    window_real_hours: 0
+testbed:
+  simulator:
+    link_buf: 32768
+    router_buf: 32768
+    router_shards: 16
+  traces:
+    metrics: metrics.json
+    overhead: oh.json
+    overhead_series: series.json
+    overhead_series_period: 5m
+    checkpoint_interval: 10m
