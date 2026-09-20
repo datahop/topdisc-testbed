@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/datahop/topdisc-testbed/pkg/assign"
-	"math/rand"
+	"github.com/datahop/topdisc-testbed/pkg/churn"
 	"os"
 	"time"
 
@@ -79,20 +79,7 @@ func dumpReach(path string, all []nodeRec, topics []topicindex.TopicID) {
 	json.NewEncoder(f).Encode(map[string]any{"searchers": sr, "registrarContents": contents})
 	fmt.Printf("reach written to: %s (%d searchers, %d topics contents)\n", path, len(sr), len(contents))
 }
-func runMultiTopicWorkload(all []nodeRec, numTopics int, zipfS float64, seed int64, registerWait, searchTimeout, regProbePeriod, registerStagger, startWindow time.Duration, metricsOut string, pacing searchPacing) {
-	if seed == 0 {
-		seed = time.Now().UnixNano()
-	}
-	rng := rand.New(rand.NewSource(seed))
-	var zipf *assign.Zipf
-	if numTopics > 1 {
-		n := numTopics
-		if commonTopicMode {
-			n = numTopics - 1 // second topic drawn from 1..numTopics-1
-		}
-		zipf = assign.NewZipf(zipfS, n)
-	}
-
+func runMultiTopicWorkload(all []nodeRec, numTopics int, zipfS float64, seed int64, registerWait, searchTimeout, regProbePeriod, registerStagger, startWindow time.Duration, metricsOut string, pacing searchPacing, topicIdx [][]int, topicModel *churn.Model) {
 	topics := make([]topicindex.TopicID, numTopics)
 	for i := range topics {
 		topics[i] = makeTopic(i)
@@ -112,14 +99,7 @@ func runMultiTopicWorkload(all []nodeRec, numTopics int, zipfS float64, seed int
 			legacyCount++
 			continue
 		}
-		var ts []int
-		if commonTopicMode {
-			ts = []int{0, 1 + zipf.Draw(rng)}
-		} else if numTopics > 1 {
-			ts = []int{zipf.Draw(rng)}
-		} else {
-			ts = []int{0}
-		}
+		ts := topicIdx[i]
 		nodeTopics[i] = ts
 		for _, t := range ts {
 			if registrantsByTopic[t] == nil {
@@ -138,10 +118,22 @@ func runMultiTopicWorkload(all []nodeRec, numTopics int, zipfS float64, seed int
 			}
 		}
 	}
-	fmt.Printf("workload: %d nodes total, %d DISC-NG-active across %d topics (Zipf s=%.2f, seed=%d), %d legacy passive\n",
-		len(all), activeCount, numTopics, zipfS, seed, legacyCount)
+	if topicModel != nil {
+		fmt.Printf("workload: %d nodes total, %d DISC-NG-active across %d topics (crawl model shares, seed=%d), %d legacy passive\n",
+			len(all), activeCount, numTopics, seed, legacyCount)
+	} else {
+		fmt.Printf("workload: %d nodes total, %d DISC-NG-active across %d topics (Zipf s=%.2f, seed=%d), %d legacy passive\n",
+			len(all), activeCount, numTopics, zipfS, seed, legacyCount)
+	}
 	for t, c := range dist {
-		fmt.Printf("  topic %d: %d nodes\n", t, c)
+		if topicModel != nil && t < len(topicModel.Topics) && (t < numTopics-1 || numTopics == len(topicModel.Topics)) {
+			mt := topicModel.Topics[t]
+			fmt.Printf("  topic %d: %d nodes  [model %s %q share %.3f]\n", t, c, mt.ID, mt.Name, mt.Share)
+		} else if topicModel != nil {
+			fmt.Printf("  topic %d: %d nodes  [model: the remaining chains]\n", t, c)
+		} else {
+			fmt.Printf("  topic %d: %d nodes\n", t, c)
+		}
 	}
 
 	// Phase 1: register. Optionally stagger the start of each registrant's

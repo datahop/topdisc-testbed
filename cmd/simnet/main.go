@@ -4,9 +4,11 @@ package main
 
 import (
 	"fmt"
+	"github.com/datahop/topdisc-testbed/pkg/assign"
 	"github.com/datahop/topdisc-testbed/pkg/churn"
 	"github.com/datahop/topdisc-testbed/pkg/scenario"
 	"log/slog"
+	"math/rand"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -300,6 +302,24 @@ func main() {
 		<-sigs
 		os.Exit(1)
 	}()
+	// Topics are drawn once here, for the workload and for the churn driver.
+	var topicModel *churn.Model
+	if mp := cfg.Scenario.Population.TopicModel; mp != "" {
+		if !filepath.IsAbs(mp) {
+			mp = filepath.Join(filepath.Dir(os.Args[1]), mp)
+		}
+		var err error
+		if topicModel, err = churn.Load(mp); err != nil {
+			fatalf("%v", err)
+		}
+		*numTopics = len(topicModel.Shares(*numTopics))
+	}
+	topicSeed := *seed
+	if topicSeed == 0 {
+		topicSeed = time.Now().UnixNano()
+		*seed = topicSeed
+	}
+	topicIdx := assign.DrawTopics(rand.New(rand.NewSource(topicSeed)), len(all), *numTopics, *zipfS, topicModel, *allRegister, commonTopicMode)
 	if *connModel || *sessionChurn {
 		// Lookup-only runs with churn keep the table for who is offline; nothing dials.
 		pacing.Conns = newConnTable(all, *connMaxPeers, *connDialRatio)
@@ -321,7 +341,13 @@ func main() {
 				if err != nil {
 					fatalf("%v", err)
 				}
-				go runModelChurn(pacing.Conns, m, *searchTimeout, cfg.Scenario.SessionChurn.WindowHours, *seed, scStop, scDone)
+				topicOf := func(i int) *churn.Topic {
+					if cfg.Scenario.Population.TopicModel != cfg.Scenario.SessionChurn.Model || len(m.Topics) == 0 || len(topicIdx[i]) == 0 {
+						return &m.Global
+					}
+					return m.TopicFor(topicIdx[i][len(topicIdx[i])-1], *numTopics)
+				}
+				go runModelChurn(pacing.Conns, m, *searchTimeout, cfg.Scenario.SessionChurn.WindowHours, *seed, topicOf, scStop, scDone)
 			} else {
 				go runSessionChurn(pacing.Conns, *searchTimeout, *sessionChurnGap, cfg.Scenario.SessionChurn.AlwaysOnFrac, cfg.Scenario.SessionChurn.Scale, *seed, scStop, scDone)
 			}
@@ -344,7 +370,7 @@ func main() {
 		if nt < 1 {
 			nt = 1
 		}
-		runMultiTopicWorkload(all, nt, *zipfS, *seed, *registerWait, *searchTimeout, *regProbePeriod, *registerStagger, cfg.Scenario.Phases.StartWindow, *metricsOut, pacing)
+		runMultiTopicWorkload(all, nt, *zipfS, *seed, *registerWait, *searchTimeout, *regProbePeriod, *registerStagger, cfg.Scenario.Phases.StartWindow, *metricsOut, pacing, topicIdx, topicModel)
 	case *legacyFrac > 0 && *numTopics <= 1:
 		runDiscNGValidationWorkload(all, *registerWait, *searchTimeout, *metricsOut)
 	case *numTopics <= 1:
@@ -353,7 +379,7 @@ func main() {
 		// runMultiTopicWorkload skips nodes with n.legacy=true (they
 		// stay as passive Discv5 peers and only contribute to the
 		// routing-table substrate).
-		runMultiTopicWorkload(all, *numTopics, *zipfS, *seed, *registerWait, *searchTimeout, *regProbePeriod, *registerStagger, cfg.Scenario.Phases.StartWindow, *metricsOut, pacing)
+		runMultiTopicWorkload(all, *numTopics, *zipfS, *seed, *registerWait, *searchTimeout, *regProbePeriod, *registerStagger, cfg.Scenario.Phases.StartWindow, *metricsOut, pacing, topicIdx, topicModel)
 	}
 	dumpSeries()
 	dumpOverheadIfSet()

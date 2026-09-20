@@ -38,7 +38,8 @@ scenario:
     topics: 1                          # distinct topics; >1 assigns one per node by Zipf
     all_register: false                # one shared topic that every node registers and searches
     register_frac: 0.5                 # single-topic mode: fraction that register, the rest search
-    zipf_s: 1.07                       # Zipf skew for topic assignment when topics > 1
+    zipf_s: 1.07                       # Zipf skew for topic assignment when topics > 1 and no topic_model
+    topic_model: ""                    # crawl model JSON (scenarios/models, cmd/crawl/model.py): topics are assigned by the crawl's chain shares instead of Zipf; topics = how many of the largest chains to keep (0 = all), the last one takes the tail
     common_topic: false                # topics > 1: everyone also registers and searches topic 0
     seed: 0                            # RNG seed for every random draw; 0 = time
     legacy_frac: 0                     # fraction of nodes that are legacy discv5: simnet removes the topic-discovery ENR flag; real backends run stock upstream geth (legacy_binary), the same fraction within every service
@@ -89,8 +90,8 @@ scenario:
     gap: 30s                           # how long a departed node is unreachable
     always_on_frac: 0.423              # share of nodes that never leave (crawl: 0.423)
     scale: 1                           # multiplier on every session length; 0.5 doubles the churn rate, 2 halves it
-    model: ""                          # fitted hazard model JSON (see scenarios/models); when set, replaces the builtin distribution and always_on_frac/scale
-    window_real_hours: 24              # with a model: the search window stands for this many real hours
+    model: ""                          # fitted hazard model JSON (see scenarios/models); when set, replaces the builtin distribution and always_on_frac/scale. A crawl model with topics churns each node by its topic's fit when population.topic_model is the same file
+    window_real_hours: 24              # with a model: the search window stands for this many real hours; 0 = real time (the window is as long as it is)
   disconnect:
     interval: 0s                       # drop a fraction of live connections this often; 0 = off
     frac: 0.01                         # fraction dropped per interval

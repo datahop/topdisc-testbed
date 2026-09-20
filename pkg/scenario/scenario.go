@@ -93,6 +93,7 @@ type PopulationConfig struct {
 	AllRegister    bool    `yaml:"all_register"`
 	RegisterFrac   float64 `yaml:"register_frac"`
 	ZipfS          float64 `yaml:"zipf_s"`
+	TopicModel     string  `yaml:"topic_model"`
 	CommonTopic    bool    `yaml:"common_topic"`
 	Seed           int64   `yaml:"seed"`
 	LegacyFrac     float64 `yaml:"legacy_frac"`
@@ -285,7 +286,8 @@ var paramDocs = []paramDoc{
 	{"scenario.population.topics", "distinct topics; >1 assigns one per node by Zipf"},
 	{"scenario.population.all_register", "one shared topic that every node registers and searches"},
 	{"scenario.population.register_frac", "single-topic mode: fraction that register, the rest search"},
-	{"scenario.population.zipf_s", "Zipf skew for topic assignment when topics > 1"},
+	{"scenario.population.zipf_s", "Zipf skew for topic assignment when topics > 1 and no topic_model"},
+	{"scenario.population.topic_model", "crawl model JSON (scenarios/models, cmd/crawl/model.py): topics are assigned by the crawl's chain shares instead of Zipf; topics = how many of the largest chains to keep (0 = all), the last one takes the tail"},
 	{"scenario.population.common_topic", "topics > 1: everyone also registers and searches topic 0"},
 	{"scenario.population.seed", "RNG seed for every random draw; 0 = time"},
 	{"scenario.population.legacy_frac", "fraction of nodes that are legacy discv5: simnet removes the topic-discovery ENR flag; real backends run stock upstream geth (legacy_binary), the same fraction within every service"},
@@ -330,8 +332,8 @@ var paramDocs = []paramDoc{
 	{"scenario.session_churn.gap", "how long a departed node is unreachable"},
 	{"scenario.session_churn.always_on_frac", "share of nodes that never leave (crawl: 0.423)"},
 	{"scenario.session_churn.scale", "multiplier on every session length; 0.5 doubles the churn rate, 2 halves it"},
-	{"scenario.session_churn.model", "fitted hazard model JSON (see scenarios/models); when set, replaces the builtin distribution and always_on_frac/scale"},
-	{"scenario.session_churn.window_real_hours", "with a model: the search window stands for this many real hours"},
+	{"scenario.session_churn.model", "fitted hazard model JSON (see scenarios/models); when set, replaces the builtin distribution and always_on_frac/scale. A crawl model with topics churns each node by its topic's fit when population.topic_model is the same file"},
+	{"scenario.session_churn.window_real_hours", "with a model: the search window stands for this many real hours; 0 = real time (the window is as long as it is)"},
 	{"scenario.disconnect.interval", "drop a fraction of live connections this often; 0 = off"},
 	{"scenario.disconnect.frac", "fraction dropped per interval"},
 	{"scenario.churn.interval", "churn round period; 0 = off"},

@@ -1,0 +1,21 @@
+{
+ "eth2:25f9148e": "chiado consensus",
+ "eth2:3237dab6": "gnosis consensus",
+ "eth2:6a95a1a9": "mainnet consensus, deneb fork",
+ "eth2:74d01459": "sepolia consensus",
+ "eth2:8c9f62fe": "consensus mainnet",
+ "eth2:aadde438": "lukso consensus",
+ "eth2:ad532ceb": "mainnet consensus, electra fork",
+ "eth2:c6ecb76c": "hoodi consensus",
+ "eth:07c9462e": "execution mainnet",
+ "eth:23aa1351": "hoodi execution",
+ "eth:268956b6": "sepolia execution",
+ "eth:d38cc282": "bsc",
+ "eth:fc64ec04": "mainnet execution at genesis (unsynced)",
+ "none": "no chain key",
+ "op:10": "op mainnet (op-node)",
+ "op:130": "unichain (op-node)",
+ "op:57073": "ink (op-node)",
+ "op:8453": "base (op-node)",
+ "op:84532": "base sepolia (op-node)"
+}

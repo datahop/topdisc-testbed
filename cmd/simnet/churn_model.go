@@ -9,51 +9,80 @@ import (
 	"github.com/datahop/topdisc-testbed/pkg/churn"
 )
 
-// runModelChurn drives session churn from a fitted model. The search window
-// stands for windowRealHours of real time, which sets how long one crawl unit
-// is in the run; each online node is re-evaluated once per crawl unit.
-func runModelChurn(c *connTable, m *churn.Model, window time.Duration, windowRealHours float64, seed int64, stop <-chan struct{}, done chan<- struct{}) {
+// runModelChurn drives session churn from a fitted model: every node gets the
+// schedule the assignment generator would give it on a real backend (same
+// seed, same draws), with its topic's fit when the model has one, and the
+// driver takes it offline and back on time. The search window stands for
+// windowRealHours of real time; 0 means the window is real time.
+func runModelChurn(c *connTable, m *churn.Model, window time.Duration, windowRealHours float64, seed int64, topicOf func(i int) *churn.Topic, stop <-chan struct{}, done chan<- struct{}) {
 	defer close(done)
 	if !waitForTopology(c, stop) {
 		return
 	}
-	crawl := time.Duration(float64(window) * m.Cadence / windowRealHours)
-	fmt.Printf("[session-churn] model %s..%s: window=%s stands for %.0f real hours, 1 crawl (%.0fh) = %s\n",
-		m.Window[0][:10], m.Window[1][:10], window, windowRealHours, m.Cadence, crawl.Round(time.Millisecond))
+	realHours := windowRealHours
+	if realHours <= 0 {
+		realHours = window.Hours()
+	}
+	crawl := time.Duration(float64(window) * m.Cadence / realHours)
+	fmt.Printf("[session-churn] model %s..%s: window=%s stands for %.1f real hours, 1 crawl (%.3fh) = %s, %d topic fits\n",
+		m.Window[0], m.Window[1], window, realHours, m.Cadence, crawl.Round(time.Millisecond), len(m.Topics))
 	go logChurnProgress(c, stop)
 
+	t0 := time.Now()
 	var wg sync.WaitGroup
+	var arrivals, leaves, forever int
+	var mu sync.Mutex
 	for i := range c.out {
+		ev := m.ScheduleTopic(rand.New(rand.NewSource(churn.NodeSeed(seed, i))), window.Seconds(), windowRealHours, topicOf(i))
+		if len(ev) == 0 {
+			continue
+		}
 		wg.Add(1)
-		go func(idx int, r *rand.Rand) {
+		go func(idx int, ev []churn.Event) {
 			defer wg.Done()
-			age := m.InitialAge(r)
-			t := time.NewTimer(crawl)
-			defer t.Stop()
-			for {
-				select {
-				case <-stop:
+			for _, e := range ev {
+				if !sleepUntil(t0, e.DownAt, stop) {
 					return
-				case <-t.C:
 				}
-				if r.Float64() < m.LeaveProb(age, 1) {
-					c.depart(idx)
-					g := time.NewTimer(time.Duration(m.Gap(r) * float64(crawl)))
-					select {
-					case <-stop:
-						g.Stop()
-						return
-					case <-g.C:
-					}
-					c.rejoin(idx)
-					age = 0
+				c.depart(idx)
+				mu.Lock()
+				if e.DownAt == 0 {
+					arrivals++
+				} else if e.UpAt >= window.Seconds() {
+					forever++
 				} else {
-					age++
+					leaves++
 				}
-				t.Reset(crawl)
+				mu.Unlock()
+				if e.UpAt >= window.Seconds() {
+					return
+				}
+				if !sleepUntil(t0, e.UpAt, stop) {
+					return
+				}
+				c.rejoin(idx)
 			}
-		}(i, rand.New(rand.NewSource(seed+int64(i)*2654435761)))
+		}(i, ev)
 	}
 	<-stop
 	wg.Wait()
+	mu.Lock()
+	fmt.Printf("[session-churn] schedule applied: %d arrivals, %d absences, %d left for good\n", arrivals, leaves, forever)
+	mu.Unlock()
+}
+
+// sleepUntil waits until offset seconds after t0; false when stopped first.
+func sleepUntil(t0 time.Time, offset float64, stop <-chan struct{}) bool {
+	d := time.Until(t0.Add(time.Duration(offset * float64(time.Second))))
+	if d <= 0 {
+		return true
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-stop:
+		return false
+	case <-t.C:
+		return true
+	}
 }

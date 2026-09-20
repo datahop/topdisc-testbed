@@ -98,18 +98,19 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 			}
 		}
 	}
-	topics := make([][]string, n)
-	if sc.Population.Topics <= 1 || sc.Population.AllRegister {
-		for i := range topics {
-			topics[i] = []string{"topic-0"}
+	var topicModel *churn.Model
+	if sc.Population.TopicModel != "" {
+		var err error
+		topicModel, err = churn.Load(filepath.Join(modelDir, sc.Population.TopicModel))
+		if err != nil {
+			return nil, err
 		}
-	} else {
-		z := NewZipf(sc.Population.ZipfS, sc.Population.Topics)
-		for i := range topics {
-			topics[i] = []string{fmt.Sprintf("topic-%d", z.Draw(rng))}
-			if sc.Population.CommonTopic {
-				topics[i] = append(topics[i], "topic-0")
-			}
+	}
+	topicIdx := DrawTopics(rng, n, sc.Population.Topics, sc.Population.ZipfS, topicModel, sc.Population.AllRegister, sc.Population.CommonTopic)
+	topics := make([][]string, n)
+	for i, ts := range topicIdx {
+		for _, t := range ts {
+			topics[i] = append(topics[i], fmt.Sprintf("topic-%d", t))
 		}
 	}
 	var model *churn.Model
@@ -169,7 +170,7 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 			a.Search.LookupAtMs = LookupTimes(rand.New(rand.NewSource(sc.Population.Seed+int64(i)*40503)), a.Phases.SearchAt, stopAt, sc.Search.Intervals)
 		}
 		if model != nil {
-			a.Churn = model.Schedule(rand.New(rand.NewSource(sc.Population.Seed+int64(i)*2654435761)), ph.SearchTimeout.Seconds(), sc.SessionChurn.WindowHours)
+			a.Churn = model.ScheduleTopic(rand.New(rand.NewSource(churn.NodeSeed(sc.Population.Seed, i))), ph.SearchTimeout.Seconds(), sc.SessionChurn.WindowHours, ChurnTopic(model, sc, topicIdx[i]))
 		}
 		out[i] = a
 	}
@@ -238,6 +239,51 @@ func legacySet(rng *rand.Rand, topics [][]string, frac float64) []bool {
 		}
 	}
 	return set
+}
+
+// DrawTopics assigns every node its topic indices: one per node from the
+// crawl model's shares when there is one, from a Zipf draw otherwise; a
+// second, common topic 0 when commonTopic is set. All-register runs put
+// everyone on topic 0.
+func DrawTopics(rng *rand.Rand, n, numTopics int, zipfS float64, model *churn.Model, allRegister, commonTopic bool) [][]int {
+	out := make([][]int, n)
+	if numTopics <= 1 && model == nil || allRegister {
+		for i := range out {
+			out[i] = []int{0}
+		}
+		return out
+	}
+	var draw func() int
+	if model != nil {
+		shares := model.Shares(numTopics)
+		cdf := make([]float64, len(shares))
+		sum := 0.0
+		for i, s := range shares {
+			sum += s
+			cdf[i] = sum
+		}
+		draw = func() int { return (&Zipf{cdf}).Draw(rng) }
+	} else {
+		z := NewZipf(zipfS, numTopics)
+		draw = func() int { return z.Draw(rng) }
+	}
+	for i := range out {
+		if commonTopic {
+			out[i] = []int{0, 1 + draw()}
+		} else {
+			out[i] = []int{draw()}
+		}
+	}
+	return out
+}
+
+// ChurnTopic picks the churn fit for a node: the topic's fit when the churn
+// model is the crawl model the topics came from, the global fit otherwise.
+func ChurnTopic(model *churn.Model, sc scenario.ScenarioConfig, topics []int) *churn.Topic {
+	if sc.Population.TopicModel != sc.SessionChurn.Model || len(model.Topics) == 0 || len(topics) == 0 {
+		return &model.Global
+	}
+	return model.TopicFor(topics[len(topics)-1], sc.Population.Topics)
 }
 
 // Zipf draws topic indices 0..n-1 with P(k) ∝ 1/(k+1)^s. Unlike math/rand's
