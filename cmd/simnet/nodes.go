@@ -15,6 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/discover"
 	"github.com/ethereum/go-ethereum/p2p/discover/topicindex"
 	"github.com/ethereum/go-ethereum/p2p/enode"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
 // defaultMaxBootnodes caps how many predecessors a fresh node bootstraps from.
@@ -112,7 +113,10 @@ func spawnNode(sim *simnet.Simnet, settings simnet.NodeBiDiLinkSettings, idx int
 	conn := &simUDPConn{SimConn: sim.NewEndpoint(addr, settings), idx: idx}
 	registerConn(conn)
 
-	db, err := enode.OpenDB("")
+	// leveldb's default 4 MiB memtable per node is 30 GB at 7500 nodes and
+	// grows until full with every peer update; a small one is flushed and
+	// compacted instead.
+	db, err := enode.OpenMemoryDB(&opt.Options{WriteBuffer: 256 << 10, CompactionTableSize: 256 << 10})
 	if err != nil {
 		fatalf("open enode db %d: %v", idx, err)
 	}
