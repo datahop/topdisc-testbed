@@ -20,6 +20,7 @@ import (
 type Model struct {
 	Window  [2]string
 	Cadence float64 // real hours per crawl unit
+	Hours   float64 // real hours the crawl covered: the span InitialUp and AlwaysOn refer to
 	Peers   int
 	Global  Topic
 	Topics  []Topic // descending share; may be empty
@@ -89,6 +90,7 @@ func Load(path string) (*Model, error) {
 		rawTopic
 		Window       [2]string  `json:"window"`
 		CadenceHours float64    `json:"cadence_hours"`
+		WindowHours  float64    `json:"window_hours"`
 		Peers        int        `json:"peers"`
 		Topics       []rawTopic `json:"topics"`
 	}
@@ -105,9 +107,12 @@ func Load(path string) (*Model, error) {
 	if len(raw.Topics) == 0 {
 		raw.rawTopic.AlwaysOn = 0
 	}
-	m := &Model{Window: raw.Window, Cadence: raw.CadenceHours, Peers: raw.Peers, Global: raw.rawTopic.topic()}
+	m := &Model{Window: raw.Window, Cadence: raw.CadenceHours, Hours: raw.WindowHours, Peers: raw.Peers, Global: raw.rawTopic.topic()}
 	if m.Cadence == 0 {
 		m.Cadence = 2
+	}
+	if m.Hours == 0 {
+		m.Hours = 24
 	}
 	for _, rt := range raw.Topics {
 		m.Topics = append(m.Topics, rt.topic())
@@ -268,32 +273,34 @@ func (m *Model) Schedule(rng *rand.Rand, window float64, windowRealHours float64
 	return m.ScheduleTopic(rng, window, windowRealHours, &m.Global)
 }
 
-// ScheduleTopic is Schedule with a topic's fit. A node that is not present
-// when the window opens arrives at a uniform time in it and follows the
-// survival of a first session; one that is present stays for good with the
-// topic's always-on probability, otherwise it is one of the nodes that go
-// away during the window: its first departure falls at a uniform time in
-// it (the fitted survival is right-censored, so a stationary age would put
-// most of these nodes past the last observed departure and they would never
-// leave), and after that it follows the survival of sessions after a return.
-// The hazard is applied once per crawl unit; each departure is for good with
-// the topic's leave-forever probability or lasts a sampled gap.
+// ScheduleTopic is Schedule with a topic's fit. The topic's initial-presence
+// and always-on fractions describe the crawl's whole span, so the share of
+// nodes that arrive or first depart inside the run is scaled by how many of
+// those hours the window stands for. A node that arrives does so at a
+// uniform time in the window and follows the survival of a first session;
+// a node that goes away has its first departure at a uniform time in the
+// window (the fitted survival is right-censored, so a stationary age would
+// put most of these nodes past the last observed departure and they would
+// never leave), then follows the survival of sessions after a return. The
+// hazard is applied once per crawl unit; each departure is for good with the
+// topic's leave-forever probability or lasts a sampled gap.
 func (m *Model) ScheduleTopic(rng *rand.Rand, window float64, windowRealHours float64, t *Topic) []Event {
 	if windowRealHours <= 0 {
 		windowRealHours = window / 3600
 	}
 	crawl := window * m.Cadence / windowRealHours
+	span := math.Min(1, windowRealHours/m.Hours)
 	var ev []Event
 	start := crawl
 	age := 0.0
 	km := t.km
 	leaveNow := false
 	switch {
-	case rng.Float64() >= t.InitialUp:
+	case rng.Float64() < (1-t.InitialUp)*span:
 		arrive := rng.Float64() * window
 		ev = append(ev, Event{DownAt: 0, UpAt: arrive})
 		start = arrive + crawl
-	case rng.Float64() < t.AlwaysOn:
+	case rng.Float64() >= (1-t.AlwaysOn)*span:
 		return nil
 	default:
 		km = t.kmReturn
