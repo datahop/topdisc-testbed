@@ -1,4 +1,4 @@
-# Grid'5000: 5 Distem virtual nodes, 5 per machine, emulated geography from the
+# Grid'5000: 5 nodes (netns'd, see testbed.wan), 5 per machine, emulated geography from the
 # RTT table (network.model: regions). deploy/g5k/g5k.py up scenarios/g5k-smoke.yaml
 name: g5k-smoke
 scenario:
@@ -23,6 +23,8 @@ testbed:
     home_region: us-east-1
   g5k:
     site: nancy
+    cluster: gros
     vnodes_per_machine: 5
   wan:
+    enabled: true
     rate_kbps: 160
