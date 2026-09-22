@@ -1,0 +1,46 @@
+# Evaluation run, simnet: 10000 nodes over the 100 largest chains of the
+# 2026-09-18 crawl (topics by the crawl's shares, node addresses by the
+# crawl's /24 histogram), crawl churn in real time with hard departures,
+# connection-driven search, 4 h. search_yield_floor 4 is the adaptive search
+# distance; 0 runs the default searcher for the A/B. Needs about 76 GB RSS:
+#   GOMEMLIMIT=96GiB SIMNET_HEAPPROF=1h ./simnet scenarios/simnet-crawl-10k-4h.yaml
+name: simnet-crawl-10k-4h
+scenario:
+  population:
+    nodes: 10000
+    topics: 100
+    topic_model: models/crawl-2026-09-18.json
+    addresses: crawl
+    seed: 1
+  network:
+    latency_ms: 30
+    bandwidth_mibps: 1000
+  phases:
+    bootstrap_wait: 180s
+    start_window: 15m
+    register_wait: 22m30s
+    search_stagger: 100ms
+    search_timeout: 4h
+  topic:
+    ad_cache_size: 5000
+    search_yield_floor: 4
+  search:
+    model: conn
+    target_count: 0
+  conn_model:
+    enabled: true
+  session_churn:
+    enabled: true
+    model: models/crawl-2026-09-18.json
+    window_real_hours: 0
+testbed:
+  simulator:
+    link_buf: 32768
+    router_buf: 32768
+    router_shards: 16
+  traces:
+    metrics: metrics.json
+    overhead: oh.json
+    overhead_series: series.json
+    overhead_series_period: 15m
+    checkpoint_interval: 30m

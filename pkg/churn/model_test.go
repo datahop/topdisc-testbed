@@ -57,3 +57,45 @@ func TestScheduleTopicWindows(t *testing.T) {
 		}
 	}
 }
+
+func TestDrawPrefix(t *testing.T) {
+	m, err := Load("../../scenarios/models/crawl-2026-09-18.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.HasAddresses() {
+		t.Fatal("model has no prefixes")
+	}
+	if got := len(m.Global.prefixes); got != m.Peers {
+		t.Fatalf("global prefixes %d, want one per peer %d", got, m.Peers)
+	}
+	rng := rand.New(rand.NewSource(1))
+	k := 20
+	seen := map[uint32]int{}
+	for n := 0; n < 20000; n++ {
+		p := m.DrawPrefix(rng, k-1, k)
+		if p == 0 {
+			t.Fatal("tail draw returned 0")
+		}
+		seen[p]++
+	}
+	// The tail pool is every chain from the k-th on; a prefix of the largest
+	// topic that no tail chain uses must not appear.
+	tail := map[uint32]bool{}
+	for _, tp := range m.Topics[k-1:] {
+		for _, p := range tp.prefixes {
+			tail[p] = true
+		}
+	}
+	for p := range seen {
+		if !tail[p] {
+			t.Fatalf("prefix %d drawn for the tail is not in any tail chain", p)
+		}
+	}
+	if len(seen) < 100 {
+		t.Fatalf("tail draws hit only %d distinct /24s", len(seen))
+	}
+	if p := m.DrawPrefix(rng, 0, k); p == 0 {
+		t.Fatal("topic 0 draw returned 0")
+	}
+}

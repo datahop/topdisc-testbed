@@ -11,6 +11,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 // Model is fitted from crawl data. Time inside the model is in crawl units
@@ -24,6 +25,9 @@ type Model struct {
 	Peers   int
 	Global  Topic
 	Topics  []Topic // descending share; may be empty
+
+	tail  []uint32 // DrawPrefix's pool for the folded tail topic, built once per k
+	tailK int
 }
 
 // Topic is the fit for one topic: its share of the live nodes, how many of
@@ -42,6 +46,7 @@ type Topic struct {
 	km           [][2]float64
 	kmReturn     [][2]float64 // survival of a session that follows a return; km when absent
 	gapCDF       [][2]float64
+	prefixes     []uint32 // /24 prefixes of the topic's nodes (a<<16|b<<8|c), one entry per node
 }
 
 type rawTopic struct {
@@ -57,6 +62,7 @@ type rawTopic struct {
 	KM           [][2]float64   `json:"km_survival"`
 	KMReturn     [][2]float64   `json:"km_survival_after_return"`
 	GapHist      map[string]int `json:"gap_hist_crawls"`
+	Prefixes     []string       `json:"prefixes"` // "a.b.c" or "a.b.c*n": n nodes in that /24
 }
 
 func (r rawTopic) topic() Topic {
@@ -65,6 +71,7 @@ func (r rawTopic) topic() Topic {
 	if len(t.kmReturn) < 2 {
 		t.kmReturn = t.km
 	}
+	t.prefixes = parsePrefixes(r.Prefixes)
 	if r.InitialUp != nil {
 		t.InitialUp = *r.InitialUp
 	}
@@ -93,6 +100,7 @@ func Load(path string) (*Model, error) {
 		WindowHours  float64    `json:"window_hours"`
 		Peers        int        `json:"peers"`
 		Topics       []rawTopic `json:"topics"`
+		GlobalFit    rawTopic   `json:"global"`
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -114,10 +122,61 @@ func Load(path string) (*Model, error) {
 	if m.Hours == 0 {
 		m.Hours = 24
 	}
+	m.Global.prefixes = parsePrefixes(raw.GlobalFit.Prefixes)
 	for _, rt := range raw.Topics {
 		m.Topics = append(m.Topics, rt.topic())
 	}
 	return m, nil
+}
+
+func parsePrefixes(list []string) []uint32 {
+	var out []uint32
+	for _, e := range list {
+		n := 1
+		if i := strings.IndexByte(e, '*'); i >= 0 {
+			n, _ = strconv.Atoi(e[i+1:])
+			e = e[:i]
+		}
+		var a, b, c int
+		if _, err := fmt.Sscanf(e, "%d.%d.%d", &a, &b, &c); err != nil {
+			continue
+		}
+		p := uint32(a)<<16 | uint32(b)<<8 | uint32(c)
+		for ; n > 0; n-- {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// HasAddresses reports whether the model carries the nodes' /24 prefixes.
+func (m *Model) HasAddresses() bool { return len(m.Global.prefixes) > 0 }
+
+// DrawPrefix draws a /24 prefix for a node of topic i in a run with k topics,
+// each of the topic's crawled nodes equally likely, so /24s shared by many
+// nodes come up as often as they did in the crawl. The folded tail topic
+// draws from every chain it stands for; a topic without prefixes, or i out
+// of range, draws from all nodes.
+func (m *Model) DrawPrefix(rng *rand.Rand, i, k int) uint32 {
+	pool := m.Global.prefixes
+	switch {
+	case k > 0 && k < len(m.Topics) && i == k-1:
+		if m.tail == nil || m.tailK != k {
+			m.tail, m.tailK = nil, k
+			for _, t := range m.Topics[k-1:] {
+				m.tail = append(m.tail, t.prefixes...)
+			}
+		}
+		if len(m.tail) > 0 {
+			pool = m.tail
+		}
+	case i >= 0 && i < len(m.Topics) && len(m.Topics[i].prefixes) > 0:
+		pool = m.Topics[i].prefixes
+	}
+	if len(pool) == 0 {
+		return 0
+	}
+	return pool[rng.Intn(len(pool))]
 }
 
 // Topic returns the fit for topic index i in share order, the global fit when

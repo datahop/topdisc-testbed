@@ -28,7 +28,7 @@ func snapshotRegistrationCoverage(all []nodeRec, registrantIDs map[enode.ID]stru
 		ByHost:       make(map[string]int),
 	}
 	for _, host := range all {
-		visible := host.disc.LocalTopicNodes(testTopic)
+		visible := localTopicNodes(host.idx, testTopic)
 		hostID := host.ln.ID()
 		seen := make(map[enode.ID]struct{})
 		for _, n := range visible {
@@ -58,7 +58,7 @@ func snapshotMultiTopicCoverage(all []nodeRec, registrantsByTopic map[int]map[en
 			ByHost:       make(map[string]int),
 		}
 		for _, host := range all {
-			visible := host.disc.LocalTopicNodes(topics[t])
+			visible := localTopicNodes(host.idx, topics[t])
 			hostID := host.ln.ID()
 			seen := make(map[enode.ID]struct{})
 			for _, n := range visible {

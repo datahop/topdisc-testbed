@@ -15,8 +15,8 @@ AWS has a driver that does every step; the other providers follow the
 manual sequence below it.
 
 ```
-deploy/aws.sh up scenarios/cloud-1k.yaml -var spot=true   # fleet sized from scenario.network.regions; build; push to S3
-deploy/aws.sh run scenarios/cloud-1k.yaml
+deploy/aws.sh up scenarios/aws-1k.yaml -var spot=true   # fleet sized from scenario.network.regions; build; push to S3
+deploy/aws.sh run scenarios/aws-1k.yaml
 deploy/aws.sh ssh                    # tail -f /opt/topdisc/run.out
 deploy/aws.sh pull                   # run directory into runs/
 deploy/aws.sh down
@@ -38,7 +38,7 @@ cd deploy/terraform/gcp && terraform init && terraform apply -var nodes=1000 -va
 
 # on the coordinator (GCP: gcloud compute ssh --tunnel-through-iap; Hetzner: ssh)
 cd /opt/topdisc && ./inventory-gcp.sh           # Hetzner: terraform output -json inventory
-./testbed cloud-1k.yaml                         # scenario copied next to inventory.json
+./testbed aws-1k.yaml                           # scenario copied next to inventory.json
 
 terraform destroy
 ```

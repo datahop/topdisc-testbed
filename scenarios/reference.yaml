@@ -40,6 +40,7 @@ scenario:
     register_frac: 0.5                 # single-topic mode: fraction that register, the rest search
     zipf_s: 1.07                       # Zipf skew for topic assignment when topics > 1 and no topic_model
     topic_model: ""                    # crawl model JSON (scenarios/models, cmd/crawl/model.py): topics are assigned by the crawl's chain shares instead of Zipf; topics = how many of the largest chains to keep (0 = all), the last one takes the tail
+    addresses: ""                      # simnet: where node IP addresses come from: index (default, node i is 33.i/256.i%256.1, its own /24) or crawl (the /24 is drawn from the topic_model's per-topic prefix histogram, so nodes share /24s as the crawled network does and the per-/24 limits and the admission IP score see real diversity)
     common_topic: false                # topics > 1: everyone also registers and searches topic 0
     seed: 0                            # RNG seed for every random draw; 0 = time
     legacy_frac: 0                     # fraction of nodes that are legacy discv5: simnet removes the topic-discovery ENR flag; real backends run stock upstream geth (legacy_binary), the same fraction within every service
@@ -71,6 +72,8 @@ scenario:
     reg_bucket_standby: 0              # standby registrars per registration bucket; 0 = default 20
     topic_nodes_limit: 0               # topic nodes in a TOPICQUERY reply; 0 = default 16
     aux_nodes_limit: 0                 # closest-to-topic nodes attached to TOPICQUERY and REGTOPIC replies; 0 = default 8
+    search_yield_floor: 0              # adaptive search distance: query the farthest bucket whose replies carry at least this many ads; 0 = query every bucket
+    search_aux_radius: 0               # adaptive search: ask aux nodes only for the active bucket and its neighbours within this many buckets; 0 = every bucket with free space
     nodes_per_source_bucket: 0         # cap per source per bucket; 0 = default 1 (inert on topdisc)
     remove_on_expiry: false            # drop ads at expiry instead of renewing (inert on topdisc)
   search:

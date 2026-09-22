@@ -1,0 +1,52 @@
+# Evaluation run, Grid'5000, with churn: 25000 real node processes over the
+# 100 largest chains of the 2026-09-18 crawl, each node leaving and returning
+# as its chain's nodes did in the crawl, in real time (the hostagent kills and
+# restarts the process), real RLPx sessions filled from the topic search, 4 h.
+# g5k-crawl-25k-4h is the same run without churn. 100 machines at 250 nodes
+# each; the walltime covers setup, 22.5 min of registration and the run.
+# search_yield_floor 4 is the adaptive search distance, 0 the default.
+# Grid'5000: one hostagent per kadeployed machine, vnodes_per_machine node
+# processes in their own network namespaces (netns + netem, testbed.wan), no
+# Distem. Node addresses are private 10.x, which geth treats as LAN: the
+# per-/24 table limits and the admission IP score do not run here.
+name: g5k-crawl-25k-4h-churn
+scenario:
+  population:
+    nodes: 25000
+    topics: 100
+    topic_model: models/crawl-2026-09-18.json
+    seed: 1
+  network:
+    model: regions
+    regions: {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}
+  phases:
+    bootstrap_wait: 180s
+    start_window: 15m
+    register_wait: 22m30s
+    search_stagger: 10ms
+    search_timeout: 4h
+  topic:
+    ad_cache_size: 5000
+    search_yield_floor: 4
+  search:
+    model: conn
+    target_count: 0
+  conn_model:
+    enabled: true
+  session_churn:
+    enabled: true
+    model: models/crawl-2026-09-18.json
+    window_real_hours: 0
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json          # g5k.py copies it next to the scenario on the coordinator
+    home_region: us-east-1
+  g5k:
+    site: nancy
+    cluster: gros
+    vnodes_per_machine: 250
+    walltime: "06:00:00"
+  wan:
+    enabled: true
+    rate_kbps: 160

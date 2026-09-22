@@ -87,6 +87,40 @@ def fit(sessions, span_s, unit, warm_s):
     }
 
 
+def prefix_hist(nodes_csv, alive_ids):
+    """Per chain, how many alive IPv4 nodes sit in each /24."""
+    hist = collections.defaultdict(collections.Counter)
+    for r in csv.DictReader(open(nodes_csv)):
+        ip = r.get("ip", "")
+        if r["id"] not in alive_ids or not ip or ":" in ip:
+            continue
+        a, b, c, _ = (int(x) for x in ip.split("."))
+        hist[r["chain"]][(a << 16) | (b << 8) | c] += 1
+    return hist
+
+
+def hist_list(counter):
+    """"a.b.c" for one node in the /24, "a.b.c*n" for n; sorted, so the file diffs."""
+    out = []
+    for p, n in sorted(counter.items()):
+        s = "%d.%d.%d" % (p >> 16, (p >> 8) & 255, p & 255)
+        out.append(s if n == 1 else "%s*%d" % (s, n))
+    return out
+
+
+def dump(model, path):
+    """indent=1 JSON, except the prefix lists, which stay on one line each."""
+    marks = {}
+    for i, t in enumerate(model["topics"] + [model["global"]]):
+        if "prefixes" in t:
+            marks["@P%d@" % i] = json.dumps(t["prefixes"], separators=(",", ":"))
+            t["prefixes"] = "@P%d@" % i
+    text = json.dumps(model, indent=1)
+    for k, v in marks.items():
+        text = text.replace('"%s"' % k, v)
+    open(path, "w").write(text)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("sessions")
@@ -96,6 +130,7 @@ def main():
     ap.add_argument("--warm", type=float, default=60.0, help="minutes at the start not counted for arrivals")
     ap.add_argument("--names", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "chains.json"), help="JSON {chain id: name}")
     ap.add_argument("--source", default="")
+    ap.add_argument("--nodes", default="", help="nodes.csv from sessions.py: adds each topic's /24 prefix histogram (IPv4 nodes that answered at least once)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     unit, span_s, warm_s = a.cadence * 60, a.span * 3600, a.warm * 60
@@ -111,21 +146,28 @@ def main():
         by_chain[s["chain"]].append(s)
     alive = {c: len({s["id"] for s in ss}) for c, ss in by_chain.items()}
     total = sum(alive.values())
+    prefixes = prefix_hist(a.nodes, {s["id"] for s in sessions}) if a.nodes else {}
 
     topics, other = [], []
     for c, n in sorted(alive.items(), key=lambda kv: -kv[1]):
         if n >= a.min_alive:
             t = {"id": c, "name": names.get(c, ""), "share": round(n / total, 5)}
             t.update(fit(by_chain[c], span_s, unit, warm_s))
+            if c in prefixes:
+                t["prefixes"] = hist_list(prefixes[c])
             topics.append(t)
         else:
             other.extend(by_chain[c])
     if other:
         t = {"id": "other", "name": "topics below min-alive, folded", "share": round(len({s['id'] for s in other}) / total, 5)}
         t.update(fit(other, span_s, unit, warm_s))
+        if prefixes:
+            t["prefixes"] = hist_list(sum((prefixes[c] for c in {s["chain"] for s in other} if c in prefixes), collections.Counter()))
         topics.append(t)
     g = {"id": "*", "name": "all nodes", "share": 1.0}
     g.update(fit(sessions, span_s, unit, warm_s))
+    if prefixes:
+        g["prefixes"] = hist_list(sum(prefixes.values(), collections.Counter()))
 
     model = {
         "source": a.source or os.path.basename(a.sessions),
@@ -140,7 +182,7 @@ def main():
         "topics": topics,
     }
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
-    json.dump(model, open(a.out, "w"), indent=1)
+    dump(model, a.out)
     print(f"{a.out}: {total} nodes, {len(topics)} topics (min alive {a.min_alive}), cadence {a.cadence} min, span {a.span} h")
     print(f"{'topic':22s} {'share':>6s} {'alive':>6s} {'init':>5s} {'stay':>5s} {'arr/h':>7s} {'flick/h':>8s} {'gone/h':>7s} {'S(1h)':>6s} {'S(12h)':>6s} {'gone%':>6s} {'fitted':>6s}")
     for t in topics + [g]:

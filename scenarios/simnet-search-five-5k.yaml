@@ -1,32 +1,31 @@
-# 5k nodes, 5 topics (Zipf s=1), continuous search paced like a node filling and
-# refreshing its peers: 16 new registrants at once, then one new per minute.
-# The search phase runs until stopped: SIGTERM to the simnet process ends the
-# searches and the run writes its reports.
-name: long-5k-paced
+# Search A/B over a topic mix: 5000 nodes, 5 Zipf topics, half register, no
+# churn, no connection model, one continuous unpaced search per node for 1 h.
+# search_yield_floor 4 is the adaptive search distance, 0 the default searcher.
+name: simnet-search-five-5k
 scenario:
   population:
     nodes: 5000
     topics: 5
-    zipf_s: 1.0
+    zipf_s: 1
+    register_frac: 0.5
     seed: 1
   network:
     latency_ms: 30
     bandwidth_mibps: 1000
   phases:
     bootstrap_wait: 180s
-    register_stagger: 30ms
+    start_window: 15m
     register_wait: 22m30s
-    search_stagger: 10ms
-    search_timeout: 48h
+    search_stagger: 100ms
+    search_timeout: 1h
   topic:
     ad_cache_size: 5000
+    search_yield_floor: 4
   search:
     model: continuous
-    initial_results: 16
-    result_interval: 1m
 testbed:
   simulator:
-    link_buf: 8192
+    link_buf: 32768
     router_buf: 32768
     router_shards: 16
   traces:

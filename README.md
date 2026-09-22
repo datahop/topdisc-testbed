@@ -25,7 +25,7 @@ Two forks, both pinned in `go.mod`:
 
 ```sh
 go build -o simnet ./cmd/simnet
-./simnet scenarios/default.yaml
+./simnet scenarios/simnet-smoke.yaml
 ```
 
 The binary takes exactly one argument, the config. It creates
@@ -69,7 +69,7 @@ needs.
 `local` and `cloud` accept `testbed.wan` (Linux only): each node gets its own
 network namespace with a netem qdisc, so pairs see WAN-like RTTs and a
 per-node rate cap instead of loopback. `scenarios/local-100*.yaml` and
-`scenarios/cloud-*.yaml` are the reference scenarios for those backends;
+`scenarios/aws-*.yaml` are the reference scenarios for those backends;
 `pkg/host` is the per-host runner both share, `cmd/hostagent` exposes it
 over HTTP for the cloud coordinator.
 

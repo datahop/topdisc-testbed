@@ -84,14 +84,19 @@ WAN emulation, cloud inventory and home region, trace outputs, safety
 
 | Scenario | Plan section | Content | Exists |
 |---|---|---|---|
-| `phase3-10k` | §2 | 10k nodes, 300 services Zipf 1, E = 15 min, F_lookup = 30, scheduled lookups, WAN model, no churn | ✓ `scenarios/phase3-10k.yaml` |
-| `phase3-10k-churn-<scale>` | §2 churn resilience | `phase3-10k` plus session churn at several `scale` values | ✓ `scenarios/phase3-10k-churn.yaml` (edit `scale`) |
+| `phase3-10k` | §2 | 10k nodes, 300 services Zipf 1, E = 15 min, F_lookup = 30, scheduled lookups, WAN model, no churn | ✓ `scenarios/g5k-phase3-10k.yaml` |
+| `phase3-10k-churn-<scale>` | §2 churn resilience | `phase3-10k` plus session churn at several `scale` values | ✓ `scenarios/g5k-phase3-10k-churn.yaml` (edit `scale`) |
 | `phase3-10k-legacy` | §3 | Same population, service assignment, addresses and lookup schedule; every node in legacy mode | ◐ `legacy_frac: 1.0` on `phase3-10k` (bootnode included via `legacy_bootnode`) |
 | `phase3-10k-deploy-<pct>` | §4 | `phase3-10k` with `legacy_frac` at 99, 95, 90, 75, 50 %, stratified per service | ✓ set `legacy_frac` on `phase3-10k` |
-| `<name>` per backend | all | The same `scenario:` block with a different `testbed:` block | ✓ pattern: `smoke-*` (simnet), `local-*`, `cloud-*`, `g5k-*` (step 5) |
+| `<name>` per backend | all | The same `scenario:` block with a different `testbed:` block | ✓ pattern: `simnet-*`, `local-*`, `aws-*`, `g5k-*` |
 
-Existing scenarios by purpose: `default.yaml` (100 Mibps baseline),
-`smoke-20`/`smoke-500*` (simnet checks, churn model, continuous search),
-`10k-*` (simnet at scale), `local-100*` (real processes on one host, churn,
-continuous, WAN), `cloud-smoke`/`cloud-300`/`cloud-1k`/`cloud-10k` (AWS),
-`reference.yaml` (every key documented).
+Scenarios, one set per backend, the same `scenario:` blocks with that
+backend's `testbed:` block: `simnet-smoke`, `simnet-10k`, `simnet-10k-churn`,
+`simnet-10k-continuous` (simnet references), `simnet-crawl-10k-4h`,
+`simnet-crawl-5k-cont-4h` (the evaluation runs: crawl topics, addresses and
+churn), `simnet-search-single-5k`, `simnet-search-five-5k` (search A/B);
+`local-100`, `local-100-continuous`, `local-100-legacy` (real processes on one
+host); `aws-smoke`, `aws-1k`, `aws-10k`; `g5k-smoke`, `g5k-1k`, `g5k-10k` (the
+Grid'5000 ladder) and `g5k-crawl-25k-4h`, `g5k-crawl-25k-4h-churn`,
+`g5k-phase3-10k`, `g5k-phase3-10k-churn` (the evaluation runs prepared for
+Grid'5000); `reference.yaml` (every key documented).

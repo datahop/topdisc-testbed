@@ -26,7 +26,7 @@ per-run report.
 |---|---|
 | Scenario | Parameters (unset protocol parameters shown with their fork default), topic assignment table, actual search duration when stopped early |
 | 1. Registration and cache | Coverage and registration-latency tables; `06`, `04`, `04b`, `07_registration_latency_bar`, `07_placement_time_idspace`, `oh_05`, `oh_08` |
-| 2. Discovery | Per-topic search results, find counts, scheduled lookups, final coverage, search provenance, search progress (with a re-walk flag); `02`, `03_time_to_fraction`, `11_discovery_rate` (continuous and conn runs), `02b`, `08`, `09`, `05`, `oh_06` |
+| 2. Discovery | Per-topic search results, find counts, scheduled lookups, final coverage, search provenance, search progress (with a re-walk flag); `02`, `03_time_to_fraction`, `11_discovery_rate` (continuous and conn runs), `12_search_bucket`, `02b`, `08`, `09`, `05`, `oh_06` |
 | 3. Overhead and load | `oh_01`, `oh_03`, `oh_10`, `oh_02`, `oh_04`, `oh_07`, `oh_09`, `oh_11` and the load summary table |
 | 4. Peer connections | Connection-model table (only when the run models peer slots) |
 | 5. Churn | Dead-result and churn tables, `10_dead_results` (only churn runs) |
@@ -155,6 +155,22 @@ per-run report.
 - The rate multiplier `session_churn.scale` is ignored when a fitted churn
   model file is set (#116).
 
+#### Planned: trace-driven churn (24 h crawl replay)
+
+Figures for runs whose population, topics (chains) and sessions come from a
+crawl trace (`cmd/crawl`), so that churn and popularity are the network's own
+rather than a model. Both are drawn for the baseline and the adaptive search
+distance on the same trace.
+
+| Figure | What it shows | Why |
+|---|---|---|
+| `12_dead_vs_alive_results` | Of the nodes a search returns over time, the share that are alive at that moment (answering), unreachable (alive in the trace but never answering a stranger) and gone (left before the result was returned); per topic, and against the same split for plain discv5 records from the crawl (15 % answering, 71 % of the rest sharing an IP with other records) | A plain FINDNODE walk hands out ~6.5 records per node that answers a stranger; ads are placed by the registrant itself, so topic results should be mostly reachable. This puts a number on that difference and on how quickly stale ads are served after a departure |
+| `13_discovery_rate_compare` | New alive registrants found per searcher per minute (`11b` style) for baseline vs adaptive on the trace, per topic, together with the queries spent per alive result | Discovery speed and cost under real churn, so the adaptive search's slower tail (seen on synthetic 5k runs) is measured where it matters |
+
+Both need a hard departure in simnet (a departed node stops answering, #17)
+and the trace loader; the alive/unreachable/gone split of a result comes
+from the sessions file at the result's timestamp.
+
 ## §3 TopDisc vs legacy discv5
 
 | Plan plot | simnet | real |
@@ -209,6 +225,7 @@ Python simulator (#123, #124).
 |---|---|
 | `02b_time_to_first_cdf` | Time to the first result, per topic |
 | `11_discovery_rate` | New registrants per searcher per minute over time, per topic, for long-lived searches (continuous, conn): shows how fast discovery decays and when a topic runs out of new registrants |
+| `12_search_bucket` | Share of TOPICQUERY requests per search-table bucket (0 = farthest from the topic), per topic or topic pool, and for adaptive searches (`search_yield_floor` > 0) the median active bucket over search time: where each topic's searches settle |
 | `oh_02_idspace_peak_rate`, `oh_04_idspace_peak_msgtype` | Peak sustained rate per node, total and by type |
 | `oh_09_cost_per_lookup` | To be replaced by a per-topic cost (see load) |
 | `cmp_01`–`cmp_13` (`compare_runs.py`) | Same scenario on two backends: lookups, discovery, registration, cache, registrar load, traffic, load vs distance |

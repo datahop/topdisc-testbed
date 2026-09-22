@@ -161,7 +161,7 @@ func main() {
 		DiscoveryV5Topic: topicindex.Config{
 			AdLifetime: time.Duration(asg.Topic.AdLifetimeMs) * time.Millisecond, AdCacheSize: asg.Topic.AdCacheSize,
 			RegAttemptTimeout: time.Duration(asg.Topic.RegAttemptTimeoutMs) * time.Millisecond, SearchBucketSize: asg.Topic.SearchBucketSize,
-			TopicNodesLimit: asg.Topic.TopicNodesLimit, AuxNodesLimit: asg.Topic.AuxNodesLimit,
+			TopicNodesLimit: asg.Topic.TopicNodesLimit, AuxNodesLimit: asg.Topic.AuxNodesLimit, SearchYieldFloor: asg.Topic.SearchYieldFloor, SearchAuxRadius: asg.Topic.SearchAuxRadius,
 			SearchTableDepth: asg.Topic.SearchTableDepth, RegTableDepth: asg.Topic.RegTableDepth,
 			RegBucketSize: asg.Topic.RegBucketSize, RegBucketStandbyLimit: asg.Topic.RegBucketStandby,
 		},

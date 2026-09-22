@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"github.com/datahop/topdisc-testbed/pkg/scenario"
 	"os"
+	"path/filepath"
+	"runtime"
+	"runtime/pprof"
 	"sort"
 	"time"
 
@@ -127,5 +130,23 @@ func monitorBuffers(sim *simnet.Simnet, abortOnDrop bool, stop <-chan struct{}, 
 				peakLinkMax, linkCap, lPct, peakLinkSum,
 				s.RouterMax, s.RouterSum, s.LinkMax, s.LinkSum, s.LinkDropped)
 		}
+	}
+}
+
+// heapProfiles writes a heap profile and a memory summary every interval,
+// for finding what grows over a long run (SIMNET_HEAPPROF=15m).
+func heapProfiles(dir string, every time.Duration) {
+	for n := 1; ; n++ {
+		time.Sleep(every)
+		var ms runtime.MemStats
+		runtime.ReadMemStats(&ms)
+		fmt.Printf("[heap] t=%s inuse=%.1fGB sys=%.1fGB objects=%d goroutines=%d\n", time.Duration(n)*every, float64(ms.HeapInuse)/1e9, float64(ms.Sys)/1e9, ms.HeapObjects, runtime.NumGoroutine())
+		f, err := os.Create(filepath.Join(dir, fmt.Sprintf("heap-%03d.pprof", n)))
+		if err != nil {
+			continue
+		}
+		runtime.GC()
+		pprof.WriteHeapProfile(f)
+		f.Close()
 	}
 }

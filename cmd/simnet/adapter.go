@@ -66,16 +66,18 @@ func dumpOverhead(path string, tqByIdx map[int]int64, idByIdx map[int]string) {
 	ops := make(map[int][]opRec)
 	loads := make(map[int]map[string]discover.TopicLoad)
 	for _, nr := range liveNodeRecs() {
-		if nr.disc == nil {
+		h := hostOf(nr.idx)
+		if h == nil {
 			continue
 		}
-		if ws := nr.disc.WireStats(); len(ws) > 0 {
+		ws, os, tl := h.stats() // over every instance the node has run
+		if len(ws) > 0 {
 			wire[nr.idx] = ws
 		}
-		for k, v := range nr.disc.OpStats() {
+		for k, v := range os {
 			ops[nr.idx] = append(ops[nr.idx], opRec{k.Msg, k.OpID, v})
 		}
-		if tl := nr.disc.TopicLoadStats(); len(tl) > 0 {
+		if len(tl) > 0 {
 			m := make(map[string]discover.TopicLoad, len(tl))
 			for t, l := range tl {
 				m[t.String()] = l
@@ -83,16 +85,25 @@ func dumpOverhead(path string, tqByIdx map[int]int64, idByIdx map[int]string) {
 			loads[nr.idx] = m
 		}
 	}
+	// A restarted node has one endpoint per instance; its counters add up.
 	connRegistryMu.Lock()
+	at := make(map[int]int, len(connRegistry))
 	recs := make([]rec, 0, len(connRegistry))
 	for _, c := range connRegistry {
-		recs = append(recs, rec{
-			Idx: c.idx, ID: idByIdx[c.idx],
-			TxPkts: c.txPkts.Load(), TxBytes: c.txBytes.Load(),
-			RxPkts: c.rxPkts.Load(), RxBytes: c.rxBytes.Load(),
-			TQRcv: tqByIdx[c.idx], ByType: wire[c.idx],
-			Ops: ops[c.idx], TopicLoad: loads[c.idx],
-		})
+		i, ok := at[c.idx]
+		if !ok {
+			i = len(recs)
+			at[c.idx] = i
+			recs = append(recs, rec{
+				Idx: c.idx, ID: idByIdx[c.idx],
+				TQRcv: tqByIdx[c.idx], ByType: wire[c.idx],
+				Ops: ops[c.idx], TopicLoad: loads[c.idx],
+			})
+		}
+		recs[i].TxPkts += c.txPkts.Load()
+		recs[i].TxBytes += c.txBytes.Load()
+		recs[i].RxPkts += c.rxPkts.Load()
+		recs[i].RxBytes += c.rxBytes.Load()
 	}
 	connRegistryMu.Unlock()
 	f, err := os.Create(path)

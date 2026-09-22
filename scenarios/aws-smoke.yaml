@@ -1,6 +1,6 @@
-# Driver check: 5 instances in one region, a couple of minutes, a few cents.
-# deploy/aws.sh up scenarios/cloud-smoke.yaml -var spot=true && deploy/aws.sh run scenarios/cloud-smoke.yaml
-name: cloud-smoke
+# AWS driver check: 5 instances in one region, a couple of minutes, a few cents.
+#   deploy/aws.sh up scenarios/aws-smoke.yaml && deploy/aws.sh run scenarios/aws-smoke.yaml
+name: aws-smoke
 scenario:
   population:
     nodes: 5

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ethereum/go-ethereum/p2p/discover/topicindex"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 )
 
@@ -30,6 +31,9 @@ func runDiscNGValidationWorkload(all []nodeRec, registerWait, searchTimeout time
 
 	for _, n := range flagged {
 		n.disc.RegisterTopic(testTopic, uint64(n.idx))
+		if h := hostOf(n.idx); h != nil {
+			h.setTopics([]topicindex.TopicID{testTopic})
+		}
 	}
 	fmt.Printf("registrations started; register-wait=%s\n", registerWait)
 	time.Sleep(registerWait)

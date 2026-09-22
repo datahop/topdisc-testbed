@@ -194,6 +194,9 @@ func runChurnWorkload(sim *simnet.Simnet, settings simnet.NodeBiDiLinkSettings, 
 		}
 		staggered++
 		n.disc.RegisterTopic(topics[nodeTopic[i]], uint64(n.idx))
+		if h := hostOf(n.idx); h != nil {
+			h.setTopics([]topicindex.TopicID{topics[nodeTopic[i]]})
+		}
 	}
 	fmt.Printf("registrations started; register-wait=%s\n", registerWait)
 
@@ -321,6 +324,9 @@ func runChurnWorkload(sim *simnet.Simnet, settings simnet.NodeBiDiLinkSettings, 
 						// draw all use shared state, so keep them serial and
 						// parallelize only the expensive spawn.
 						specs[c] = joinSpec{cs.nextIndex(), cs.aliveSample(maxBootnodes, rng), drawTopic()}
+						if nodeAddrs != nil {
+							nodeAddrs.reserve(specs[c].idx, specs[c].topic)
+						}
 					}
 					recs := make([]nodeRec, wantJoins)
 					sem := make(chan struct{}, churnJoinConcurrency)
@@ -341,6 +347,9 @@ func runChurnWorkload(sim *simnet.Simnet, settings simnet.NodeBiDiLinkSettings, 
 						sm.stats.addAssigned(t)
 						cs.join(rec)
 						rec.disc.RegisterTopic(topics[t], uint64(rec.idx))
+						if h := hostOf(rec.idx); h != nil {
+							h.setTopics([]topicindex.TopicID{topics[t]})
+						}
 						sm.launch(rec, t)
 						roundJoins++
 					}
@@ -453,7 +462,7 @@ func countKilledStillVisible(nodes []nodeRec, killed map[enode.ID]bool, topics [
 		}
 		inspected++
 		for t := range topics {
-			for _, n := range host.disc.LocalTopicNodes(topics[t]) {
+			for _, n := range localTopicNodes(host.idx, topics[t]) {
 				id := n.ID()
 				if killed[id] {
 					visible[id] = true
