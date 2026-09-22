@@ -1,24 +1,23 @@
-# Laptop-sized end-to-end check: 20 nodes, under a minute.
-name: smoke-20
+# simnet reference at scale: 10k nodes, one topic everyone registers and
+# searches, connection-driven search, no churn.
+name: simnet-10k
 scenario:
   population:
-    nodes: 20
+    nodes: 10000
     topics: 1
     all_register: true
     seed: 1
   network:
     latency_ms: 30
-    bandwidth_mibps: 100
+    bandwidth_mibps: 1000
   phases:
-    bootstrap_wait: 5s
-    register_stagger: 5ms
-    register_wait: 20s
-    search_stagger: 2ms
-    search_timeout: 20s
+    bootstrap_wait: 180s
+    register_wait: 22m30s  # 1.5 x ad_lifetime (15m)
+    register_stagger: 30ms
+    search_stagger: 10ms
+    search_timeout: 10m
   topic:
     ad_cache_size: 5000
-  search:
-    model: conn
   conn_model:
     enabled: true
     max_peers: 50
@@ -34,4 +33,4 @@ testbed:
     overhead: oh.json
     overhead_series: series.json
     overhead_series_period: 30s
-    checkpoint_interval: 10s
+    checkpoint_interval: 60s

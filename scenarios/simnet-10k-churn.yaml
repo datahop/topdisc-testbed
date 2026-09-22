@@ -1,6 +1,8 @@
-# The baseline run. Everything not listed here takes the reference default
-# (see reference.yaml). Copy this file to derive an experiment.
-name: default
+# simnet-10k plus session churn from the fitted August 2026 discv5 model:
+# 42.3% of sessions outlast the run, the rest fall off geometrically from a
+# very short mode. Departures stop the node's discovery entirely (hard
+# departures); a node returns with the same identity.
+name: simnet-10k-churn
 scenario:
   population:
     nodes: 10000
@@ -9,22 +11,23 @@ scenario:
     seed: 1
   network:
     latency_ms: 30
-    bandwidth_mibps: 100
+    bandwidth_mibps: 1000
   phases:
-    bootstrap_wait: 3m
-    register_stagger: 30ms
+    bootstrap_wait: 180s
     register_wait: 22m30s  # 1.5 x ad_lifetime (15m)
+    register_stagger: 30ms
     search_stagger: 10ms
-    search_timeout: 10m
+    search_timeout: 30m
   topic:
     ad_cache_size: 5000
-  search:
-    model: conn
   conn_model:
     enabled: true
     max_peers: 50
     dial_ratio: 3
     redial_wait: 35s
+  session_churn:
+    enabled: true
+    gap: 30s
 testbed:
   simulator:
     link_buf: 8192
@@ -35,4 +38,4 @@ testbed:
     overhead: oh.json
     overhead_series: series.json
     overhead_series_period: 30s
-    checkpoint_interval: 1m
+    checkpoint_interval: 60s

@@ -1,5 +1,9 @@
-# smoke-500 plus session churn, to check the churn driver end to end quickly.
-name: smoke-500-churn
+# simnet smoke: 500 nodes, one topic, connection-driven search, a few minutes.
+# 500 nodes is *more* contended than 10k (fewer inbound slots network-wide),
+# so refusals run higher than at scale. Peer slots as geth: MaxPeers 50 split
+# by DialRatio 3 -> 16 out / 34 in.
+#   go build -o simnet ./cmd/simnet && ./simnet scenarios/simnet-smoke.yaml
+name: simnet-smoke
 scenario:
   population:
     nodes: 500
@@ -22,9 +26,6 @@ scenario:
     max_peers: 50
     dial_ratio: 3
     redial_wait: 35s
-  session_churn:
-    enabled: true
-    gap: 10s
 testbed:
   simulator:
     link_buf: 8192

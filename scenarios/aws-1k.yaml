@@ -1,10 +1,10 @@
-# 10k instances, one node each, over three regions (deploy/aws.sh up
-# scenarios/cloud-10k.yaml). Compare with the simnet 10k: fill time, refill,
-# inbound-by-idspace flat, REGTOPIC hotspot.
-name: cloud-10k
+# AWS acceptance run: 1,000 instances, one node each, spread over three
+# regions (deploy/aws.sh up scenarios/aws-1k.yaml -var spot=true).
+# Inventory path is relative to this file.
+name: aws-1k
 scenario:
   population:
-    nodes: 10000
+    nodes: 1000
     topics: 1
     all_register: true
     seed: 1
@@ -13,9 +13,9 @@ scenario:
   phases:
     bootstrap_wait: 30s
     register_stagger: 20ms
-    register_wait: 900s
+    register_wait: 120s
     search_stagger: 10ms
-    search_timeout: 1800s
+    search_timeout: 300s
   topic:
     ad_cache_size: 5000
 testbed:
