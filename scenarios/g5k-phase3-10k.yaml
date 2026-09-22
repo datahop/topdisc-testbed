@@ -49,4 +49,4 @@ testbed:
     enabled: true
     delay_min_ms: 4
     delay_max_ms: 45
-    rate_kbps: 160
+    rate_kbps: 1000
