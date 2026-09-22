@@ -134,6 +134,7 @@ type TopicConfig struct {
 	RegBucketStandby     int           `yaml:"reg_bucket_standby"`
 	TopicNodesLimit      int           `yaml:"topic_nodes_limit"`
 	AuxNodesLimit        int           `yaml:"aux_nodes_limit"`
+	SearchYieldFloor     int           `yaml:"search_yield_floor"`
 	NodesPerSourceBucket int           `yaml:"nodes_per_source_bucket"`
 	RemoveOnExpiry       bool          `yaml:"remove_on_expiry"`
 }
@@ -316,6 +317,7 @@ var paramDocs = []paramDoc{
 	{"scenario.topic.reg_bucket_standby", "standby registrars per registration bucket; 0 = default 20"},
 	{"scenario.topic.topic_nodes_limit", "topic nodes in a TOPICQUERY reply; 0 = default 16"},
 	{"scenario.topic.aux_nodes_limit", "closest-to-topic nodes attached to TOPICQUERY and REGTOPIC replies; 0 = default 8"},
+	{"scenario.topic.search_yield_floor", "adaptive search distance: query the farthest bucket whose replies carry at least this many ads; 0 = query every bucket"},
 	{"scenario.topic.nodes_per_source_bucket", "cap per source per bucket; 0 = default 1 (inert on topdisc)"},
 	{"scenario.topic.remove_on_expiry", "drop ads at expiry instead of renewing (inert on topdisc)"},
 	{"scenario.search.model", "conn: connection-driven, nodes fill peer slots from their topic search (simnet: conn_model; real backends: geth's dialer); scheduled: lookup-only, one lookup per node at a random time in each of `intervals` equal slices of the search phase (plan §1); continuous: lookup-only, one search for the whole search phase consumed at initial_results/result_interval. Lookup-only models never dial"},

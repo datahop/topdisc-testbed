@@ -155,6 +155,22 @@ per-run report.
 - The rate multiplier `session_churn.scale` is ignored when a fitted churn
   model file is set (#116).
 
+#### Planned: trace-driven churn (24 h crawl replay)
+
+Figures for runs whose population, topics (chains) and sessions come from a
+crawl trace (`cmd/crawl`), so that churn and popularity are the network's own
+rather than a model. Both are drawn for the baseline and the adaptive search
+distance on the same trace.
+
+| Figure | What it shows | Why |
+|---|---|---|
+| `12_dead_vs_alive_results` | Of the nodes a search returns over time, the share that are alive at that moment (answering), unreachable (alive in the trace but never answering a stranger) and gone (left before the result was returned); per topic, and against the same split for plain discv5 records from the crawl (15 % answering, 71 % of the rest sharing an IP with other records) | A plain FINDNODE walk hands out ~6.5 records per node that answers a stranger; ads are placed by the registrant itself, so topic results should be mostly reachable. This puts a number on that difference and on how quickly stale ads are served after a departure |
+| `13_discovery_rate_compare` | New alive registrants found per searcher per minute (`11b` style) for baseline vs adaptive on the trace, per topic, together with the queries spent per alive result | Discovery speed and cost under real churn, so the adaptive search's slower tail (seen on synthetic 5k runs) is measured where it matters |
+
+Both need a hard departure in simnet (a departed node stops answering, #17)
+and the trace loader; the alive/unreachable/gone split of a result comes
+from the sessions file at the result's timestamp.
+
 ## §3 TopDisc vs legacy discv5
 
 | Plan plot | simnet | real |

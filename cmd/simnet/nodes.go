@@ -146,6 +146,7 @@ func spawnNode(sim *simnet.Simnet, settings simnet.NodeBiDiLinkSettings, idx int
 	cfg.Topic.RegTableDepth = nodeTopic.RegTableDepth
 	cfg.Topic.RegBucketSize = nodeTopic.RegBucketSize
 	cfg.Topic.RegBucketStandbyLimit = nodeTopic.RegBucketStandby
+	cfg.Topic.SearchYieldFloor = nodeTopic.SearchYieldFloor
 
 	disc, err := discover.ListenV5(conn, ln, cfg)
 	if err != nil {
