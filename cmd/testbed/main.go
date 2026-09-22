@@ -17,7 +17,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: testbed <scenario.yaml> | testbed reference | testbed fleet <scenario.yaml> | testbed preview <scenario.yaml>")
+		fmt.Fprintln(os.Stderr, "usage: testbed <scenario.yaml> | testbed reference | testbed fleet <scenario.yaml> | testbed preview <scenario.yaml> | testbed schedule <scenario.yaml>")
 		os.Exit(2)
 	}
 	if os.Args[1] == "reference" {
@@ -30,6 +30,16 @@ func main() {
 			fatal(err)
 		}
 		if err := preview(cfg, filepath.Dir(os.Args[2])); err != nil {
+			fatal(err)
+		}
+		return
+	}
+	if os.Args[1] == "schedule" && len(os.Args) == 3 {
+		cfg, err := scenario.Load(os.Args[2])
+		if err != nil {
+			fatal(err)
+		}
+		if err := printSchedule(cfg, filepath.Dir(os.Args[2])); err != nil {
 			fatal(err)
 		}
 		return
@@ -83,6 +93,26 @@ func fatal(err error) {
 	fmt.Fprintln(os.Stderr, "fatal:", err)
 	scenario.FlushLog()
 	os.Exit(1)
+}
+
+// printSchedule writes the churn schedule of every node as JSON, the same
+// draws simnet and the real backends apply, so a finished run's figures can
+// tell a node's absence from its search latency.
+func printSchedule(cfg scenario.Config, dir string) error {
+	as, err := assign.Generate(cfg, func(i int) assign.Host { return assign.Host{IP: "10.0.0.1", BasePort: 30303, StatusOff: 1} }, 0, dir)
+	if err != nil {
+		return err
+	}
+	nodes := make(map[int][]churn.Event, len(as))
+	for _, a := range as {
+		if len(a.Churn) > 0 {
+			nodes[a.Idx] = a.Churn
+		}
+	}
+	return json.NewEncoder(os.Stdout).Encode(struct {
+		Window float64               `json:"window"`
+		Nodes  map[int][]churn.Event `json:"nodes"`
+	}{cfg.Scenario.Phases.SearchTimeout.Seconds(), nodes})
 }
 
 // preview prints what the scenario's topic and churn models produce for its

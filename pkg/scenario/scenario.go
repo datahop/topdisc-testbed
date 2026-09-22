@@ -94,6 +94,7 @@ type PopulationConfig struct {
 	RegisterFrac   float64 `yaml:"register_frac"`
 	ZipfS          float64 `yaml:"zipf_s"`
 	TopicModel     string  `yaml:"topic_model"`
+	Addresses      string  `yaml:"addresses"`
 	CommonTopic    bool    `yaml:"common_topic"`
 	Seed           int64   `yaml:"seed"`
 	LegacyFrac     float64 `yaml:"legacy_frac"`
@@ -135,6 +136,7 @@ type TopicConfig struct {
 	TopicNodesLimit      int           `yaml:"topic_nodes_limit"`
 	AuxNodesLimit        int           `yaml:"aux_nodes_limit"`
 	SearchYieldFloor     int           `yaml:"search_yield_floor"`
+	SearchAuxRadius      int           `yaml:"search_aux_radius"`
 	NodesPerSourceBucket int           `yaml:"nodes_per_source_bucket"`
 	RemoveOnExpiry       bool          `yaml:"remove_on_expiry"`
 }
@@ -289,6 +291,7 @@ var paramDocs = []paramDoc{
 	{"scenario.population.register_frac", "single-topic mode: fraction that register, the rest search"},
 	{"scenario.population.zipf_s", "Zipf skew for topic assignment when topics > 1 and no topic_model"},
 	{"scenario.population.topic_model", "crawl model JSON (scenarios/models, cmd/crawl/model.py): topics are assigned by the crawl's chain shares instead of Zipf; topics = how many of the largest chains to keep (0 = all), the last one takes the tail"},
+	{"scenario.population.addresses", "simnet: where node IP addresses come from: index (default, node i is 33.i/256.i%256.1, its own /24) or crawl (the /24 is drawn from the topic_model's per-topic prefix histogram, so nodes share /24s as the crawled network does and the per-/24 limits and the admission IP score see real diversity)"},
 	{"scenario.population.common_topic", "topics > 1: everyone also registers and searches topic 0"},
 	{"scenario.population.seed", "RNG seed for every random draw; 0 = time"},
 	{"scenario.population.legacy_frac", "fraction of nodes that are legacy discv5: simnet removes the topic-discovery ENR flag; real backends run stock upstream geth (legacy_binary), the same fraction within every service"},
@@ -318,6 +321,7 @@ var paramDocs = []paramDoc{
 	{"scenario.topic.topic_nodes_limit", "topic nodes in a TOPICQUERY reply; 0 = default 16"},
 	{"scenario.topic.aux_nodes_limit", "closest-to-topic nodes attached to TOPICQUERY and REGTOPIC replies; 0 = default 8"},
 	{"scenario.topic.search_yield_floor", "adaptive search distance: query the farthest bucket whose replies carry at least this many ads; 0 = query every bucket"},
+	{"scenario.topic.search_aux_radius", "adaptive search: ask aux nodes only for the active bucket and its neighbours within this many buckets; 0 = every bucket with free space"},
 	{"scenario.topic.nodes_per_source_bucket", "cap per source per bucket; 0 = default 1 (inert on topdisc)"},
 	{"scenario.topic.remove_on_expiry", "drop ads at expiry instead of renewing (inert on topdisc)"},
 	{"scenario.search.model", "conn: connection-driven, nodes fill peer slots from their topic search (simnet: conn_model; real backends: geth's dialer); scheduled: lookup-only, one lookup per node at a random time in each of `intervals` equal slices of the search phase (plan §1); continuous: lookup-only, one search for the whole search phase consumed at initial_results/result_interval. Lookup-only models never dial"},
@@ -427,6 +431,15 @@ func Load(path string) (Config, error) {
 	case "conn", "scheduled", "continuous":
 	default:
 		return c, fmt.Errorf("%s: search.model %q: want conn, scheduled or continuous", path, c.Scenario.Search.Model)
+	}
+	switch c.Scenario.Population.Addresses {
+	case "", "index":
+	case "crawl":
+		if c.Scenario.Population.TopicModel == "" {
+			return c, fmt.Errorf("%s: population.addresses crawl needs population.topic_model", path)
+		}
+	default:
+		return c, fmt.Errorf("%s: population.addresses %q: want index or crawl", path, c.Scenario.Population.Addresses)
 	}
 	if c.Scenario.Search.Model != "conn" && c.Scenario.ConnModel.Enabled {
 		return c, fmt.Errorf("%s: search.model %s is lookup-only and never dials; remove conn_model or use search.model conn", path, c.Scenario.Search.Model)

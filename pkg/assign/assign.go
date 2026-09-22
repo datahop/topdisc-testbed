@@ -46,6 +46,7 @@ type Topic struct {
 	TopicNodesLimit     int   `json:"topic_nodes_limit"`
 	AuxNodesLimit       int   `json:"aux_nodes_limit"`
 	SearchYieldFloor    int   `json:"search_yield_floor"`
+	SearchAuxRadius     int   `json:"search_aux_radius"`
 	SearchTableDepth    int   `json:"search_table_depth"`
 	RegTableDepth       int   `json:"reg_table_depth"`
 	RegBucketSize       int   `json:"reg_bucket_size"`
@@ -165,7 +166,7 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 		a.SampleMs = cfg.Testbed.Traces.OverheadSeriesPeriod.Milliseconds()
 		a.Topic = Topic{AdLifetimeMs: sc.Topic.AdLifetime.Milliseconds(), AdCacheSize: sc.Topic.AdCacheSize,
 			RegAttemptTimeoutMs: sc.Topic.RegAttemptTimeout.Milliseconds(), SearchBucketSize: sc.Topic.SearchBucketSize,
-			TopicNodesLimit: sc.Topic.TopicNodesLimit, AuxNodesLimit: sc.Topic.AuxNodesLimit, SearchYieldFloor: sc.Topic.SearchYieldFloor,
+			TopicNodesLimit: sc.Topic.TopicNodesLimit, AuxNodesLimit: sc.Topic.AuxNodesLimit, SearchYieldFloor: sc.Topic.SearchYieldFloor, SearchAuxRadius: sc.Topic.SearchAuxRadius,
 			SearchTableDepth: sc.Topic.SearchTableDepth, RegTableDepth: sc.Topic.RegTableDepth, RegBucketSize: sc.Topic.RegBucketSize, RegBucketStandby: sc.Topic.RegBucketStandby}
 		if sc.Search.Model == "scheduled" && sc.Search.Intervals > 0 {
 			a.Search.LookupAtMs = LookupTimes(rand.New(rand.NewSource(sc.Population.Seed+int64(i)*40503)), a.Phases.SearchAt, stopAt, sc.Search.Intervals)
