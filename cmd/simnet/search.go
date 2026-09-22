@@ -174,7 +174,7 @@ func runSearches(searchers []nodeRec, registrants map[enode.ID]struct{}, target 
 		go func(slot int, n nodeRec) {
 			defer wg.Done()
 
-			iter := n.disc.TopicSearch(testTopic, uint64(n.idx))
+			iter := liveDisc(n).TopicSearch(testTopic, uint64(n.idx))
 			defer iter.Close()
 
 			done := make(chan struct{})
@@ -339,6 +339,15 @@ func printLookupSummary(results []searchResult, pacing searchPacing) {
 		total, medOrZero(per), hit, 100*float64(hit)/float64(max(total, 1)), pct(lat, 50), pct(lat, 95), pct(lat, 100))
 }
 
+// liveDisc is the node's running discovery service, or the one it was
+// spawned with for a node that has never been stopped.
+func liveDisc(n nodeRec) *discover.UDPv5 {
+	if d := currentDisc(n.idx); d != nil {
+		return d
+	}
+	return n.disc
+}
+
 // runOneSearcher executes a single node's TopicSearch until the absolute
 // deadline (or early-termination), and returns its result. Membership is
 // queried via has() so the caller can back it with either a static map
@@ -355,7 +364,7 @@ func runOneSearcher(n nodeRec, topicIdx int, topic topicindex.TopicID, deadlineA
 	// not discovered by search; the net-new metric discards these to isolate
 	// search's marginal discovery contribution.
 	connected := make(map[enode.ID]struct{})
-	for _, cn := range n.disc.AllNodes() {
+	for _, cn := range liveDisc(n).AllNodes() {
 		connected[cn.ID()] = struct{}{}
 	}
 	// Closed (not sent to) so every pump goroutine across sessions observes it.
@@ -403,7 +412,12 @@ func runOneSearcher(n nodeRec, topicIdx int, topic topicindex.TopicID, deadlineA
 	// does not reliably unblock a parked iter.Next() at scale, so reading via a
 	// channel lets us bail when the deadline fires even if iter.Next() is stuck.
 	openSearch := func() {
-		it := n.disc.TopicSearch(topic, uint64(n.idx))
+		// A node that is away has no service: the session yields nothing and
+		// the searcher waits for the rejoin.
+		var it enode.Iterator = enode.IterNodes(nil)
+		if d := currentDisc(n.idx); d != nil {
+			it = d.TopicSearch(topic, uint64(n.idx))
+		}
 		ch := make(chan *enode.Node, 1)
 		iter, nodeCh = it, ch
 		go func() {
@@ -972,4 +986,11 @@ func addSearchStats(dst *discover.TopicSearchStats, st discover.TopicSearchStats
 	dst.Duplicate += st.Duplicate
 	dst.Filtered += st.Filtered
 	dst.Yielded += st.Yielded
+	for len(dst.QueriesByBucket) < len(st.QueriesByBucket) {
+		dst.QueriesByBucket = append(dst.QueriesByBucket, 0)
+	}
+	for i, n := range st.QueriesByBucket {
+		dst.QueriesByBucket[i] += n
+	}
+	dst.ActiveTrace = append(dst.ActiveTrace, st.ActiveTrace...)
 }

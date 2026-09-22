@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
+	"os"
 	"sync"
 	"time"
 
@@ -28,15 +30,19 @@ func runModelChurn(c *connTable, m *churn.Model, window time.Duration, windowRea
 		m.Window[0], m.Window[1], window, realHours, m.Cadence, crawl.Round(time.Millisecond), len(m.Topics))
 	go logChurnProgress(c, stop)
 
+	sched := make(map[int][]churn.Event, len(c.out))
+	for i := range c.out {
+		if ev := m.ScheduleTopic(rand.New(rand.NewSource(churn.NodeSeed(seed, i))), window.Seconds(), windowRealHours, topicOf(i)); len(ev) > 0 {
+			sched[i] = ev
+		}
+	}
+	dumpChurnSchedule(window.Seconds(), sched)
+
 	t0 := time.Now()
 	var wg sync.WaitGroup
 	var arrivals, leaves, forever int
 	var mu sync.Mutex
-	for i := range c.out {
-		ev := m.ScheduleTopic(rand.New(rand.NewSource(churn.NodeSeed(seed, i))), window.Seconds(), windowRealHours, topicOf(i))
-		if len(ev) == 0 {
-			continue
-		}
+	for i, ev := range sched {
 		wg.Add(1)
 		go func(idx int, ev []churn.Event) {
 			defer wg.Done()
@@ -45,6 +51,9 @@ func runModelChurn(c *connTable, m *churn.Model, window time.Duration, windowRea
 					return
 				}
 				c.depart(idx)
+				if h := hostOf(idx); h != nil {
+					h.stop()
+				}
 				mu.Lock()
 				if e.DownAt == 0 {
 					arrivals++
@@ -60,6 +69,9 @@ func runModelChurn(c *connTable, m *churn.Model, window time.Duration, windowRea
 				if !sleepUntil(t0, e.UpAt, stop) {
 					return
 				}
+				if h := hostOf(idx); h != nil {
+					h.start()
+				}
 				c.rejoin(idx)
 			}
 		}(i, ev)
@@ -67,8 +79,28 @@ func runModelChurn(c *connTable, m *churn.Model, window time.Duration, windowRea
 	<-stop
 	wg.Wait()
 	mu.Lock()
-	fmt.Printf("[session-churn] schedule applied: %d arrivals, %d absences, %d left for good\n", arrivals, leaves, forever)
+	fmt.Printf("[session-churn] schedule applied: %d arrivals, %d absences, %d left for good; %d discovery services stopped\n", arrivals, leaves, forever, hostRestarts())
 	mu.Unlock()
+}
+
+// churnDumpPath is where the applied schedule is written (churn.json in the
+// run directory), so the report can tell a node's absence from search latency.
+var churnDumpPath string
+
+func dumpChurnSchedule(window float64, sched map[int][]churn.Event) {
+	if churnDumpPath == "" {
+		return
+	}
+	f, err := os.Create(churnDumpPath)
+	if err != nil {
+		fmt.Printf("[session-churn] schedule not written: %v\n", err)
+		return
+	}
+	defer f.Close()
+	json.NewEncoder(f).Encode(struct {
+		Window float64               `json:"window"`
+		Nodes  map[int][]churn.Event `json:"nodes"`
+	}{window, sched})
 }
 
 // sleepUntil waits until offset seconds after t0; false when stopped first.

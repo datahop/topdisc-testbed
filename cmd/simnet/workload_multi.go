@@ -58,7 +58,7 @@ func dumpReach(path string, all []nodeRec, topics []topicindex.TopicID) {
 		rc := &regContents{Fanout: make(map[string]int), Load: make(map[string]int), Sample: make(map[string][]string)}
 		for _, host := range all {
 			hid := host.ln.ID().String()
-			held := host.disc.LocalTopicNodes(topic)
+			held := localTopicNodes(host.idx, topic)
 			rc.Load[hid] = len(held)
 			for _, n := range held {
 				rid := n.ID().String()
@@ -175,8 +175,13 @@ func runMultiTopicWorkload(all []nodeRec, numTopics int, zipfS float64, seed int
 		}
 		staggered++
 		startNs[n.ln.ID().String()] = time.Since(regStart).Nanoseconds()
+		mine := make([]topicindex.TopicID, 0, len(nodeTopics[i]))
 		for _, t := range nodeTopics[i] {
 			n.disc.RegisterTopic(topics[t], uint64(n.idx))
+			mine = append(mine, topics[t])
+		}
+		if h := hostOf(n.idx); h != nil {
+			h.setTopics(mine) // registered again after every restart
 		}
 	}
 	if startWindow > 0 {
@@ -258,7 +263,7 @@ func runRegistrationProbe(all []nodeRec, topics []topicindex.TopicID, nodeTopics
 		for _, host := range all {
 			hostID := host.ln.ID()
 			for _, topic := range topics {
-				visible := host.disc.LocalTopicNodes(topic)
+				visible := localTopicNodes(host.idx, topic)
 				key := topic.String()
 				m := out[key]
 				sm := seen[key]

@@ -3,10 +3,12 @@ package main
 import (
 	"crypto/ecdsa"
 	"encoding/binary"
+	"github.com/datahop/topdisc-testbed/pkg/churn"
 	"github.com/datahop/topdisc-testbed/pkg/scenario"
 	"math"
 	"math/rand"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/marcopolo/simnet"
@@ -104,14 +106,7 @@ func spawnNode(sim *simnet.Simnet, settings simnet.NodeBiDiLinkSettings, idx int
 	if err != nil {
 		fatalf("generate key %d: %v", idx, err)
 	}
-	// Non-LAN public-style /24 per node so the IP-diversity defences fire.
-	addr := &net.UDPAddr{
-		IP:   net.IP{33, byte(idx / 256), byte(idx % 256), 1},
-		Port: 30303,
-	}
-	conn := &simUDPConn{SimConn: sim.NewEndpoint(addr, settings), idx: idx}
-	registerConn(conn)
-
+	addr := &net.UDPAddr{IP: nodeIP(idx), Port: 30303}
 	// A leveldb per node grows without bound (4 MiB memtable each, peer keys
 	// rewritten on every revalidation); the in-memory table does not.
 	db := enode.OpenMemoryDB()
@@ -119,6 +114,94 @@ func spawnNode(sim *simnet.Simnet, settings simnet.NodeBiDiLinkSettings, idx int
 	ln.SetStaticIP(addr.IP)
 	ln.SetFallbackUDP(addr.Port)
 
+	h := &host{idx: idx, key: key, ln: ln, addr: addr, legacy: legacy, sim: sim, settings: settings, boot: boot, refresh: refreshInterval}
+	hostsMu.Lock()
+	hosts[idx] = h
+	hostsMu.Unlock()
+	disc := h.start()
+	rec := nodeRec{idx: idx, key: key, ln: ln, disc: disc, legacy: legacy}
+	registerNodeRec(rec)
+	return rec
+}
+
+// nodeAddrs, when set, draws addresses from the crawl model (population.addresses: crawl).
+var nodeAddrs *addrPool
+
+// nodeIP is the address node idx listens on and advertises. Public-style,
+// never LAN, so the IP-diversity defences run: by default 33.(idx/256).(idx%256).1,
+// one /24 per node; with the crawl pool, a /24 drawn from the node's topic.
+func nodeIP(idx int) net.IP {
+	if nodeAddrs != nil {
+		if ip := nodeAddrs.ip(idx); ip != nil {
+			return ip
+		}
+	}
+	return net.IP{33, byte(idx / 256), byte(idx % 256), 1}
+}
+
+// addrPool hands out /24 prefixes from the crawl model's histogram of the
+// node's topic, one host address per node within the /24 (254 per /24,
+// then another draw), so nodes share prefixes as the crawled network does.
+type addrPool struct {
+	model   *churn.Model
+	k       int
+	seed    int64
+	topicOf func(idx int) int // -1 when unknown
+
+	mu   sync.Mutex
+	used map[uint32]int // hosts handed out per /24
+	hint map[int]int    // topic reserved for an index before its spawn (churn joins)
+	n    int
+}
+
+func newAddrPool(m *churn.Model, k int, seed int64, topicOf func(int) int) *addrPool {
+	return &addrPool{model: m, k: k, seed: seed, topicOf: topicOf, used: map[uint32]int{}, hint: map[int]int{}}
+}
+
+// reserve records the topic of a node that joins later, so its address is
+// drawn from that topic's prefixes.
+func (p *addrPool) reserve(idx, topic int) {
+	p.mu.Lock()
+	p.hint[idx] = topic
+	p.mu.Unlock()
+}
+
+func (p *addrPool) ip(idx int) net.IP {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	topic, ok := p.hint[idx]
+	if !ok {
+		topic = p.topicOf(idx)
+	}
+	rng := rand.New(rand.NewSource(p.seed*7919 + int64(idx)))
+	for try := 0; try < 64; try++ {
+		prefix := p.model.DrawPrefix(rng, topic, p.k)
+		if prefix == 0 {
+			return nil
+		}
+		if p.used[prefix] >= 254 {
+			continue
+		}
+		p.used[prefix]++
+		p.n++
+		return net.IP{byte(prefix >> 16), byte(prefix >> 8), byte(prefix), byte(p.used[prefix])}
+	}
+	return nil
+}
+
+// summary: nodes placed, distinct /24s, and the largest /24.
+func (p *addrPool) summary() (nodes, prefixes, largest int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, n := range p.used {
+		if n > largest {
+			largest = n
+		}
+	}
+	return p.n, len(p.used), largest
+}
+
+func discoveryConfig(key *ecdsa.PrivateKey, boot []*enode.Node, refreshInterval time.Duration) discover.Config {
 	cfg := discover.Config{PrivateKey: key}
 	if refreshInterval > 0 {
 		cfg.RefreshInterval = refreshInterval
@@ -147,17 +230,8 @@ func spawnNode(sim *simnet.Simnet, settings simnet.NodeBiDiLinkSettings, idx int
 	cfg.Topic.RegBucketSize = nodeTopic.RegBucketSize
 	cfg.Topic.RegBucketStandbyLimit = nodeTopic.RegBucketStandby
 	cfg.Topic.SearchYieldFloor = nodeTopic.SearchYieldFloor
-
-	disc, err := discover.ListenV5(conn, ln, cfg)
-	if err != nil {
-		fatalf("listen v5 on node %d: %v", idx, err)
-	}
-	if legacy {
-		ln.Delete(new(topicindex.TopicDiscovery))
-	}
-	rec := nodeRec{idx: idx, key: key, ln: ln, disc: disc, legacy: legacy}
-	registerNodeRec(rec)
-	return rec
+	cfg.Topic.SearchAuxRadius = nodeTopic.SearchAuxRadius
+	return cfg
 }
 
 func spawnNodes(sim *simnet.Simnet, settings simnet.NodeBiDiLinkSettings, count int, legacySet map[int]bool, maxBootnodes int, spawnDelay time.Duration, refreshInterval time.Duration, adLifetime time.Duration) []nodeRec {

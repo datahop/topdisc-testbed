@@ -148,10 +148,20 @@ func (o *overheadSeries) sample(start time.Time) {
 		Nodes:        make([]int, overheadBuckets),
 		CacheByTopic: make(map[string]int64),
 	}
+	// A restarted node has one endpoint per instance; its counters add up.
+	type counters struct{ txBytes, rxBytes, txPkts, rxPkts int64 }
 	connRegistryMu.Lock()
-	byIdx := make(map[int]*simUDPConn, len(connRegistry))
+	byIdx := make(map[int]*counters, len(connRegistry))
 	for _, c := range connRegistry {
-		byIdx[c.idx] = c
+		k := byIdx[c.idx]
+		if k == nil {
+			k = &counters{}
+			byIdx[c.idx] = k
+		}
+		k.txBytes += c.txBytes.Load()
+		k.rxBytes += c.rxBytes.Load()
+		k.txPkts += c.txPkts.Load()
+		k.rxPkts += c.rxPkts.Load()
 	}
 	connRegistryMu.Unlock()
 
@@ -163,20 +173,28 @@ func (o *overheadSeries) sample(start time.Time) {
 		s.numNodes++
 		s.Nodes[b]++
 		if c := byIdx[nr.idx]; c != nil {
-			s.TxBytes[b] += c.txBytes.Load()
-			s.RxBytes[b] += c.rxBytes.Load()
-			s.TxMsgs[b] += c.txPkts.Load()
-			s.RxMsgs[b] += c.rxPkts.Load()
+			s.TxBytes[b] += c.txBytes
+			s.RxBytes[b] += c.rxBytes
+			s.TxMsgs[b] += c.txPkts
+			s.RxMsgs[b] += c.rxPkts
 		}
-		if cacheSample {
-			held, capacity, byTopic := nr.disc.TopicCacheOccupancy()
+		h := hostOf(nr.idx)
+		live := currentDisc(nr.idx)
+		if cacheSample && live != nil {
+			held, capacity, byTopic := live.TopicCacheOccupancy()
 			s.CacheHeld += int64(held)
 			s.CacheCap += int64(capacity)
 			for t, n := range byTopic {
 				s.CacheByTopic[t.String()] += int64(n)
 			}
 		}
-		for name, wc := range nr.disc.WireStats() {
+		var wireNow map[string]discover.WireCounter
+		if h != nil {
+			wireNow, _, _ = h.stats()
+		} else if nr.disc != nil {
+			wireNow = nr.disc.WireStats()
+		}
+		for name, wc := range wireNow {
 			bw := s.ByType[name]
 			if bw == nil {
 				bw = newBucketedWireSample()
