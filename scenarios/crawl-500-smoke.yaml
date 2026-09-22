@@ -1,0 +1,38 @@
+# Smoke test of the crawl-driven topics and churn: 500 nodes, the 8 largest
+# chains, a 10-minute search window standing for 24 real hours (time
+# compressed 144x), so every churn event of a day happens in the run.
+name: crawl-500-smoke
+scenario:
+  population:
+    nodes: 500
+    topics: 8
+    topic_model: models/crawl-2026-09-18.json
+    seed: 1
+  network:
+    latency_ms: 30
+    bandwidth_mibps: 1000
+  phases:
+    bootstrap_wait: 45s
+    register_wait: 90s
+    register_stagger: 5ms
+    search_stagger: 2ms
+    search_timeout: 10m
+  topic:
+    ad_cache_size: 5000
+  search:
+    model: continuous
+  session_churn:
+    enabled: true
+    model: models/crawl-2026-09-18.json
+    window_real_hours: 24
+testbed:
+  simulator:
+    link_buf: 8192
+    router_buf: 32768
+    router_shards: 16
+  traces:
+    metrics: metrics.json
+    overhead: oh.json
+    overhead_series: series.json
+    overhead_series_period: 30s
+    checkpoint_interval: 60s

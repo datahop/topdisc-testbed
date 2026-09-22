@@ -29,12 +29,20 @@ S3 prefix: `s3://datahop-testbed-data/crawl/2026-09-18/` (public read).
 
 ### What is in it
 
-- 200,653 records seen; 29,184 nodes answered at least once (15 %); ~25.4k
-  answering at any moment. 71 % of the never-answering records share an IP
-  with other records (NATs and rotating identities); the rest are stale.
-- 2,064 chain identifiers in records, 453 with at least one answering node,
-  22 with ≥100, 5 with ≥1000. The top 5 hold 68 % of the answering nodes,
-  the top 25 88 %.
+- 29,184 nodes answered at least once; ~25.4k answering at any moment. Every
+  count, share and rate in the dataset's derived files and in the model is
+  over these nodes. (The crawl also saw 200,653 records that never answered:
+  NATed nodes, stale records and rotated identities; 71 % of them share an
+  IP with another record. They are kept in `nodes.csv` for the reachability
+  comparison only.)
+- 455 chains with at least one answering node: 5 with ≥1000 nodes (68 % of
+  the nodes), 22 with ≥100 (88 %), 110 with ≥10 (97 %); the remaining 345
+  chains hold 869 nodes.
+- A node is its discv5 ID. 19 % of the permanent leaves (673 of 3,513) are
+  followed within 2 h by a new ID answering at the same IP:port (median 23
+  min): restarts with a rotated key, counted as a leave plus an arrival, as
+  the protocol sees them. `sessions.py --merge-endpoint` chains them into one
+  node for machine-level sessions.
 - Population is stationary: 25,076 answering nodes at the start, 25,671 at
   the end; 94 % of the initial nodes still up after 24 h; joins 0.40 %/h,
   permanent leaves 0.50 %/h of the live set (30-min gap).

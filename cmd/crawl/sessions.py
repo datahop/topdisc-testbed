@@ -40,12 +40,14 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--initial", type=float, default=15.0, help="minutes: seen before this counts as initially present")
     ap.add_argument("--down-after", type=float, default=10.0, help="minutes without an answer that end a session")
+    ap.add_argument("--merge-endpoint", type=float, default=0, help="minutes: a node whose last session ended is the same node as one first answering at the same ip:port within this time (key rotation); 0 = nodes are ids")
     args = ap.parse_args()
     gap = args.down_after * 60
     out = args.out or os.path.dirname(os.path.abspath(args.events))
 
     nodes, enr_changes, sessions, open_at, sweeps = {}, [], [], {}, []
     last_pong, have_pongs = {}, False
+    endpoint = {}
     t0 = None
     with open(args.events) as f:
         for line in f:
@@ -58,6 +60,7 @@ def main():
             if ev == "seen":
                 nodes[nid] = {"id": nid, "chain": chain_of(o), "first_seen": rel, "keys": " ".join(o.get("keys") or []),
                               "ip": o.get("ip", ""), "src": o.get("src", "")}
+                endpoint[nid] = (o.get("ip", ""), o.get("udp", 0))
             elif ev == "enr":
                 n = nodes.get(nid)
                 new = chain_of(o)
@@ -86,6 +89,29 @@ def main():
             sessions.append({"id": nid, "start": start, "end": last_pong[nid]})
         else:
             sessions.append({"id": nid, "start": start, "end": ""})
+    if args.merge_endpoint > 0:
+        # Chain a node whose last session ended to the next id that first
+        # answered at the same endpoint within the window: one machine.
+        by_ep = collections.defaultdict(list)
+        first = {}
+        for s in sessions:
+            first.setdefault(s["id"], s["start"])
+        for nid, t in first.items():
+            by_ep[endpoint.get(nid)].append((t, nid))
+        last_end = {}
+        for s in sessions:
+            last_end[s["id"]] = s["end"] if s["end"] not in (None, "") else float("inf")
+        alias = {}
+        for ep, lst in by_ep.items():
+            if not ep or not ep[0]:
+                continue
+            lst.sort()
+            for (t_a, a), (t_b, b) in zip(lst, lst[1:]):
+                if last_end[a] != float("inf") and 0 <= t_b - last_end[a] <= args.merge_endpoint * 60:
+                    alias[b] = alias.get(a, a)
+        for s in sessions:
+            s["id"] = alias.get(s["id"], s["id"])
+        print(f"merged {len(alias)} rotated ids into their predecessors")
     sessions.sort(key=lambda s: (s["id"], s["start"]))
     idx = collections.Counter()
     for s in sessions:

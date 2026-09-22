@@ -72,6 +72,24 @@ is the silence that ends a session, applied to the raw `pong` events:
 Times are seconds since the first event. Arrival precision is one crawl
 sweep (minutes); leave and rejoin precision is the probe period.
 
+## Model for scenarios
+
+```
+python3 cmd/crawl/model.py data/crawl/2026-09-18/derived/gap30/sessions.csv --span 24 --cadence 2 \
+    --names names.json --out scenarios/models/crawl-2026-09-18.json
+testbed preview scenarios/crawl-5k-24h.yaml
+```
+
+`model.py` fits, per chain with at least `--min-alive` nodes (the rest folded
+into `other`) and globally: the share of live nodes, the fraction present at
+the start, the fraction of those that never leave, the survival of a first
+session and of a session after a return (Kaplan-Meier at the probe cadence),
+the lengths of absences that ended in a return, the share of departures that
+never returned, and the arrival, return and permanent-leave rates. A scenario
+uses it through `population.topic_model` (topics drawn by share) and
+`session_churn.model` (each node churns by its topic's fit); `testbed preview`
+shows what a given node count and window produce next to the crawl's rates.
+
 ## Host
 
 Run it from a host with a public IP and no NAT in front. A home router's
