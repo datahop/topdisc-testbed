@@ -3,7 +3,7 @@
 # per node in each of L = 6 intervals of a 60-minute search phase. Protocol
 # parameters follow the plan (K_lookup 5, F_return 10); the code defaults are
 # 16/16, see #12. On Grid'5000 the star model emulates the plan's 8-91 ms pair
-# RTT and 20 KB/s per node; for AWS swap the testbed block for aws-10k's, the
+# RTT; the per-node cap is 1 Mbit/s, not the plan's 20 KB/s; for AWS swap the testbed block for aws-10k's, the
 # regions are then real and the star model is ignored.
 # Grid'5000: one hostagent per kadeployed machine, vnodes_per_machine node
 # processes in their own network namespaces (netns + netem, testbed.wan), no
@@ -54,4 +54,4 @@ testbed:
     enabled: true
     delay_min_ms: 4
     delay_max_ms: 45
-    rate_kbps: 160
+    rate_kbps: 1000

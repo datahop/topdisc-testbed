@@ -27,4 +27,4 @@ testbed:
     vnodes_per_machine: 5
   wan:
     enabled: true
-    rate_kbps: 160
+    rate_kbps: 1000

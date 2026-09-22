@@ -44,4 +44,4 @@ testbed:
     walltime: "06:00:00"
   wan:
     enabled: true
-    rate_kbps: 160
+    rate_kbps: 1000
