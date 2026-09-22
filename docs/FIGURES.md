@@ -26,7 +26,7 @@ per-run report.
 |---|---|
 | Scenario | Parameters (unset protocol parameters shown with their fork default), topic assignment table, actual search duration when stopped early |
 | 1. Registration and cache | Coverage and registration-latency tables; `06`, `04`, `04b`, `07_registration_latency_bar`, `07_placement_time_idspace`, `oh_05`, `oh_08` |
-| 2. Discovery | Per-topic search results, find counts, scheduled lookups, final coverage, search provenance, search progress (with a re-walk flag); `02`, `03_time_to_fraction`, `11_discovery_rate` (continuous and conn runs), `02b`, `08`, `09`, `05`, `oh_06` |
+| 2. Discovery | Per-topic search results, find counts, scheduled lookups, final coverage, search provenance, search progress (with a re-walk flag); `02`, `03_time_to_fraction`, `11_discovery_rate` (continuous and conn runs), `12_search_bucket`, `02b`, `08`, `09`, `05`, `oh_06` |
 | 3. Overhead and load | `oh_01`, `oh_03`, `oh_10`, `oh_02`, `oh_04`, `oh_07`, `oh_09`, `oh_11` and the load summary table |
 | 4. Peer connections | Connection-model table (only when the run models peer slots) |
 | 5. Churn | Dead-result and churn tables, `10_dead_results` (only churn runs) |
@@ -225,6 +225,7 @@ Python simulator (#123, #124).
 |---|---|
 | `02b_time_to_first_cdf` | Time to the first result, per topic |
 | `11_discovery_rate` | New registrants per searcher per minute over time, per topic, for long-lived searches (continuous, conn): shows how fast discovery decays and when a topic runs out of new registrants |
+| `12_search_bucket` | Share of TOPICQUERY requests per search-table bucket (0 = farthest from the topic), per topic or topic pool, and for adaptive searches (`search_yield_floor` > 0) the median active bucket over search time: where each topic's searches settle |
 | `oh_02_idspace_peak_rate`, `oh_04_idspace_peak_msgtype` | Peak sustained rate per node, total and by type |
 | `oh_09_cost_per_lookup` | To be replaced by a per-topic cost (see load) |
 | `cmp_01`–`cmp_13` (`compare_runs.py`) | Same scenario on two backends: lookups, discovery, registration, cache, registrar load, traffic, load vs distance |

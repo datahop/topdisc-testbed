@@ -19,6 +19,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
+from figures import topic_groups  # noqa: E402
+
 STYLES = ["-", "--", ":", "-."]
 REG = ("REGTOPIC/v5", "REGTOPIC(renewal)/v5", "REGCONFIRMATION/v5")
 LOOKUP = ("TOPICQUERY/v5", "TOPICNODES/v5")
@@ -145,26 +147,27 @@ def main():
         save(fig, args.out, "cmp_02_time_to_first")
         figs.append(("cmp_02_time_to_first", "Time from the start of a searcher's search to its first result."))
 
-    topics = sorted({x["topic"] for r in runs for x in r.results})
-    fig, axes = plt.subplots(1, len(topics), figsize=(3.4 * len(topics), 3.8), sharey=True, squeeze=False, constrained_layout=True)
-    for ax, t in zip(axes[0], topics):
+    # Topic rows: one per topic, or pools by registrant count when the run has
+    # many topics (figures.topic_groups); the first run's topic list applies.
+    groups = topic_groups(runs[0].m.get("perTopic") or [])
+    fig, axes = plt.subplots(1, len(groups), figsize=(3.6 * len(groups), 3.8), sharey=True, squeeze=False, constrained_layout=True)
+    for ax, (name, ts, _, _) in zip(axes[0], groups):
         for i, r in enumerate(runs):
-            rs = [x for x in r.results if x["topic"] == t]
+            rs = [x for x in r.results if x["topic"] in ts]
             if not rs:
                 continue
-            target = max(rs[0].get("target") or 1, 1)
-            end = max((ts[-1] for x in rs for ts in [x.get("uniqueFoundAtMs") or [0]]), default=0)
+            end = max((ts_[-1] for x in rs for ts_ in [x.get("uniqueFoundAtMs") or [0]]), default=0)
             grid = np.linspace(0, max(end, 1), 200)
-            curves = [np.searchsorted(np.sort(x.get("uniqueFoundAtMs") or []), grid, side="right") / target for x in rs]
+            curves = [np.searchsorted(np.sort(x.get("uniqueFoundAtMs") or []), grid, side="right") / max(x.get("target") or 1, 1) for x in rs]
             ax.plot(grid / 1000.0, np.median(np.vstack(curves), axis=0), ls=STYLES[i % 4], lw=1.8, label=r.label)
-        ax.set_title(f"topic {t}")
+        ax.set_title(name.replace(", ", "\n"), fontsize=9)
         ax.set_xlabel("search time (s)")
         ax.grid(alpha=0.3)
     axes[0][0].set_ylabel("registrants found (median share)")
     axes[0][0].legend(fontsize=8, loc="lower right")
     fig.suptitle("Share of the topic's registrants found over time")
     save(fig, args.out, "cmp_03_found_over_time")
-    figs.append(("cmp_03_found_over_time", "Median share of the topic's registrants each searcher had found, by topic."))
+    figs.append(("cmp_03_found_over_time", "Median share of its topic's registrants each searcher had found, by topic or topic pool."))
 
     # Registration.
     fig, (ax_f, ax_q, ax_a) = plt.subplots(1, 3, figsize=(17, 4.6), constrained_layout=True)
@@ -218,15 +221,13 @@ def main():
     save(fig, args.out, "cmp_06_msgtype_share")
     figs.append(("cmp_06_msgtype_share", "Share of all bytes sent, by message type."))
 
-    topics = sorted({x["topic"] for r in runs for x in r.results})
-
     def per_topic_panels(stem, title, xlabel, values, caption, logx=False):
-        fig, axes = plt.subplots(1, len(topics), figsize=(3.4 * len(topics), 3.8), sharey=True, squeeze=False, constrained_layout=True)
-        for ax, t in zip(axes[0], topics):
+        fig, axes = plt.subplots(1, len(groups), figsize=(3.6 * len(groups), 3.8), sharey=True, squeeze=False, constrained_layout=True)
+        for ax, (name, ts, _, _) in zip(axes[0], groups):
             for i, r in enumerate(runs):
-                v = values(r, t)
+                v = [x for t in ts for x in values(r, t)]
                 cdf(ax, v, ls=STYLES[i % 4], lw=1.8, label=f"{r.label} ({pct(v, 50):.2f})" if v else r.label)
-            ax.set_title(f"topic {t}")
+            ax.set_title(name.replace(", ", "\n"), fontsize=9)
             ax.set_xlabel(xlabel)
             ax.set_ylim(0, 1)
             if logx:
@@ -252,7 +253,7 @@ def main():
                 out += x.get(key) or []
         return out
 
-    per_topic_panels("cmp_07_lookup_latency_by_topic", "Lookup latency by topic (topic 0 most popular)", "latency (s)",
+    per_topic_panels("cmp_07_lookup_latency_by_topic", "Lookup latency by topic", "latency (s)",
                      lambda r, t: topic_lookups(r, t, "latency"),
                      "Lookup latency to F_lookup per topic; the legend gives the median in seconds.")
     per_topic_panels("cmp_08_contacts_by_topic", "Distinct nodes contacted per lookup, by topic", "nodes contacted",
@@ -305,7 +306,8 @@ def main():
         out = []
         for n in r.oh:
             tl = n.get("topicLoad") or {}
-            out.append(sum((l.get("regtopic") or {}).get(key, 0) + (l.get("topicQuery") or {}).get(key, 0) for l in tl.values()))
+            # Search side only: registration is the same on both sides of a search A/B.
+            out.append(sum((l.get("topicQuery") or {}).get(key, 0) for l in tl.values()))
         return [v for v in out if v > 0]
 
     fig, (ax_q, ax_b) = plt.subplots(1, 2, figsize=(13, 4.6), constrained_layout=True)
@@ -313,16 +315,16 @@ def main():
         q, b = registrar_load(r, "rxMsgs"), [v / 1e3 for v in registrar_load(r, "txBytes")]
         cdf(ax_q, q, ls=STYLES[i % 4], lw=1.8, label=f"{r.label} (median {pct(q, 50):.0f}, max {max(q) if q else 0:.0f})")
         cdf(ax_b, b, ls=STYLES[i % 4], lw=1.8, label=f"{r.label} (median {pct(b, 50):.0f} kB)")
-    for ax, xl in ((ax_q, "REGTOPIC + TOPICQUERY requests received per registrar"), (ax_b, "reply bytes sent per registrar (kB)")):
+    for ax, xl in ((ax_q, "TOPICQUERY requests received per registrar"), (ax_b, "TOPICNODES bytes sent per registrar (kB)")):
         ax.set_xscale("log")
         ax.set_xlabel(xl)
         ax.set_ylabel("CDF over registrars")
         ax.set_ylim(0, 1)
         ax.grid(alpha=0.3, which="both")
         ax.legend(fontsize=9, loc="lower right")
-    fig.suptitle("Registrar load: requests served and reply bytes")
+    fig.suptitle("Registrar load from searches: TOPICQUERY served and TOPICNODES bytes")
     save(fig, args.out, "cmp_11_registrar_load")
-    figs.append(("cmp_11_registrar_load", "Topic requests each node received as a registrar, all topics, and the bytes of its replies."))
+    figs.append(("cmp_11_registrar_load", "Search requests (TOPICQUERY) each node received as a registrar, all topics, and the bytes of its TOPICNODES replies. Registration traffic is left out: it is the same on both sides of a search A/B."))
 
     def by_types(r, types):
         return [sum((n.get("byType") or {}).get(t, {}).get("txBytes", 0) + (n.get("byType") or {}).get(t, {}).get("rxBytes", 0) for t in types) / 1e6 for n in r.oh]
@@ -369,6 +371,50 @@ def main():
     save(fig, args.out, "cmp_13_load_vs_distance")
     figs.append(("cmp_13_load_vs_distance", "Median bytes received and sent per node against its distance to the closest topic ID."))
 
+    # Search traffic per node: the two messages the search itself sends and
+    # receives, next to the node's total traffic (cmp_05), so a search change
+    # can be judged on its own bytes and on the whole.
+    def by_type_node(r, t):
+        return [((n.get("byType") or {}).get(t, {}).get("txBytes", 0) + (n.get("byType") or {}).get(t, {}).get("rxBytes", 0)) / 1e6 for n in r.oh]
+
+    fig, (ax_q, ax_n) = plt.subplots(1, 2, figsize=(13, 4.6), constrained_layout=True)
+    for i, r in enumerate(runs):
+        q, nn = by_type_node(r, "TOPICQUERY/v5"), by_type_node(r, "TOPICNODES/v5")
+        cdf(ax_q, [v for v in q if v > 0], ls=STYLES[i % 4], lw=1.8, label=f"{r.label} (median {pct(q, 50):.2f} MB, p99 {pct(q, 99):.1f} MB)")
+        cdf(ax_n, [v for v in nn if v > 0], ls=STYLES[i % 4], lw=1.8, label=f"{r.label} (median {pct(nn, 50):.2f} MB, p99 {pct(nn, 99):.1f} MB)")
+    for ax, xl in ((ax_q, "TOPICQUERY bytes per node, sent + received (MB)"), (ax_n, "TOPICNODES bytes per node, sent + received (MB)")):
+        ax.set_xscale("log")
+        ax.set_xlabel(xl)
+        ax.set_ylabel("CDF over nodes")
+        ax.set_ylim(0, 1)
+        ax.grid(alpha=0.3, which="both")
+        ax.legend(fontsize=9, loc="lower right")
+    fig.suptitle("Search traffic per node: queries and ad replies")
+    save(fig, args.out, "cmp_15_search_bytes_per_node")
+    figs.append(("cmp_15_search_bytes_per_node", "Bytes of TOPICQUERY and of TOPICNODES per node, sent plus received, over the whole run. Compare with cmp_05 for the node's total traffic."))
+
+    # Where searches query, per group.
+    depth = max((len((x.get("searchStats") or {}).get("queriesByBucket") or []) for r in runs for x in r.results), default=0)
+    if depth:
+        fig, axes = plt.subplots(1, len(groups), figsize=(3.6 * len(groups), 3.8), sharey=True, squeeze=False, constrained_layout=True)
+        for ax, (name, ts, _, _) in zip(axes[0], groups):
+            for i, r in enumerate(runs):
+                counts = np.zeros(depth)
+                for x in r.results:
+                    if x["topic"] in ts:
+                        q = (x.get("searchStats") or {}).get("queriesByBucket") or []
+                        counts[:len(q)] += q
+                if counts.sum():
+                    ax.plot(np.arange(depth), 100 * counts / counts.sum(), ls=STYLES[i % 4], marker="o", ms=3, lw=1.8, label=r.label)
+            ax.set_title(name.replace(", ", "\n"), fontsize=9)
+            ax.set_xlabel("bucket (0 = farthest)")
+            ax.grid(alpha=0.3)
+        axes[0][0].set_ylabel("share of TOPICQUERY (%)")
+        axes[0][0].legend(fontsize=8)
+        fig.suptitle("Where searches query, by search-table bucket")
+        save(fig, args.out, "cmp_14_query_buckets")
+        figs.append(("cmp_14_query_buckets", "Share of TOPICQUERY requests per search-table bucket, 0 the farthest from the topic, by topic or topic pool."))
+
     # Summary table.
     rows = []
 
@@ -390,7 +436,7 @@ def main():
         v = [(ns - start.get(rid, 0)) / 1e9 for regs in (r.m.get("registrationTimingNs") or {}).values() for rid, ns in regs.items()]
         return [x for x in v if x >= 0]
     row("time to first admission p50 (s)", lambda v: f"{v:.1f}", [pct(first_adm(r), 50) for r in runs])
-    row("requests per registrar p50 / p99 / max", lambda v: f"{v[0]:.0f} / {v[1]:.0f} / {v[2]:.0f}",
+    row("search requests (TOPICQUERY) per registrar p50 / p99 / max", lambda v: f"{v[0]:.0f} / {v[1]:.0f} / {v[2]:.0f}",
         [(pct(q, 50), pct(q, 99), max(q) if q else float("nan")) for q in [registrar_load(r, "rxMsgs") for r in runs]])
     row("fan-out p50 (registrars per registrant)", lambda v: f"{v:.0f}", [pct(r.fanout(), 50) for r in runs])
     row("quoted wait p50 (s)", lambda v: f"{v:.0f}", [pct(r.waits("quotedMs"), 50) for r in runs])

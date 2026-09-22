@@ -21,6 +21,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
+from figures import TOPIC_LINES, topic_groups  # noqa: E402
+
 DPI = 130
 
 
@@ -33,6 +35,25 @@ def save(fig, out, stem):
     for ext in ("png", "pdf"):
         fig.savefig(os.path.join(out, f"{stem}.{ext}"), dpi=DPI, bbox_inches="tight")
     plt.close(fig)
+
+
+def topic_rows(groups, tmap, hexes):
+    """Rows for figures keyed by topic hex: (name, hexes, colour, linewidth).
+
+    With groups from figures.topic_groups the rows are the topic pools; without
+    them, or for hexes the metrics do not map, one row per topic hex.
+    """
+    tmap = tmap or {}
+    if groups:
+        by_idx = {}
+        for h in hexes:
+            if h in tmap:
+                by_idx.setdefault(tmap[h], []).append(h)
+        return [(name, [h for t in ts for h in by_idx.get(t, [])], colour, lw)
+                for name, ts, colour, lw in groups
+                if any(t in by_idx for t in ts)]
+    return [(f"topic {tmap[h]}" if h in tmap else f"topic {h[:10]}", [h],
+             plt.cm.tab10((tmap.get(h, i)) % 10), 1.5) for i, h in enumerate(hexes)]
 
 
 def rates(samples, key, nbuckets):
@@ -150,35 +171,34 @@ def plot_idspace_peak_msgtype(samples, out, label, tpos=None, window=3):
     save(fig, out, "oh_04_idspace_peak_msgtype")
 
 
-def plot_load_vs_topic_distance(nodes, metrics, out, label):
+def plot_load_vs_topic_distance(nodes, metrics, out, label, groups=None):
     """Per-node load against log-distance to the topic ID, received and sent.
 
     Distance is discv5's log2 XOR distance, so bucket 256 is the far half of
     the keyspace and small numbers are the neighbourhood that stores the
     topic's ads. Received and sent are separate panels because registrars near
-    a topic mostly answer, so their load shows on the sent side.
+    a topic mostly answer, so their load shows on the sent side. For a pool of
+    topics the distance is to the nearest topic of the pool.
     """
     tmap = topic_index_map(metrics)
     if not tmap or not nodes:
         return
     topic_ids = {idx: int(h, 16) for h, idx in tmap.items()}
+    rows = groups or [(f"topic {t}", [t], plt.cm.tab10(t % 10), 1.5) for t in sorted(topic_ids)]
+    ids = [(int(n["id"], 16), n) for n in nodes if n.get("id")]
     fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True, constrained_layout=True)
     plotted = False
     for ax, key, what in ((axes[0], "rxBytes", "received"), (axes[1], "txBytes", "sent")):
-        for t, tid in sorted(topic_ids.items()):
-            xs, ys = [], []
-            for n in nodes:
-                nid = n.get("id")
-                if not nid:
-                    continue
-                xs.append((int(nid, 16) ^ tid).bit_length())  # 0 = identical, 256 = farthest
-                ys.append(n.get(key, 0) / 1e6)
-            if not xs:
+        for name, ts, colour, lw in rows:
+            tids = [topic_ids[t] for t in ts if t in topic_ids]
+            if not tids or not ids:
                 continue
-            xs, ys = np.asarray(xs), np.asarray(ys)
+            # 0 = identical, 256 = farthest
+            xs = np.asarray([min((nid ^ tid).bit_length() for tid in tids) for nid, _ in ids])
+            ys = np.asarray([n.get(key, 0) / 1e6 for _, n in ids])
             buckets = sorted(set(xs.tolist()))
             ax.plot(buckets, [float(np.median(ys[xs == b])) for b in buckets], marker="o", ms=3,
-                    linewidth=1.5, color=plt.cm.tab10(t % 10), label=f"topic {t} (median)")
+                    linewidth=lw, color=colour, label=f"{name} (median)")
             plotted = True
         ax.set_ylabel(f"{what} per node (MB)")
         ax.set_title(what.capitalize())
@@ -187,7 +207,8 @@ def plot_load_vs_topic_distance(nodes, metrics, out, label):
     if not plotted:
         plt.close(fig)
         return
-    axes[1].set_xlabel("log2 XOR distance from node to topic ID (smaller = closer)")
+    axes[1].set_xlabel("log2 XOR distance from node to the topic ID (smaller = closer)"
+                       + ("; nearest topic of the pool" if any(len(ts) > 1 for _, ts, _, _ in rows) else ""))
     fig.suptitle(f"{label}: does load depend on distance to the topic?")
     save(fig, out, "oh_07_load_vs_topic_distance")
 
@@ -201,12 +222,12 @@ REG_TYPES = ("REGTOPIC/v5", "REGTOPIC(renewal)/v5", "REGCONFIRMATION/v5")
 LOOKUP_TYPES = ("TOPICQUERY/v5", "TOPICNODES/v5")
 
 
-def plot_cache_utilisation(samples, out, label):
+def plot_cache_utilisation(samples, out, label, tmap=None, groups=None):
     """Figure 1: ad-cache utilisation over time.
 
     The waiting-time function is driven by how full the ad cache is, so this is
     the state underlying every quoted wait. Plotted network-wide as a fill
-    fraction, with the per-topic share of occupied slots beneath it.
+    fraction, with the share of occupied slots per topic or topic pool beneath.
     """
     pts = [(s["tSec"], s.get("cacheHeld", 0), s.get("cacheCap", 0), s.get("cacheByTopic") or {})
            for s in samples if s.get("cacheCap")]
@@ -231,13 +252,14 @@ def plot_cache_utilisation(samples, out, label):
                 color="#57656E")
     ax.grid(alpha=0.3)
     ax.set_title(f"{label}: ad-cache utilisation over time")
-    for i, t in enumerate(topics):
-        ax2.plot(ts, [bt.get(t, 0) for _, _, _, bt in pts],
-                 color=plt.cm.tab10(i % 10), linewidth=1.5, label=f"topic {t[:10]}")
+    rows = topic_rows(groups, tmap, topics)
+    for name, hexes, colour, lw in rows:
+        ax2.plot(ts, [sum(bt.get(h, 0) for h in hexes) for _, _, _, bt in pts],
+                 color=colour, linewidth=lw, label=name)
     ax2.set_xlabel("time since spawn (s)")
     ax2.set_ylabel("ads held (network-wide)")
     ax2.grid(alpha=0.3)
-    if topics:
+    if rows:
         ax2.legend(fontsize=8, ncol=2)
     save(fig, out, "oh_08_cache_utilisation")
 
@@ -276,6 +298,8 @@ def plot_cost_per_lookup(nodes, metrics, out, label):
     ax2 = ax.twinx()
     ax2.plot([str(t) for t in sorted(sizes)], per_b, color="tab:red", marker="o",
              linewidth=1.8, label=f"lookup traffic per searcher ({per_b[0]:.1f} kB)")
+    if len(xs) > TOPIC_LINES:
+        ax.set_xticks(range(0, len(xs), max(1, len(xs) // 10)))
     ax.set_xlabel("topic")
     ax.set_ylabel("searchers on topic")
     ax2.set_ylabel("lookup kB per searcher")
@@ -406,25 +430,24 @@ def plot_idspace_msgtype(nodes, out, label, tpos=None):
     save(fig, out, "oh_03_idspace_msgtype")
 
 
-def plot_wait_times(waits, out, label, tmap=None):
+def plot_wait_times(waits, out, label, tmap=None, groups=None):
     """(a) CDF of registrar-quoted waiting times; (b) CDF of the total wait of
     every successful registration, from its first REGTOPIC to admission."""
     waits = [w for w in waits if w.get("quotedMs") or w.get("admittedMs")]
     if not waits:
         return
     tmap = tmap or {}
-
-    def name(w):
-        return f"topic {tmap[w['topic']]}" if w["topic"] in tmap else w["topic"][:10]
+    by_hex = {w["topic"]: w for w in waits}
+    rows = topic_rows(groups, tmap, sorted(by_hex, key=lambda h: (tmap.get(h, 1 << 30), h)))
 
     fig, (ax_q, ax_a) = plt.subplots(1, 2, figsize=(14, 4.6), constrained_layout=True)
-    for w in sorted(waits, key=lambda w: (tmap.get(w["topic"], 1 << 30), w["topic"])):
-        color = plt.cm.tab10(tmap[w["topic"]] % 10) if w["topic"] in tmap else None
+    for name, hexes, colour, lw in rows:
         for ax, key in ((ax_q, "quotedMs"), (ax_a, "admittedMs")):
-            v = np.sort(np.array(w.get(key) or [], dtype=float)) / 1000.0
+            v = np.sort(np.array([x for h in hexes for x in (by_hex.get(h, {}).get(key) or [])],
+                                 dtype=float)) / 1000.0
             if v.size:
-                ax.plot(v, np.arange(1, v.size + 1) / v.size, color=color,
-                        label=f"{name(w)} (n={v.size}, median {np.median(v):.0f}s)")
+                ax.plot(v, np.arange(1, v.size + 1) / v.size, color=colour, linewidth=lw,
+                        label=f"{name} (n={v.size}, median {np.median(v):.0f}s)")
     ax_q.set_xlabel("quoted wait time (s)")
     ax_q.set_ylabel("CDF over quotes")
     ax_q.set_title("Waiting times quoted by registrars")
@@ -438,6 +461,7 @@ def plot_wait_times(waits, out, label, tmap=None):
         ax.legend(fontsize=8, loc="lower right")
     fig.suptitle(f"{label}: registration waiting times")
     save(fig, out, "oh_05_wait_time_cdf")
+
 
 def topic_index_map(metrics):
     """Map a topic's hex ID to its topic index.
@@ -468,7 +492,7 @@ def topic_index_map(metrics):
     return out
 
 
-def plot_idspace_found_time(metrics, out, label):
+def plot_idspace_found_time(metrics, out, label, groups=None):
     """Per-registrant discovery latency across the ID space.
 
     Measured from when the registrant's ad was first admitted on a remote
@@ -480,7 +504,7 @@ def plot_idspace_found_time(metrics, out, label):
     that actually matters: how long an advertisement takes to become findable.
 
     Falls back to searcher-relative time when the registration probe produced
-    no timing data, and says so in the axis label.
+    no timing data, and says so in the axis label. One row per topic or pool.
     """
     results = metrics.get("results", [])
     per_topic = metrics.get("perTopic", [])
@@ -528,31 +552,32 @@ def plot_idspace_found_time(metrics, out, label):
     if not by_topic:
         return
 
-    topics = sorted(t["topic"] for t in per_topic) or sorted(by_topic)
+    rows = groups or [(f"topic {t}", [t], None, None)
+                      for t in (sorted(x["topic"] for x in per_topic) or sorted(by_topic))]
     fig, axes = plt.subplots(
-        len(topics), 1, figsize=(9, 2.4 * len(topics)), sharex=True, squeeze=False
+        len(rows), 1, figsize=(9, 2.4 * len(rows)), sharex=True, squeeze=False
     )
-    for ax, t in zip(axes[:, 0], topics):
-        found = by_topic.get(t, {})
-        admitted = list(cov.get(str(t), {}).get("byRegistrant", {}).keys())
-        short = {a[:16] for a in admitted}
-        xs, ys = [], []
-        for rid, lat in found.items():
-            xs.append(int(rid[:16], 16) / float(2**64))
-            ys.append(float(np.median(lat)))
+    for ax, (name, ts, _, _) in zip(axes[:, 0], rows):
+        xs, ys, missed = [], [], []
+        for t in ts:
+            found = by_topic.get(t, {})
+            short = {a[:16] for a in cov.get(str(t), {}).get("byRegistrant", {})}
+            for rid, lat in found.items():
+                xs.append(int(rid[:16], 16) / float(2**64))
+                ys.append(float(np.median(lat)))
+            missed += [m for m in short if m not in found]
         if xs:
             ax.scatter(xs, ys, s=10, alpha=0.6, color="tab:blue",
                        label="median over searchers that found it")
-        missed = [m for m in short if m not in found]
         if missed:
             top = max(ys) * 1.08 if ys else 1.0
             ax.scatter([int(m[:16], 16) / float(2**64) for m in missed],
                        [top] * len(missed), s=26, marker="x", color="#C2185B",
                        linewidths=1.3, label=f"never found ({len(missed)})")
-        if t in tpos:
-            ax.axvline(tpos[t], color="#7B1FA2", ls=":", linewidth=1.6, zorder=0,
-                       label=f"topic ID position ({tpos[t]:.3f})")
-        ax.set_ylabel(f"topic {t}\ntime (s)", fontsize=8)
+        if len(ts) == 1 and ts[0] in tpos:
+            ax.axvline(tpos[ts[0]], color="#7B1FA2", ls=":", linewidth=1.6, zorder=0,
+                       label=f"topic ID position ({tpos[ts[0]]:.3f})")
+        ax.set_ylabel(f"{name if len(ts) == 1 else name.replace(', ', chr(10))}\ntime (s)", fontsize=8)
         ax.set_ylim(bottom=0)  # a latency is never negative; keep autoscale from implying it
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=7, loc="lower right")
@@ -575,16 +600,17 @@ def _dist_stats(vals):
             "cv": float(v.std() / mean) if mean else 0.0}
 
 
-def plot_topic_load(nodes, metrics, out, label):
-    """Load distribution per topic, and its summary statistics.
+def plot_topic_load(nodes, metrics, out, label, groups=None):
+    """Load distribution per topic or topic pool, and its summary statistics.
 
-    Registrar side, from each node's per-topic request counters: REGTOPIC and
-    TOPICQUERY requests received for the topic, and the bytes of the replies
-    sent. Requester side, from each node's per-operation counters: the bytes
+    Registrar side, from each node's per-topic request counters: TOPICQUERY
+    requests received for the topic and the bytes of the TOPICNODES replies;
+    registration requests are left out so a search A/B compares only what
+    the search changes. Requester side, from each node's per-operation counters: the bytes
     its registration and search for its own topic sent and received. Writes
     load_summary.md with median, p95, p99, max and coefficient of variation,
     over all nodes for the registrar side and over the topic's members for
-    the requester side.
+    the requester side, per topic and per pool.
     """
     tmap = topic_index_map(metrics)
     if not nodes or not tmap or not any(n.get("topicLoad") or n.get("ops") for n in nodes):
@@ -598,21 +624,31 @@ def plot_topic_load(nodes, metrics, out, label):
         for hex_id, t in tmap.items():
             tl = load.get(hex_id) or {}
             rg, tq = tl.get("regtopic") or {}, tl.get("topicQuery") or {}
-            reqs[t].append(rg.get("rxMsgs", 0) + tq.get("rxMsgs", 0))
-            reply_kb[t].append((rg.get("txBytes", 0) + tq.get("txBytes", 0)) / 1e3)
+            reqs[t].append(tq.get("rxMsgs", 0))
+            reply_kb[t].append(tq.get("txBytes", 0) / 1e3)
         t = node_topic.get(n.get("idx"))
         if t is not None and n.get("ops"):
             member_kb[t].append(sum(o.get("txBytes", 0) + o.get("rxBytes", 0) for o in n["ops"]) / 1e3)
-    panels = (("requests received per registrar", reqs, "msgs"),
-              ("reply bytes sent per registrar", reply_kb, "kB"),
-              ("registration + lookup traffic per member", member_kb, "kB"))
+    rows = groups or [(f"topic {t}", [t], plt.cm.tab10(t % 10), 1.8) for t in sorted(reqs)]
+
+    def pool(data, ts, per_node):
+        # Registrar-side counters are per node and per topic: a pool's load on
+        # a node is the sum over its topics. Member-side values are per member.
+        if per_node:
+            cols = [data[t] for t in ts if t in data and data[t]]
+            return [sum(v) for v in zip(*cols)] if cols else []
+        return [v for t in ts for v in data.get(t, [])]
+
+    panels = (("TOPICQUERY received per registrar", reqs, "msgs", True),
+              ("TOPICNODES bytes sent per registrar", reply_kb, "kB", True),
+              ("registration + lookup traffic per member", member_kb, "kB", False))
     fig, axes = plt.subplots(1, 3, figsize=(17, 4.8), constrained_layout=True)
-    for ax, (what, data, unit) in zip(axes, panels):
-        for t in sorted(data):
-            v = np.sort([x for x in data[t] if x > 0])
+    for ax, (what, data, unit, per_node) in zip(axes, panels):
+        for name, ts, colour, lw in rows:
+            v = np.sort([x for x in pool(data, ts, per_node) if x > 0])
             if v.size:
-                ax.plot(v, np.arange(1, v.size + 1) / v.size, linewidth=1.8, color=plt.cm.tab10(t % 10),
-                        label=f"topic {t} ({v.size} nodes, median {np.median(v):.0f})")
+                ax.plot(v, np.arange(1, v.size + 1) / v.size, linewidth=lw, color=colour,
+                        label=f"{name} ({v.size} nodes, median {np.median(v):.0f})")
         ax.set_xscale("log")
         ax.set_xlabel(f"{what} ({unit})")
         ax.set_ylim(0, 1)
@@ -622,21 +658,27 @@ def plot_topic_load(nodes, metrics, out, label):
     fig.suptitle(f"{label}: load distribution per topic")
     save(fig, out, "oh_11_topic_load")
 
-    rows = []
-    for what, data, unit in panels:
+    lines = []
+    for what, data, unit, per_node in panels:
+        for name, ts, _, _ in rows:
+            if len(ts) > 1:
+                st = _dist_stats(pool(data, ts, per_node))
+                if st:
+                    lines.append(f"| {what} | {name} | {unit} | {st['n']} | {st['median']:.1f} | {st['p95']:.1f} | "
+                                 f"{st['p99']:.1f} | {st['max']:.1f} | {st['cv']:.2f} |")
         for t in sorted(data):
             st = _dist_stats(data[t])
             if st:
-                rows.append(f"| {what} | {t} | {unit} | {st['n']} | {st['median']:.1f} | {st['p95']:.1f} | "
-                            f"{st['p99']:.1f} | {st['max']:.1f} | {st['cv']:.2f} |")
+                lines.append(f"| {what} | {t} | {unit} | {st['n']} | {st['median']:.1f} | {st['p95']:.1f} | "
+                             f"{st['p99']:.1f} | {st['max']:.1f} | {st['cv']:.2f} |")
     tot = _dist_stats([(n.get("txBytes", 0) + n.get("rxBytes", 0)) / 1e6 for n in nodes])
     if tot:
-        rows.append(f"| total traffic per node | all | MB | {tot['n']} | {tot['median']:.1f} | {tot['p95']:.1f} | "
-                    f"{tot['p99']:.1f} | {tot['max']:.1f} | {tot['cv']:.2f} |")
+        lines.append(f"| total traffic per node | all | MB | {tot['n']} | {tot['median']:.1f} | {tot['p95']:.1f} | "
+                     f"{tot['p99']:.1f} | {tot['max']:.1f} | {tot['cv']:.2f} |")
     with open(os.path.join(out, "load_summary.md"), "w") as f:
         f.write("| load | topic | unit | nodes | median | p95 | p99 | max | CV |\n")
         f.write("|---|---:|---|---:|---:|---:|---:|---:|---:|\n")
-        f.write("\n".join(rows) + "\n")
+        f.write("\n".join(lines) + "\n")
 
 
 def main():
@@ -658,23 +700,26 @@ def main():
     samples = data.get("samples", [])
     metrics = load(args.metrics) if args.metrics else {}
 
-    plot_wait_times(data.get("waitTime") or [], out, label, topic_index_map(metrics) if metrics else {})
-    plot_cache_utilisation(samples, out, label)
-    tpos = ({idx: int(h[:16], 16) / float(2 ** 64)
-             for h, idx in topic_index_map(metrics).items()} if metrics else {})
+    tmap = topic_index_map(metrics) if metrics else {}
+    groups = topic_groups(metrics["perTopic"]) if metrics.get("perTopic") else None
+    plot_wait_times(data.get("waitTime") or [], out, label, tmap, groups)
+    plot_cache_utilisation(samples, out, label, tmap, groups)
+    # Topic markers only while they can be told apart.
+    tpos = ({idx: int(h[:16], 16) / float(2 ** 64) for h, idx in tmap.items()}
+            if len(tmap) <= TOPIC_LINES else {})
     plot_idspace_peak_rate(samples, out, label, tpos, args.window)
     plot_idspace_peak_msgtype(samples, out, label, tpos, args.window)
     if args.overhead and os.path.exists(args.overhead):
         nodes = load(args.overhead)
         plot_idspace_traffic(nodes, out, label, tpos)
         plot_idspace_msgtype(nodes, out, label, tpos)
-        plot_load_vs_topic_distance(nodes, metrics, out, label)
+        plot_load_vs_topic_distance(nodes, metrics, out, label, groups)
         plot_reg_vs_lookup_overhead(nodes, out, label, tpos)
         if metrics:
             plot_cost_per_lookup(nodes, metrics, out, label)
-            plot_topic_load(nodes, metrics, out, label)
+            plot_topic_load(nodes, metrics, out, label, groups)
     if metrics:
-        plot_idspace_found_time(metrics, out, label)
+        plot_idspace_found_time(metrics, out, label, groups)
 
     print(f"figures written to {out}")
 
