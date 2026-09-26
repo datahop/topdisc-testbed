@@ -35,9 +35,7 @@ testbed:
 scenario:
   population:
     nodes: 5                           # discv5 nodes to spawn
-    topics: 1                          # distinct topics; >1 assigns one per node by Zipf
-    all_register: false                # one shared topic that every node registers and searches
-    register_frac: 0.5                 # single-topic mode: fraction that register, the rest search
+    topics: 1                          # distinct topics; every node gets exactly one, registers it and searches it; >1 assigns by Zipf or the topic_model
     zipf_s: 1.07                       # Zipf skew for topic assignment when topics > 1 and no topic_model
     topic_model: ""                    # crawl model JSON (scenarios/models, cmd/crawl/model.py): topics are assigned by the crawl's chain shares instead of Zipf; topics = how many of the largest chains to keep (0 = all), the last one takes the tail
     addresses: ""                      # simnet: where node IP addresses come from: index (default, node i is 33.i/256.i%256.1, its own /24) or crawl (the /24 is drawn from the topic_model's per-topic prefix histogram, so nodes share /24s as the crawled network does and the per-/24 limits and the admission IP score see real diversity)

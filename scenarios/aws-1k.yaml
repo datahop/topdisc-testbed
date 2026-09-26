@@ -6,7 +6,6 @@ scenario:
   population:
     nodes: 1000
     topics: 1
-    all_register: true
     seed: 1
   network:
     regions: {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}

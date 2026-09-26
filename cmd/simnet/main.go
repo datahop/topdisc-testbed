@@ -45,8 +45,6 @@ func main() {
 	defer scenario.FlushLog()
 	nodes := &cfg.Scenario.Population.Nodes
 	numTopics := &cfg.Scenario.Population.Topics
-	allRegister := &cfg.Scenario.Population.AllRegister
-	registerFrac := &cfg.Scenario.Population.RegisterFrac
 	zipfS := &cfg.Scenario.Population.ZipfS
 	commonTopicFlag := &cfg.Scenario.Population.CommonTopic
 	seed := &cfg.Scenario.Population.Seed
@@ -265,7 +263,7 @@ func main() {
 		topicSeed = time.Now().UnixNano()
 		*seed = topicSeed
 	}
-	topicIdx := assign.DrawTopics(rand.New(rand.NewSource(topicSeed)), *nodes, *numTopics, *zipfS, topicModel, *allRegister, commonTopicMode)
+	topicIdx := assign.DrawTopics(rand.New(rand.NewSource(topicSeed)), *nodes, *numTopics, *zipfS, topicModel, commonTopicMode)
 	if cfg.Scenario.Population.Addresses == "crawl" {
 		if topicModel == nil || !topicModel.HasAddresses() {
 			fatalf("population.addresses crawl: the topic model has no prefixes (regenerate it with model.py --nodes)")
@@ -386,16 +384,12 @@ func main() {
 	case *churnInterval > 0:
 		runChurnWorkload(sim, settings, *maxBootnodes, *refreshInterval, all, *numTopics, *zipfS, *seed, *registerWait, *searchTimeout, *regProbePeriod, *registerStagger, cfg.Scenario.Phases.StartWindow,
 			churnParams{Interval: *churnInterval, Frac: *churnFrac, SteadyState: *churnMode == "steadystate"}, *metricsOut, pacing)
-	case *allRegister:
-		nt := *numTopics
-		if nt < 1 {
-			nt = 1
-		}
-		runMultiTopicWorkload(all, nt, *zipfS, *seed, *registerWait, *searchTimeout, *regProbePeriod, *registerStagger, cfg.Scenario.Phases.StartWindow, *metricsOut, pacing, topicIdx, topicModel)
 	case *legacyFrac > 0 && *numTopics <= 1:
 		runDiscNGValidationWorkload(all, *registerWait, *searchTimeout, *metricsOut)
 	case *numTopics <= 1:
-		runSingleTopicWorkload(all, *registerWait, *searchTimeout, *registerFrac, *metricsOut)
+		// One topic: the multi-topic workload with a single topic, so every
+		// node registers and searches it with the same probes and traces.
+		runMultiTopicWorkload(all, 1, *zipfS, *seed, *registerWait, *searchTimeout, *regProbePeriod, *registerStagger, cfg.Scenario.Phases.StartWindow, *metricsOut, pacing, topicIdx, topicModel)
 	default:
 		// runMultiTopicWorkload skips nodes with n.legacy=true (they
 		// stay as passive Discv5 peers and only contribute to the

@@ -108,7 +108,7 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 			return nil, err
 		}
 	}
-	topicIdx := DrawTopics(rng, n, sc.Population.Topics, sc.Population.ZipfS, topicModel, sc.Population.AllRegister, sc.Population.CommonTopic)
+	topicIdx := DrawTopics(rng, n, sc.Population.Topics, sc.Population.ZipfS, topicModel, sc.Population.CommonTopic)
 	topics := make([][]string, n)
 	for i, ts := range topicIdx {
 		for _, t := range ts {
@@ -247,9 +247,9 @@ func legacySet(rng *rand.Rand, topics [][]string, frac float64) []bool {
 // crawl model's shares when there is one, from a Zipf draw otherwise; a
 // second, common topic 0 when commonTopic is set. All-register runs put
 // everyone on topic 0.
-func DrawTopics(rng *rand.Rand, n, numTopics int, zipfS float64, model *churn.Model, allRegister, commonTopic bool) [][]int {
+func DrawTopics(rng *rand.Rand, n, numTopics int, zipfS float64, model *churn.Model, commonTopic bool) [][]int {
 	out := make([][]int, n)
-	if numTopics <= 1 && model == nil || allRegister {
+	if numTopics <= 1 && model == nil {
 		for i := range out {
 			out[i] = []int{0}
 		}

@@ -5,7 +5,6 @@ scenario:
   population:
     nodes: 100
     topics: 1
-    all_register: true
     seed: 1
   network:
     latency_ms: 30
