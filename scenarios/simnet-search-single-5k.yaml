@@ -1,5 +1,4 @@
-# Search A/B with nothing else in the picture: 5000 nodes that all register
-# and search one topic, no churn, no connection model, one continuous unpaced
+# Search A/B with nothing else in the picture: 5000 nodes, one topic, no churn, no connection model, one continuous unpaced
 # search per node for 1 h. Measures registrar load against search
 # performance. search_yield_floor 4 is the adaptive search distance, 0 the
 # default searcher; search_aux_radius 1 additionally asks aux nodes only for
@@ -9,7 +8,6 @@ scenario:
   population:
     nodes: 5000
     topics: 1
-    all_register: true
     seed: 1
   network:
     latency_ms: 30

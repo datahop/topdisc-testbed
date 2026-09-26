@@ -107,7 +107,6 @@ PARAM_KEYS = [
     ("nodes", "scenario.population.nodes"),
     ("topics", "scenario.population.topics"),
     ("zipf_s", "scenario.population.zipf_s"),
-    ("all_register", "scenario.population.all_register"),
     ("legacy_frac", "scenario.population.legacy_frac"),
     ("seed", "scenario.population.seed"),
     ("latency_ms", "scenario.network.latency_ms"),

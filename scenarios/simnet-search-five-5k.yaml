@@ -1,4 +1,4 @@
-# Search A/B over a topic mix: 5000 nodes, 5 Zipf topics, half register, no
+# Search A/B over a topic mix: 5000 nodes, 5 Zipf topics, every node registers its own, no
 # churn, no connection model, one continuous unpaced search per node for 1 h.
 # search_yield_floor 4 is the adaptive search distance, 0 the default searcher.
 name: simnet-search-five-5k
@@ -7,7 +7,6 @@ scenario:
     nodes: 5000
     topics: 5
     zipf_s: 1
-    register_frac: 0.5
     seed: 1
   network:
     latency_ms: 30

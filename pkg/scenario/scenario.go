@@ -90,8 +90,6 @@ type TestbedConfig struct {
 type PopulationConfig struct {
 	Nodes          int     `yaml:"nodes"`
 	Topics         int     `yaml:"topics"`
-	AllRegister    bool    `yaml:"all_register"`
-	RegisterFrac   float64 `yaml:"register_frac"`
 	ZipfS          float64 `yaml:"zipf_s"`
 	TopicModel     string  `yaml:"topic_model"`
 	Addresses      string  `yaml:"addresses"`
@@ -286,9 +284,7 @@ var paramDocs = []paramDoc{
 	{"testbed.wan.jitter_ms", "netem jitter"},
 	{"testbed.wan.rate_kbps", "per-node rate cap; plan 20 KB/s -> 160; 0 = unshaped"},
 	{"scenario.population.nodes", "discv5 nodes to spawn"},
-	{"scenario.population.topics", "distinct topics; >1 assigns one per node by Zipf"},
-	{"scenario.population.all_register", "one shared topic that every node registers and searches"},
-	{"scenario.population.register_frac", "single-topic mode: fraction that register, the rest search"},
+	{"scenario.population.topics", "distinct topics; every node gets exactly one, registers it and searches it; >1 assigns by Zipf or the topic_model"},
 	{"scenario.population.zipf_s", "Zipf skew for topic assignment when topics > 1 and no topic_model"},
 	{"scenario.population.topic_model", "crawl model JSON (scenarios/models, cmd/crawl/model.py): topics are assigned by the crawl's chain shares instead of Zipf; topics = how many of the largest chains to keep (0 = all), the last one takes the tail"},
 	{"scenario.population.addresses", "simnet: where node IP addresses come from: index (default, node i is 33.i/256.i%256.1, its own /24) or crawl (the /24 is drawn from the topic_model's per-topic prefix histogram, so nodes share /24s as the crawled network does and the per-/24 limits and the admission IP score see real diversity)"},
@@ -378,7 +374,6 @@ func Default() Config {
 	c.Testbed.Wan.DelayMinMs, c.Testbed.Wan.DelayMaxMs, c.Testbed.Wan.JitterMs, c.Testbed.Wan.RateKbps = 4, 45, 3, 160
 	c.Scenario.Population.Nodes = 5
 	c.Scenario.Population.Topics = 1
-	c.Scenario.Population.RegisterFrac = 0.5
 	c.Scenario.Population.ZipfS = 1.07
 	c.Scenario.Network.LatencyMs = 30
 	c.Scenario.Network.RTTTable = "models/region-rtt.json"
