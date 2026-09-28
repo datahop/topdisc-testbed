@@ -160,9 +160,15 @@ type agent struct{ base string }
 
 var agentClient = &http.Client{Timeout: 60 * time.Second}
 
+// Prepare creates a netns, a veth pair and a netem qdisc per node, each with
+// its own `ip` invocation, so it costs on the order of a minute per 300
+// nodes and reports no progress until it is done. It gets its own deadline
+// rather than stretching the one every other call shares.
+var prepareClient = &http.Client{Timeout: 30 * time.Minute}
+
 func (a agent) prepare(p prepareRequest) error {
 	b, _ := json.Marshal(p)
-	resp, err := agentClient.Post(a.base+"/prepare", "application/json", bytes.NewReader(b))
+	resp, err := prepareClient.Post(a.base+"/prepare", "application/json", bytes.NewReader(b))
 	if err != nil {
 		return err
 	}
