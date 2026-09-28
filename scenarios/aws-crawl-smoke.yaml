@@ -1,0 +1,37 @@
+# AWS smoke for the crawl workload before a large run: 540 instances over
+# three regions, the 20 largest crawl chains as topics (the 20th takes the
+# tail), every node registering and searching its own, connection-driven
+# search with real RLPx sessions, adaptive floor 4, no churn. Short phases
+# so the fleet lives about 45 min; the point is that traces, metrics and the
+# figures come out right, not the numbers. 540 fits the account's 448-vCPU
+# per-region quota (2 vCPUs per t4g.nano, 216 nodes in the home region).
+#   deploy/aws.sh up scenarios/aws-crawl-smoke.yaml -var spot=true
+#   deploy/aws.sh run scenarios/aws-crawl-smoke.yaml && deploy/aws.sh pull && deploy/aws.sh down
+name: aws-crawl-smoke
+scenario:
+  population:
+    nodes: 540
+    topics: 20
+    topic_model: models/crawl-2026-09-18.json
+    seed: 1
+  network:
+    regions: {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}
+  phases:
+    bootstrap_wait: 1m
+    start_window: 3m
+    register_wait: 5m
+    search_stagger: 10ms
+    search_timeout: 10m
+  topic:
+    ad_cache_size: 5000
+    search_yield_floor: 4
+  search:
+    model: conn
+    target_count: 0
+  conn_model:
+    enabled: true
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json
+    home_region: us-east-1

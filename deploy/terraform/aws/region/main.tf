@@ -112,6 +112,9 @@ resource "aws_vpc_endpoint" "s3" {
 }
 
 resource "aws_instance" "coordinator" {
+  # scale-down.sh ends with `shutdown -h now`: with this the halt terminates the
+  # instance without an API call, which it can no longer make once its NAT is gone
+  instance_initiated_shutdown_behavior = "terminate"
   count                  = var.coordinator ? 1 : 0
   ami                    = data.aws_ami.al2023_arm.id
   instance_type          = var.coordinator_type
