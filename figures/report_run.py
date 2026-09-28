@@ -367,6 +367,12 @@ def main():
                     missing.append(("figures_overhead.py", f"exited {rc}, see gen.log"))
             else:
                 missing.append(("figures_overhead.py", "no series.json in the run directory (testbed.traces.overhead_series unset)"))
+    # The checks are cheap and their verdict belongs to the run, so they run
+    # even when the figures are reused.
+    with open(os.path.join(out, "gen.log"), "a") as gen:
+        rc = run([sys.executable, os.path.join(HERE, "checks.py"), rd, "--out", os.path.join(out, "checks.json"), "--md", os.path.join(figdir, "checks.md")], gen)
+        if rc > 1:
+            missing.append(("checks.py", f"exited {rc}, see gen.log"))
     for stray in ["report.md"] + [s + ext for s in EXCLUDED for ext in (".png", ".pdf")]:
         p = os.path.join(figdir, stray)
         if os.path.exists(p):
@@ -408,6 +414,15 @@ def main():
         L.append("")
     else:
         missing.append(("table: Topic assignment", "no per-topic search summary in run.log"))
+
+    checks = os.path.join(figdir, "checks.md")
+    L.append("## Correctness checks\n")
+    if os.path.exists(checks):
+        L.append("Functional assertions over the run's traces (`checks.py`, verdicts and evidence in `checks.json`). "
+                 "*not-exercised*: the run never reached the condition; *needs-data*: the traces lack a field the check needs.\n")
+        L.append(open(checks).read())
+    else:
+        missing.append(("table: Correctness checks", "checks.md not written (see gen.log)"))
 
     present = {f[:-4] for f in os.listdir(figdir) if f.endswith(".png")}
     listed = set()

@@ -181,6 +181,9 @@ func main() {
 	// from outside; here the registrar reports it.
 	adsFirst := map[string]map[string]int64{} // topic hex -> advertiser id -> unix ms
 	adsLast := map[string][]string{}
+	adsExpiry := map[string]map[string]int64{} // topic hex -> advertiser id -> expiry unix ms, last snapshot
+	staleMaxMs := int64(0)                     // longest an expired ad was still in the table
+	adsSnapshotMs := int64(0)                  // when the last ad snapshot was taken
 	var adsMu sync.Mutex
 	// Advertiser side: when each registration bucket first held its target
 	// number of ads, when the whole table first was complete (every bucket
@@ -221,6 +224,8 @@ func main() {
 			now := time.Now().UnixMilli()
 			adsMu.Lock()
 			adsLast = map[string][]string{}
+			adsExpiry = map[string]map[string]int64{}
+			adsSnapshotMs = now
 			for tid, n := range byTopic {
 				if n == 0 {
 					continue
@@ -229,24 +234,36 @@ func main() {
 				if adsFirst[key] == nil {
 					adsFirst[key] = map[string]int64{}
 				}
-				for _, ad := range d.LocalTopicNodes(tid) {
-					id := ad.ID().String()
+				adsExpiry[key] = map[string]int64{}
+				for _, ad := range d.LocalTopicAds(tid) {
+					id := ad.Node.ID().String()
+					if ad.ExpiresIn < 0 {
+						staleMaxMs = max(staleMaxMs, (-ad.ExpiresIn).Milliseconds())
+						continue
+					}
 					if _, ok := adsFirst[key][id]; !ok {
 						adsFirst[key][id] = now
 					}
 					adsLast[key] = append(adsLast[key], id)
+					adsExpiry[key][id] = now + ad.ExpiresIn.Milliseconds()
 				}
 			}
 			adsMu.Unlock()
 		}
 	}()
 	// Periodic counters and cache occupancy for the time series.
+	type bucketCounts struct {
+		Registered int `json:"registered"`
+		Waiting    int `json:"waiting"`
+		Standby    int `json:"standby"`
+	}
 	type sample struct {
-		AtMs      int64                           `json:"at_ms"`
-		Wire      map[string]discover.WireCounter `json:"wire"`
-		CacheHeld int                             `json:"cache_held"`
-		CacheCap  int                             `json:"cache_cap"`
-		ByTopic   map[string]int                  `json:"cache_by_topic"`
+		AtMs       int64                           `json:"at_ms"`
+		Wire       map[string]discover.WireCounter `json:"wire"`
+		CacheHeld  int                             `json:"cache_held"`
+		CacheCap   int                             `json:"cache_cap"`
+		ByTopic    map[string]int                  `json:"cache_by_topic"`
+		RegBuckets []bucketCounts                  `json:"reg_buckets,omitempty"` // far to close
 	}
 	samples := []sample{}
 	var samplesMu sync.Mutex
@@ -259,8 +276,14 @@ func main() {
 				for tid, n := range byTopic {
 					bt[tid.String()] = n
 				}
+				var rb []bucketCounts
+				adsMu.Lock()
+				for _, b := range bucketsLast {
+					rb = append(rb, bucketCounts{Registered: b.Registered, Waiting: b.Waiting, Standby: b.Standby})
+				}
+				adsMu.Unlock()
 				samplesMu.Lock()
-				samples = append(samples, sample{AtMs: time.Now().UnixMilli(), Wire: d.WireStats(), CacheHeld: held, CacheCap: capacity, ByTopic: bt})
+				samples = append(samples, sample{AtMs: time.Now().UnixMilli(), Wire: d.WireStats(), CacheHeld: held, CacheCap: capacity, ByTopic: bt, RegBuckets: rb})
 				samplesMu.Unlock()
 			}
 		}()
@@ -363,7 +386,7 @@ func main() {
 			wait[tid.String()] = st
 		}
 		adsMu.Lock()
-		first, last := adsFirst, adsLast
+		first, last, expiry, stale, snapAt := adsFirst, adsLast, adsExpiry, staleMaxMs, adsSnapshotMs
 		bFull, bLast, rComplete := bucketFullMs, bucketsLast, regCompleteMs
 		adsMu.Unlock()
 		samplesMu.Lock()
@@ -374,7 +397,7 @@ func main() {
 		}
 		ops := []map[string]any{}
 		for k, v := range srv.DiscoveryV5().OpStats() {
-			ops = append(ops, map[string]any{"msg": k.Msg, "opid": k.OpID, "txMsgs": v.TxMsgs, "txBytes": v.TxBytes, "rxMsgs": v.RxMsgs, "rxBytes": v.RxBytes, "nodes": v.Nodes})
+			ops = append(ops, map[string]any{"msg": k.Msg, "opid": k.OpID, "txMsgs": v.TxMsgs, "txBytes": v.TxBytes, "rxMsgs": v.RxMsgs, "rxBytes": v.RxBytes, "nodes": v.Nodes, "nodeIds": v.NodeIDs})
 		}
 		var conn map[string]any
 		connMu.Lock()
@@ -396,7 +419,8 @@ func main() {
 			"peer_drops": drops, "refill_ms": refills, "lookups": lookups, "first_capable_ms": firstCapableMs, "legacy": false,
 			"ads_held": len(srv.DiscoveryV5().LocalTopicNodes(topic)), "wire": wire,
 			"topic": topic.String(), "topics": asg.Topics, "register_at_ms": asg.Phases.RegisterAt, "search_at_ms": asg.Phases.SearchAt,
-			"ads_first_seen_ms": first, "ads_final": last, "wait": wait, "samples": smp,
+			"ads_first_seen_ms": first, "ads_final": last, "ads_final_expiry_ms": expiry, "ads_snapshot_ms": snapAt, "stale_ad_max_ms": stale, "wait": wait, "samples": smp,
+			"admissions": discover.AdmissionEvents(srv.Self().ID()),
 			"reg_bucket_full_ms": bFull, "reg_complete_ms": rComplete, "reg_buckets_final": bLast,
 			"ops": ops, "topic_load": topicLoad, "conn": conn,
 		}, "", " ")

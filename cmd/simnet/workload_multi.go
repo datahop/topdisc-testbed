@@ -6,6 +6,7 @@ import (
 	"github.com/datahop/topdisc-testbed/pkg/assign"
 	"github.com/datahop/topdisc-testbed/pkg/churn"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/ethereum/go-ethereum/p2p/discover/topicindex"
@@ -208,6 +209,9 @@ func runMultiTopicWorkload(all []nodeRec, numTopics int, zipfS float64, seed int
 	if pacing.Dead != nil {
 		pacing.Dead.report()
 		deadResults = pacing.Dead.snapshot()
+	}
+	if metricsOut != "" {
+		dumpNodeState(filepath.Dir(metricsOut), all, nodeTopics, topics)
 	}
 	reportMultiTopic(results, registrantsByTopic, topics, regTimingNs, metricsOut, allCov)
 	if reachOut != "" {
