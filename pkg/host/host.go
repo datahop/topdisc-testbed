@@ -80,6 +80,14 @@ func (r *Runner) Prepare(as []assign.Assignment, peers map[int]string) error {
 	}
 	cmds := []string{
 		"sysctl -q -w net.ipv4.ip_forward=1",
+		// The host keeps one neighbour entry per node on the bridge, and the
+		// defaults (512 soft, 1024 hard) sit below the node counts this runs
+		// at. Overflowing the table evicts entries indiscriminately -- the
+		// host's own default gateway among them -- and the machine drops off
+		// the network mid-run while its BMC still reports it alive.
+		"sysctl -q -w net.ipv4.neigh.default.gc_thresh1=8192",
+		"sysctl -q -w net.ipv4.neigh.default.gc_thresh2=32768",
+		"sysctl -q -w net.ipv4.neigh.default.gc_thresh3=65536",
 		fmt.Sprintf("ip link add %s type bridge", Bridge),
 		fmt.Sprintf("ip addr add %s/16 dev %s", BridgeAddr(r.Host), Bridge),
 		fmt.Sprintf("ip link set %s up", Bridge),
@@ -107,6 +115,11 @@ func (r *Runner) Start(idx int) error {
 	if err != nil {
 		return err
 	}
+	// The child gets its own descriptor at Start, so the parent's copy is dead
+	// weight: holding it kept one fd per node (and one more per churn restart)
+	// open for the life of the agent, which caps vnodes_per_machine at the
+	// agent's own file limit.
+	defer logf.Close()
 	bin := r.NodeBinary
 	if r.legacy[idx] {
 		bin = r.LegacyBinary

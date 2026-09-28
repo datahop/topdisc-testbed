@@ -117,7 +117,11 @@ def up(path):
         save_state({"site": g["site"], "cluster": g["cluster"], "env": g["env"], "pnodes": pnodes, "coordinator": coordinator, "scenario": path})
         for h in pnodes:
             sh(f"scp -q {REPO}/out/hostagent {REPO}/out/topdisc-node {REPO}/out/topdisc-node-legacy root@{h}:/root/")
+            # ulimit: one agent supervises vnodes_per_machine node processes,
+            # each with its own netns, veth and log; the login default of 1024
+            # is the first thing to bind as that number grows.
             sh(f"ssh root@{h} 'chmod +x /root/hostagent /root/topdisc-node /root/topdisc-node-legacy; "
+               f"ulimit -n 65536; "
                f"nohup /root/hostagent -serve :{AGENT_PORT} -node-binary /root/topdisc-node "
                f"-legacy-binary /root/topdisc-node-legacy -workdir /root/run "
                f">/root/hostagent.log 2>&1 </dev/null &'")
