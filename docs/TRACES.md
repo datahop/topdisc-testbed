@@ -179,8 +179,8 @@ sampling. Runs without those flags carry no measurement overhead.
 
 `run.yaml` records `build.testbed` (testbed commit) and `build.fork` (the
 go-ethereum tag, e.g. `github.com/datahop/go-ethereum@v1.17.2-testbed.3`). The
-fork's testbed tags live on `feat/topdisc-instrumentation` and are never merged
-into `topdisc`.
+fork's testbed tags live on the instrumentation branch (`instr-adaptive` since
+`v1.17.2-testbed.9`) and are never merged into `topdisc`.
 
 Real backends add to `metrics.json`:
 
@@ -205,3 +205,16 @@ Every backend adds, from fork tag `v1.17.2-testbed.4` on:
 Wire counters on every backend split REGTOPIC requests to a registrar that
 already admitted the advertiser once into `REGTOPIC(renewal)/v5`; first
 registrations stay `REGTOPIC/v5`.
+
+From fork tag `v1.17.2-testbed.10` on, for the correctness checks (`figures/checks.py`):
+
+| File | Field | Contents |
+|---|---|---|
+| node trace | `ads_final_expiry_ms{}` | topic hex → advertiser → unix ms the held ad expires, at the last snapshot |
+| node trace | `stale_ad_max_ms` | longest an ad past its expiry was still in the table before the sweep |
+| node trace | `admissions[]` | every REGTOPIC the node decided as a registrar: `atMs`, `advertiser`, `topic`, `recordIp`, `fromIp`, `requiredMs` (wait computed for the advertiser), `waitedMs` (wait the ticket proved), `quoteMs` (0 when admitted), `admitted`, `renewal`, `held` and `topicHeld` before the decision |
+| node trace | `reg_buckets_final[].nodes[]` | the registrars each bucket is registered with or waiting on: `id`, `ip`, `state` |
+| node trace | `samples[].reg_buckets[]` | per sample, registered / waiting / standby counts per bucket, far to close |
+| node trace | `ops[].nodeIds[]` | the distinct nodes an operation asked (up to 4096) |
+| node trace | `lookups[].search.maxTopicPerReply`, `maxAuxPerReply` | the largest TOPICNODES and NODES reply one search received |
+| simnet | `ads.json`, `buckets.json`, `admissions.json` | the same registrar and advertiser state for every in-process node at the end of the run; `admissions.json` only up to 1000 nodes |

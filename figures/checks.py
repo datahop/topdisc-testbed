@@ -48,7 +48,31 @@ class Run:
         self.host = []
         for p in glob.glob(os.path.join(rd, "hostmetrics", "host*.json")):
             self.host.append(json.load(open(p)))
+        one = self.load("hostmetrics.json")  # the local backend: one host
+        if one:
+            self.host.append(one if isinstance(one, list) else one.get("samples") or [])
         self.simnet = not self.traces
+        # simnet writes the registrar and advertiser state of every node at the
+        # end of the run instead of per-node traces
+        self.state = {}
+        if self.simnet:
+            ads = self.load("ads.json") or {}
+            buckets = self.load("buckets.json") or {}
+            adm = self.load("admissions.json") or {}
+            for i, per_topic in ads.get("nodes", {}).items():
+                st = self.state.setdefault(int(i), {"idx": int(i)})
+                st["ads_final"] = {t: list(m) for t, m in per_topic.items()}
+                st["ads_final_expiry_ms"] = per_topic
+                st["stop_ms"] = ads.get("at_ms")
+                st["ads_snapshot_ms"] = ads.get("at_ms")
+                st["stale_ad_max_ms"] = ads.get("stale_max_ms", 0)
+            for i, bs in buckets.items():
+                self.state.setdefault(int(i), {"idx": int(i)})["reg_buckets_final"] = bs
+            for i, ev in adm.items():
+                self.state.setdefault(int(i), {"idx": int(i)})["admissions"] = ev
+            self.has_admissions = bool(adm) or os.path.exists(os.path.join(rd, "admissions.json"))
+        else:
+            self.has_admissions = any("admissions" in t for t in self.traces.values())
         self.topic_ids = self.metrics.get("topicIds", {}) if self.metrics else {}
         # scenario-level topic parameters: 0 means the fork default
         t = next(iter(self.assign.values()))["topic"] if self.assign else {}
@@ -59,20 +83,40 @@ class Run:
         self.nodes_limit = t.get("topic_nodes_limit") or int(self.params.get("scenario.topic.topic_nodes_limit") or 0) or TOPIC_NODES_LIMIT
         self.aux_limit = t.get("aux_nodes_limit") or int(self.params.get("scenario.topic.aux_nodes_limit") or 0) or AUX_NODES_LIMIT
         # node id -> assignment idx, topics (hash), legacy
+        self.topic_of = {}  # idx -> topic hash (real backends: from the trace; simnet: from the results)
+        for i, t in self.traces.items():
+            if t.get("topic"):
+                self.topic_of[i] = t["topic"]
         self.id_idx = {}
         for i, t in self.traces.items():
             self.id_idx[t["id"]] = i
         for r in (self.metrics or {}).get("results", []):
             self.id_idx.setdefault(r["nodeId"], r["nodeIdx"])
+            if self.simnet and "topic" in r:
+                self.topic_of.setdefault(r["nodeIdx"], self.topic_hash(r["topic"]))
         for n in self.oh:
             if n.get("id"):
                 self.id_idx.setdefault(n["id"], n["idx"])
-        self.topic_of = {}  # idx -> topic hash (real backends: from the trace)
-        for i, t in self.traces.items():
-            self.topic_of[i] = t["topic"]
         self.legacy = {i: a.get("legacy", False) for i, a in self.assign.items()}
         for i, t in self.traces.items():
             self.legacy[i] = t.get("legacy", False)
+
+    def topic_hash(self, index):
+        for h, i in self.topic_ids.items():
+            if i == index:
+                return h
+        return None
+
+    def nodes(self):
+        """Per-node registrar and advertiser state: the traces, or simnet's dumps."""
+        if self.traces:
+            for i, t in self.traces.items():
+                st = dict(t)
+                st["stop_ms"] = t["samples"][-1]["at_ms"] if t.get("samples") else None
+                yield i, st
+        else:
+            for i, st in self.state.items():
+                yield i, st
 
     def load(self, name):
         p = os.path.join(self.rd, name)
@@ -141,10 +185,10 @@ def c1_capacity(run, tol):
 
 
 def c2_no_duplicates(run, tol):
-    if not run.traces:
-        return verdict("needs-data", "simnet writes no per-registrar ad sets")
+    if not any("ads_final" in st for _, st in run.nodes()):
+        return verdict("needs-data", "no per-registrar ad sets (simnet: ads.json)")
     dup = []
-    for i, t in run.traces.items():
+    for i, t in run.nodes():
         for topic, ads in (t.get("ads_final") or {}).items():
             c = Counter(ads)
             for ad, n in c.items():
@@ -154,19 +198,19 @@ def c2_no_duplicates(run, tol):
 
 
 def c3_only_registrants(run, tol):
-    if not run.traces:
-        return verdict("needs-data", "simnet writes no per-registrar ad sets")
+    if not any("ads_final" in st for _, st in run.nodes()):
+        return verdict("needs-data", "no per-registrar ad sets (simnet: ads.json)")
     bad = []
     unknown = 0
-    for i, t in run.traces.items():
-        for topic, seen in (t.get("ads_first_seen_ms") or {}).items():
+    for i, t in run.nodes():
+        for topic, seen in (t.get("ads_first_seen_ms") or t.get("ads_final") or {}).items():
             for ad in seen:
                 j = run.id_idx.get(ad)
                 if j is None:
                     unknown += 1
                 elif run.topic_of.get(j) != topic:
                     bad.append((i, topic[:8], j))
-    complete = len(run.traces) >= len(run.assign) > 0
+    complete = run.simnet or len(run.traces) >= len(run.assign) > 0
     st = "fail" if bad or (unknown and complete) else "pass"
     return verdict(st, f"{len(bad)} ads from nodes not registering that topic; {unknown} ads from ids without a trace"
                    + ("" if complete or not unknown else " (traces missing, see H2)"), offenders=bad[:10], unknown_ids=unknown)
@@ -175,28 +219,29 @@ def c3_only_registrants(run, tol):
 def c4_only_capable(run, tol):
     if not any(run.legacy.values()):
         return verdict("not-exercised", "no legacy nodes in the run")
-    if not run.traces:
-        return verdict("needs-data", "simnet writes no per-registrar ad sets")
-    bad = [(i, ad[:8]) for i, t in run.traces.items() for seen in (t.get("ads_first_seen_ms") or {}).values()
+    if not any("ads_final" in st for _, st in run.nodes()):
+        return verdict("needs-data", "no per-registrar ad sets (simnet: ads.json)")
+    bad = [(i, ad[:8]) for i, t in run.nodes() for seen in (t.get("ads_final") or {}).values()
            for ad in seen if run.legacy.get(run.id_idx.get(ad, -1), False)]
     return pf(bad, "no legacy node in any cache", f"{len(bad)} ads from legacy nodes", offenders=bad[:10])
 
 
 def c5_no_self_ads(run, tol):
-    if not run.traces:
-        return verdict("needs-data", "simnet writes no per-registrar ad sets")
-    bad = [i for i, t in run.traces.items() if any(t["id"] in seen for seen in (t.get("ads_first_seen_ms") or {}).values())]
+    if not any("ads_final" in st for _, st in run.nodes()):
+        return verdict("needs-data", "no per-registrar ad sets (simnet: ads.json)")
+    idx_id = {i: nid for nid, i in run.id_idx.items()}
+    bad = [i for i, t in run.nodes() if any(idx_id.get(i) in seen for seen in (t.get("ads_final") or {}).values())]
     return pf(bad, "no registrar holds its own ad", f"{len(bad)} registrars hold their own ad", offenders=bad[:10])
 
 
 def k1_departed_leave(run, tol):
     if not run.has_churn():
         return verdict("not-exercised", "no churn in the run")
-    if not run.traces:
-        return verdict("needs-data", "simnet writes no final ad sets")
+    if not any("ads_final" in st for _, st in run.nodes()):
+        return verdict("needs-data", "no final ad sets (simnet: ads.json)")
     stale = []
-    for i, t in run.traces.items():
-        stop = t["samples"][-1]["at_ms"] if t.get("samples") else None
+    for i, t in run.nodes():
+        stop = t.get("stop_ms")
         if stop is None:
             continue
         for topic, ads in (t.get("ads_final") or {}).items():
@@ -224,60 +269,197 @@ def w1_bounded_wait(run, tol):
               f"{len(over)} admissions past the attempt timeout", longest_ms=longest, limit_ms=run.attempt_timeout, offenders=over[:10], samples=len(src))
 
 
+def admissions(run):
+    for i, t in run.nodes():
+        for ev in t.get("admissions") or []:
+            yield i, ev
+
+
+def e1_lifetime(run, tol):
+    have = [(i, t) for i, t in run.nodes() if "stale_ad_max_ms" in t]
+    if not have:
+        return verdict("needs-data", "ad expiry is not in the traces (fork before testbed.10)")
+    stale = max(t["stale_ad_max_ms"] for _, t in have)
+    late = []
+    for i, t in have:
+        stop = t.get("ads_snapshot_ms") or t.get("stop_ms") or 0
+        for topic, m in (t.get("ads_final_expiry_ms") or {}).items():
+            for ad, exp in m.items():
+                if exp - stop > run.ad_lifetime + tol.skew_ms:
+                    late.append((i, ad[:8], (exp - stop) // 1000))
+    fails = stale > tol.stale_ms or late
+    return pf(fails, f"expired ads linger at most {stale / 1000:.1f} s; no ad expiry beyond a lifetime from the last snapshot",
+              f"expired ads lingered {stale / 1000:.1f} s (tolerance {tol.stale_ms / 1000:.0f} s); {len(late)} ads with expiry beyond a lifetime", stale_max_ms=stale, offenders=late[:10])
+
+
+def w2_no_early_admission(run, tol):
+    if not run.has_admissions:
+        return verdict("needs-data", "admission events are not in the traces (fork before testbed.10)")
+    early, n = [], 0
+    for i, ev in admissions(run):
+        if not ev.get("admitted") or ev.get("renewal"):
+            continue
+        n += 1
+        if ev["waitedMs"] < ev["requiredMs"] - tol.floor_ms:
+            early.append((i, ev["advertiser"][:8], ev["waitedMs"], ev["requiredMs"]))
+    if n == 0:
+        return verdict("not-exercised", "no admissions recorded")
+    return pf(early, f"every one of {n} admissions waited at least the required time minus the {tol.floor_ms / 1000:.0f} s floor",
+              f"{len(early)} of {n} admissions before the required wait", offenders=early[:10], admissions=n)
+
+
+def w3_lower_bound(run, tol):
+    if not run.has_admissions:
+        return verdict("needs-data", "admission events are not in the traces (fork before testbed.10)")
+    bad, n = [], 0
+    for i, t in run.nodes():
+        seq = defaultdict(list)
+        for ev in t.get("admissions") or []:
+            if ev.get("quoteMs", 0) > 0:
+                seq[(ev["topic"], ev["advertiser"])].append((ev["atMs"], ev["quoteMs"]))
+        for key, q in seq.items():
+            q.sort()
+            for (t1, q1), (t2, q2) in zip(q, q[1:]):
+                n += 1
+                if q2 < q1 - (t2 - t1) - tol.floor_ms:
+                    bad.append((i, key[1][:8], q1, q2, t2 - t1))
+    if n == 0:
+        return verdict("not-exercised", "no advertiser was quoted twice by one registrar")
+    return pf(bad, f"no quote undercut the previous one to the same advertiser and topic by more than the time elapsed ({n} pairs)",
+              f"{len(bad)} of {n} repeated quotes undercut the lower bound", offenders=bad[:10], pairs=n)
+
+
 def w4_full_cache(run, tol):
     peak = 0
     if run.traces:
         peak = max((s["cache_held"] for t in run.traces.values() for s in t.get("samples", [])), default=0)
     elif run.series:
         peak = max(s["cacheHeld"] for s in run.series["samples"]) / max(len(run.oh) or 1, 1)
+    if run.has_admissions:
+        full = [(i, ev["held"]) for i, ev in admissions(run) if ev.get("admitted") and not ev.get("renewal") and ev["held"] >= run.cache_size]
+        at_cap = sum(1 for _, ev in admissions(run) if ev["held"] >= run.cache_size)
+        if at_cap == 0:
+            return verdict("not-exercised", f"no REGTOPIC arrived at a full cache (peak {peak:.0f} of {run.cache_size})", peak=peak)
+        return pf(full, f"{at_cap} requests at a full cache, none admitted", f"{len(full)} admissions into a full cache", offenders=full[:10])
     if peak < run.cache_size:
         return verdict("not-exercised", f"no cache reached capacity (peak {peak:.0f} of {run.cache_size})", peak=peak)
     return verdict("needs-data", "occupancy at each admission is not traced")
 
 
+def w6_record_address(run, tol):
+    if not run.has_admissions:
+        return verdict("needs-data", "admission events are not in the traces (fork before testbed.10)")
+    bad, n = [], 0
+    for i, ev in admissions(run):
+        if not ev.get("admitted"):
+            continue
+        n += 1
+        if ev.get("recordIp") and ev.get("fromIp") and ev["recordIp"] != ev["fromIp"]:
+            bad.append((i, ev["advertiser"][:8], ev["recordIp"], ev["fromIp"]))
+    if n == 0:
+        return verdict("not-exercised", "no admissions recorded")
+    return pf(bad, f"record IP equals the packet source for all {n} admissions", f"{len(bad)} admissions with a record IP other than the source", offenders=bad[:10])
+
+
+def private_ip(ip):
+    return ip.startswith(("10.", "192.168.", "127.")) or any(ip.startswith(f"172.{x}.") for x in range(16, 32))
+
+
+def r2_bucket_ip_diversity(run, tol):
+    have = [(i, t) for i, t in run.nodes() if any(b.get("nodes") for b in t.get("reg_buckets_final") or [])]
+    if not have:
+        return verdict("needs-data", "registrars per bucket are not in the traces (fork before testbed.10)")
+    bad, n, public = [], 0, 0
+    for i, t in have:
+        for b in t["reg_buckets_final"]:
+            nets = Counter()
+            for nd in b.get("nodes") or []:
+                ip = nd.get("ip") or ""
+                if not ip or private_ip(ip):
+                    continue
+                public += 1
+                nets[".".join(ip.split(".")[:3])] += 1
+            n += 1
+            for net, c in nets.items():
+                if c > 1:
+                    bad.append((i, b["dist"], net, c))
+    if public == 0:
+        return verdict("not-exercised", "every registrar has a private address; the /24 rule exempts LAN addresses")
+    return pf(bad, f"one registrar per /24 in every one of {n} buckets", f"{len(bad)} buckets with two registrars in one /24", offenders=bad[:10])
+
+
+def i1_no_topic_requests_to_legacy(run, tol):
+    leg = {nid for nid, i in run.id_idx.items() if run.legacy.get(i)}
+    if not any(run.legacy.values()):
+        return verdict("not-exercised", "no legacy nodes in the run")
+    ops = [(i, op) for i, t in run.traces.items() for op in t.get("ops") or [] if "nodeIds" in op]
+    if not ops:
+        return verdict("needs-data", "request destinations are not in the traces (fork before testbed.10)")
+    bad = [(i, op["msg"], len(set(op["nodeIds"]) & leg)) for i, op in ops if set(op["nodeIds"]) & leg]
+    return pf(bad, f"no REGTOPIC or TOPICQUERY went to a legacy node ({len(ops)} operations)", f"{len(bad)} operations sent topic requests to legacy nodes", offenders=bad[:10])
+
+
+
 # --------------------------------------------------------------- advertiser side
 
 def r1_bucket_size(run, tol):
-    if not run.traces:
-        return verdict("needs-data", "simnet writes no registration bucket state")
-    over = [(i, b["dist"], b["registered"] + b["waiting"]) for i, t in run.traces.items()
+    if not any("reg_buckets_final" in st for _, st in run.nodes()):
+        return verdict("needs-data", "no registration bucket state (simnet: buckets.json)")
+    over = [(i, b["dist"], b["registered"] + b["waiting"]) for i, t in run.nodes()
             for b in (t.get("reg_buckets_final") or []) if b["registered"] + b["waiting"] > max(b.get("target", 0), run.bucket_size)]
     return pf(over, f"registered plus waiting within {run.bucket_size} in every final bucket", f"{len(over)} buckets over size", offenders=over[:10])
 
 
 def r3_state_maintained(run, tol):
-    if not run.traces:
-        return verdict("needs-data", "simnet writes no registration bucket state")
-    empty, incomplete = [], []
-    for i, t in run.traces.items():
+    if not any("reg_buckets_final" in st for _, st in run.nodes()):
+        return verdict("needs-data", "no registration bucket state (simnet: buckets.json)")
+    empty, incomplete, idle_runs = [], [], []
+    n = 0
+    for i, t in run.nodes():
         if not t.get("reg_buckets_final"):
             continue
+        n += 1
         for b in t["reg_buckets_final"]:
             if b["registered"] == 0 and b["waiting"] == 0 and b["standby"] > 0:
                 empty.append((i, b["dist"], b["standby"]))
         a = run.assign.get(i, {})
         search_at = a.get("phases", {}).get("search_at_ms") or t.get("search_at_ms")
-        if not t.get("reg_complete_ms") or (search_at and t["reg_complete_ms"] > search_at + tol.skew_ms):
+        if "reg_complete_ms" in t and (not t.get("reg_complete_ms") or (search_at and t["reg_complete_ms"] > search_at + tol.skew_ms)):
             incomplete.append((i, t.get("reg_complete_ms")))
-    n = sum(1 for t in run.traces.values() if t.get("reg_buckets_final"))
-    fails = empty or len(incomplete) > tol.incomplete_frac * n
+        # over time: a bucket idle with candidates for longer than the allowance, after the table first completed
+        done = t.get("reg_complete_ms") or 0
+        idle_since = {}
+        for smp in t.get("samples") or []:
+            if smp["at_ms"] < done:
+                continue
+            for k, b in enumerate(smp.get("reg_buckets") or []):
+                if b["registered"] == 0 and b["waiting"] == 0 and b["standby"] > 0:
+                    idle_since.setdefault(k, smp["at_ms"])
+                    if smp["at_ms"] - idle_since[k] > tol.idle_bucket_ms:
+                        idle_runs.append((i, k, (smp["at_ms"] - idle_since[k]) // 1000))
+                        idle_since[k] = smp["at_ms"]
+                else:
+                    idle_since.pop(k, None)
+    fails = empty or idle_runs
+    over_time = "; over time: %d idle spells beyond %d s" % (len(idle_runs), tol.idle_bucket_ms // 1000) if any(
+        (t.get("samples") or [{}])[0].get("reg_buckets") for _, t in run.nodes()) else "; over time needs periodic bucket samples"
     return verdict("fail" if fails else "pass",
-                   f"{len(empty)} final buckets idle with candidates left; {len(incomplete)} of {n} tables not complete by search start",
-                   empty=empty[:10], incomplete=incomplete[:10], advertisers=n)
+                   f"{len(empty)} final buckets idle with candidates left" + over_time + f"; {len(incomplete)} of {n} tables were still filling at search start (register_wait)",
+                   empty=empty[:10], incomplete=incomplete[:10], idle=idle_runs[:10], advertisers=n)
 
 
 def e2_renewal_keeps_fanout(run, tol):
     cov = ((run.metrics or {}).get("registrationCoverage") or {}).get("byTopic")
     if not cov:
         return verdict("needs-data", "no registration coverage after the register wait")
-    if not run.traces:
-        return verdict("needs-data", "simnet writes no final ad sets")
+    if not any("ads_final" in st for _, st in run.nodes()):
+        return verdict("needs-data", "no final ad sets (simnet: ads.json)")
     final = Counter()
-    for t in run.traces.values():
+    for _, t in run.nodes():
         for ads in (t.get("ads_final") or {}).values():
             for ad in set(ads):
                 final[ad] += 1
-    stop = max((t["samples"][-1]["at_ms"] for t in run.traces.values() if t.get("samples")), default=0)
+    stop = max((t.get("stop_ms") or 0 for _, t in run.nodes()), default=0)
     lost, kept, ratios = [], 0, []
     for topic, c in cov.items():
         for ad, n0 in (c.get("byRegistrant") or {}).items():
@@ -404,6 +586,13 @@ def l5_reply_limits(run, tol):
     limit = run.nodes_limit + run.aux_limit
     if not run.traces:
         return verdict("needs-data", "per-reply result counts are not traced")
+    exact = [(i, lk["search"]) for i, t in run.traces.items() for lk in t.get("lookups") or [] if "maxTopicPerReply" in (lk.get("search") or {})]
+    if exact:
+        bad = [(i, st["maxTopicPerReply"], st["maxAuxPerReply"]) for i, st in exact if st["maxTopicPerReply"] > run.nodes_limit or st["maxAuxPerReply"] > run.aux_limit]
+        wt = max(st["maxTopicPerReply"] for _, st in exact)
+        wa = max(st["maxAuxPerReply"] for _, st in exact)
+        return pf(bad, f"largest reply carried {wt} registrants of {run.nodes_limit} and {wa} neighbours of {run.aux_limit}",
+                  f"{len(bad)} searches saw a reply over the limit (largest {wt} registrants, {wa} neighbours)", offenders=bad[:10], max_topic=wt, max_aux=wa)
     worst, bad, n = 0, [], 0
     for i, t in run.traces.items():
         for lk in t.get("lookups") or []:
@@ -427,6 +616,8 @@ def l6_no_duplicate_results(run, tol):
     dup, n = [], 0
     for i, t in run.traces.items():
         for lk in t.get("lookups") or []:
+            if "found" not in lk:  # legacy nodes record counts only
+                continue
             distinct = len(lk.get("found") or [])
             n += lk.get("results", 0)
             if lk.get("results", 0) > distinct:
@@ -478,6 +669,10 @@ def accounting(run, tol, types, what):
     loss = unexplained / all_tx if all_tx else 0
     limit = tol.loss_churn if run.has_churn() else tol.loss
     what += " (churn: requests to departed nodes are lost by design)" if run.has_churn() else ""
+    if any(run.legacy.values()):
+        # legacy nodes count no traffic, so only the topic requests balance and only up to the session setups
+        return pf(tx < rx or tx - rx > setups, f"{what}: {tx} sent, {rx} received, difference within the {setups} session setups (legacy nodes count no traffic)",
+                  f"{what}: {tx} sent, {rx} received, difference not within the {setups} session setups", sent=tx, received=rx, session_setups=setups)
     return pf(abs(loss) > limit or (tx - rx > setups and not run.has_churn()),
               f"{what}: {tx} sent, {rx} received (+{share:.1%} first packets before a session); requests unexplained by session setups {loss:+.2%}",
               f"{what}: {tx} sent, {rx} received; {unexplained} requests neither received nor explained by session setups ({loss:+.2%}, tolerance {limit:.0%})",
@@ -544,12 +739,13 @@ def h3_hosts_under_load(run, tol):
         return verdict("needs-data", "no host metrics")
     cpu = [ns["cpu_pct"] for h in run.host for s in h for ns in s.get("nodes", [])]
     rss = [ns["rss_mb"] for h in run.host for s in h for ns in s.get("nodes", [])]
-    lowmem = min((s.get("mem_avail_mb", 1 << 30) for h in run.host for s in h), default=None)
+    lowmem = min((s["mem_avail_mb"] for h in run.host for s in h if s.get("mem_avail_mb")), default=None)
     if not cpu:
         return verdict("needs-data", "no node samples in host metrics")
     hot = max(cpu)
     fails = hot > tol.cpu_pct or (lowmem is not None and lowmem < tol.mem_avail_mb)
-    return pf(fails, f"node CPU peak {hot:.0f}%, RSS peak {max(rss):.0f} MB, host memory never below {lowmem} MB",
+    mem = f"host memory never below {lowmem:.0f} MB" if lowmem is not None else "host memory not reported"
+    return pf(fails, f"node CPU peak {hot:.0f}%, RSS peak {max(rss):.0f} MB, {mem}",
               f"host saturated: CPU peak {hot:.0f}% or free memory {lowmem} MB", cpu_peak=hot, rss_peak=max(rss), mem_avail_min=lowmem)
 
 
@@ -561,17 +757,17 @@ CHECKS = [
         ("C4", "only capable nodes: no legacy node in any cache", c4_only_capable),
         ("C5", "no self-ads: a registrar never holds its own ad", c5_no_self_ads),
         ("K1", "departed nodes leave caches within an ad lifetime", k1_departed_leave),
-        ("E1", "lifetime: no ad held longer than a lifetime without re-admission", lambda r, t: verdict("needs-data", "per-ad removal time is not traced")),
+        ("E1", "lifetime: expired ads are swept promptly and no ad expires beyond a lifetime", e1_lifetime),
         ("E2", "renewal keeps fan-out: final fan-out against the post-register level", e2_renewal_keeps_fanout),
         ("E3", "renewal accounting: renewals sent equal renewals received", e3_renewal_accounting),
         ("W1", "bounded wait: no admission after the attempt timeout", w1_bounded_wait),
-        ("W2", "no early admission: admitted only after the quoted wait", lambda r, t: verdict("needs-data", "required wait per admission is not traced")),
-        ("W3", "lower bound: quotes never undercut earlier ones by more than the time elapsed", lambda r, t: verdict("needs-data", "timed quote sequence per registrar is not traced")),
+        ("W2", "no early admission: admitted only after the required wait", w2_no_early_admission),
+        ("W3", "lower bound: a repeated quote never undercuts the previous one by more than the time elapsed", w3_lower_bound),
         ("W4", "full cache admits nothing", w4_full_cache),
         ("W5", "ticket validity: early, late, wrong-topic and bad-MAC tickets rejected", lambda r, t: verdict("unit-test", "TicketSealer tests in the fork; rejection counters not traced")),
-        ("W6", "record address: admitted record IP equals the packet source", lambda r, t: verdict("needs-data", "record IP is not in the ad sets")),
+        ("W6", "record address: admitted record IP equals the packet source", w6_record_address),
         ("R1", "bucket size: registered plus waiting never exceed the bucket size", r1_bucket_size),
-        ("R2", "bucket IP diversity: one registrar per /24 per bucket", lambda r, t: verdict("needs-data", "registrar ids per bucket are not traced")),
+        ("R2", "bucket IP diversity: one registrar per /24 per bucket", r2_bucket_ip_diversity),
         ("R3", "state maintained: tables complete by search start and no bucket left empty with candidates", r3_state_maintained),
     ]),
     ("search", [
@@ -581,7 +777,7 @@ CHECKS = [
         ("L4", "termination: lookups end at the target or the timeout, hit flag consistent", l4_termination),
         ("L5", "reply limits: nodes per reply within the topic and aux limits", l5_reply_limits),
         ("L6", "no duplicate results within a lookup", l6_no_duplicate_results),
-        ("I1", "no topic messages to legacy peers", lambda r, t: verdict("needs-data", "destinations of topic requests are not traced")),
+        ("I1", "no topic messages to legacy peers", i1_no_topic_requests_to_legacy),
         ("I2", "base discovery: legacy nodes still find providers", i2_base_discovery),
     ]),
     ("load", [
@@ -613,6 +809,9 @@ def main():
     ap.add_argument("--loss", type=float, default=0.02, help="tolerated share of requests lost between sent and received")
     ap.add_argument("--loss-churn", type=float, default=0.30, help="the same tolerance when the run has churn (requests to departed nodes are lost)")
     ap.add_argument("--skew-ms", type=int, default=5000, help="clock skew between hosts")
+    ap.add_argument("--floor-ms", type=int, default=1000, help="admission floor: a remaining wait under this is admitted")
+    ap.add_argument("--stale-ms", type=int, default=5000, help="how long an expired ad may stay in a table before the sweep")
+    ap.add_argument("--idle-bucket-ms", type=int, default=120000, help="how long a bucket may sit without registrations or attempts while candidates remain")
     ap.add_argument("--snapshot-ms", type=int, default=30000, help="period of the node's cache samples")
     ap.add_argument("--fanout-keep", type=float, default=0.5, help="minimum final fan-out as a share of the post-register level")
     ap.add_argument("--incomplete-frac", type=float, default=0.01, help="tolerated share of advertisers whose table is not complete by search start")

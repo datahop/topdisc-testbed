@@ -37,12 +37,12 @@ per-run report.
 
 | Plan check | Status | Where |
 |---|---|---|
-| Advertisements are stored correctly | ✓ | `checks.py` C2, C3, C4, C5 over the per-registrar ad sets (real backends); simnet keeps no ad sets |
-| Advertisements expire and are renewed correctly | ◐ | E2 (fan-out kept after the first lifetime), E3 (renewal accounting), K1 (departed nodes leave caches); E1 needs per-ad removal times |
+| Advertisements are stored correctly | ✓ | `checks.py` C2, C3, C4, C5 over the per-registrar ad sets (node traces; simnet writes `ads.json`) |
+| Advertisements expire and are renewed correctly | ✓ | E1 (expired ads swept, no expiry beyond a lifetime), E2 (fan-out kept after the first lifetime), E3 (renewal accounting), K1 (departed nodes leave caches) |
 | Caches never exceed capacity C | ✓ | C1 over the per-node cache samples (network-wide series on simnet); W4 reports not-exercised while no cache fills |
 | Lookups return advertisements for the requested service | ✓ | L1, L2, L3, L4, L5, L6 over the per-lookup result lists; simnet uses `foundExtra` |
-| Ticket and waiting-time behaviour is correct | ◐ | W1 (bounded wait); W2, W3, W6 need the required wait, timed quotes and record IP per admission; W5 is a fork unit test |
-| Registration state is maintained over time | ◐ | R1, R3 over the final bucket state; over time needs periodic bucket samples; R2 needs registrar ids per bucket |
+| Ticket and waiting-time behaviour is correct | ✓ | W1 (bounded wait), W2 (no early admission), W3 (lower bound on repeated quotes), W4 (full cache), W6 (record address) over the registrar's admission events; W5 is a fork unit test |
+| Registration state is maintained over time | ✓ | R1, R2 over the final bucket state with its registrars, R3 over the periodic bucket counts |
 
 `figures/checks.py <run-dir>` evaluates them and writes `checks.json` (verdict and
 evidence per check) and a table the per-run report includes; it exits non-zero
@@ -52,9 +52,9 @@ complete trace collection, hosts under load) sit in the same table.
 
 #### Differences and gaps
 
-- Seven checks wait on trace fields the fork does not export yet (E1, W2, W3,
-  W6, R2, I1 and exact per-reply counts for L5); the script reports them as
-  needs-data until a fork tag adds them.
+- E1, W2, W3, W4, W6, R2, I1 and the exact per-reply counts of L5 read fields
+  that exist from fork tag `v1.17.2-testbed.10` on (see TRACES.md); on older
+  traces the script reports them as needs-data.
 - The plan also asks to compare cache utilisation and waiting times against the
   Python simulator. That comparison is outside this repo.
 
@@ -263,4 +263,4 @@ Removed from the per-run report: `01_topic_distribution` (now a table),
 | simnet | 9 | 8 | 15 |
 | real backends | 9 | 6 | 17 |
 
-Plus the §2 correctness checks (`checks.py`), of which seven still need trace fields (#122).
+Plus the §2 correctness checks (`checks.py`, #122).
