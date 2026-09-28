@@ -40,6 +40,33 @@ print(round(n*0.0042 + 0.0816 + active*0.045, 2))')
 }
 
 # Runs a command on the coordinator through SSM and prints its output.
+# The coordinator registers with SSM a few minutes after boot; wait for it
+# before the first command instead of failing with InvalidInstanceId.
+ssm_wait() {
+  for i in $(seq 1 60); do
+    st=$(aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$(tfout coordinator_id)" \
+         --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null)
+    [ "$st" = Online ] && return 0
+    [ $i -eq 1 ] && echo "waiting for the coordinator to register with SSM"
+    sleep 10
+  done
+  echo "coordinator never registered with SSM"; return 1
+}
+# One t4g node is 2 vCPUs; a fleet above the region's vCPU quota comes up
+# short and the coordinator then refuses the inventory. Check first.
+quota_guard() {
+  # the coordinator (on demand, 2 vCPUs) counts against the on-demand quota only
+  code=L-1216C47A; coord=2; echo "$3 $4 $5 $6" | grep -q "spot=true" && { code=L-34B43A08; coord=0; }
+  echo "$1" | python3 -c '
+import json,sys; f=json.load(sys.stdin); home=sys.argv[1]; coord=int(sys.argv[2])
+for r,n in f.items():
+    if n: print(r, 2*n + (coord if r==home else 0))' "$2" "$coord" | while read r need; do
+    q=$(aws service-quotas get-service-quota --region $r --service-code ec2 --quota-code $code --query Quota.Value --output text 2>/dev/null | cut -d. -f1)
+    [ -n "$q" ] || { echo "$r: could not read the vCPU quota"; continue; }
+    [ "$q" -ge "$need" ] || { echo "refusing: $r needs $need vCPUs, quota $code is $q; request an increase or shrink the fleet"; exit 1; }
+    echo "$r: vCPU quota $q, need $need"
+  done
+}
 ssm_run() {
   params=$(python3 -c 'import json,sys; print(json.dumps({"commands":["export AWS_DEFAULT_REGION=$(cat /opt/topdisc/region); "+sys.argv[1]]}))' "$1")
   id=$(aws ssm send-command --instance-ids "$(tfout coordinator_id)" --document-name AWS-RunShellScript \
@@ -62,6 +89,7 @@ case "$1" in
     home=$(echo "$fleet" | python3 -c 'import json,sys; print(json.load(sys.stdin)["home_region"])')
     echo "fleet: $regions, home $home"
     cost_guard "$regions"
+    quota_guard "$regions" "$home" "$@"
     terraform -chdir=$TF init -input=false >/dev/null
     terraform -chdir=$TF apply -auto-approve -input=false -var "regions=$regions" -var "home_region=$home" \
       -var "max_hours=$MAX_HOURS" "$@"
@@ -72,7 +100,10 @@ case "$1" in
     # the results can still be fetched by hand (deploy/aws.sh pull / ssh).
     [ -n "$KEEP" ] || trap 'st=$?; if [ $st -eq 0 ] || [ -z "$PULL_FAILED" ]; then "$0" down; "$0" check; else echo "pull failed: deployment kept; fix, then deploy/aws.sh pull && deploy/aws.sh down"; fi' EXIT
     aws s3 cp "$2" "s3://$(tfout binaries_bucket)/scenario.yaml"
-    ssm_run "cd /opt/topdisc && aws s3 cp s3://$(tfout binaries_bucket)/scenario.yaml scenario.yaml && ./inventory-aws.sh && (nohup ./testbed scenario.yaml > run.out 2>&1; echo RUN-EXIT \$? >> run.out) > /dev/null 2>&1 &"
+    # the scenario's models (topic and churn fits) live next to it
+    aws s3 cp --recursive --only-show-errors "$(dirname "$2")/models" "s3://$(tfout binaries_bucket)/models"
+    ssm_wait
+    ssm_run "cd /opt/topdisc && aws s3 cp s3://$(tfout binaries_bucket)/scenario.yaml scenario.yaml && aws s3 cp --recursive --only-show-errors s3://$(tfout binaries_bucket)/models models && ./inventory-aws.sh && (nohup ./testbed scenario.yaml > run.out 2>&1; echo RUN-EXIT \$? >> run.out) > /dev/null 2>&1 &"
     echo "started on the coordinator; waiting"
     while :; do
       out=$(ssm_run "tail -c 4000 /opt/topdisc/run.out" 2>/dev/null || true)

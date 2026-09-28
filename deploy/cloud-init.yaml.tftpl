@@ -48,8 +48,9 @@ write_files:
         done
       done
       echo "fleet stopped at $(date -u)" >> /opt/topdisc/scale-down.log
-      me=$(curl -s -H "X-aws-ec2-metadata-token: $(curl -s -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')" http://169.254.169.254/latest/meta-data/instance-id)
-      aws ec2 terminate-instances --region $(cat /opt/topdisc/region) --instance-ids $me
+      # The NAT is gone by now, so no API call reaches EC2 from here: halt
+      # instead, and instance_initiated_shutdown_behavior terminates the instance.
+      shutdown -h now
   - path: /etc/systemd/system/fleet-scale-down.service
     content: |
       [Unit]

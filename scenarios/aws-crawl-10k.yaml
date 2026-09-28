@@ -1,0 +1,38 @@
+# AWS evaluation run, 2.5 h of fleet time: 10 000 instances, one node each,
+# over three regions; the 100 largest chains of the 2026-09-18 crawl as
+# topics, every node registering and searching its own, connection-driven
+# search with real RLPx sessions, adaptive search distance (floor 4), no
+# churn, so spot instances are fine. Phases: 15 min start window, 22.5 min
+# register wait, 75 min of search; with provisioning and pull the fleet
+# lives about 2.5 h. Needs the vCPU quota for 20 000 vCPUs over the three
+# regions (2 per t4g.nano) and MAX_HOURS=4 for the cost guard:
+#   MAX_HOURS=4 deploy/aws.sh up scenarios/aws-crawl-10k.yaml -var spot=true
+#   deploy/aws.sh run scenarios/aws-crawl-10k.yaml && deploy/aws.sh pull && deploy/aws.sh down
+name: aws-crawl-10k
+scenario:
+  population:
+    nodes: 10000
+    topics: 100
+    topic_model: models/crawl-2026-09-18.json
+    seed: 1
+  network:
+    regions: {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}
+  phases:
+    bootstrap_wait: 2m
+    start_window: 15m
+    register_wait: 22m30s
+    search_stagger: 10ms
+    search_timeout: 75m
+  topic:
+    ad_cache_size: 5000
+    search_yield_floor: 4
+  search:
+    model: conn
+    target_count: 0
+  conn_model:
+    enabled: true
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json
+    home_region: us-east-1
