@@ -47,7 +47,12 @@ The inventory is `{coordinator, hosts:[{index, ip, nodes}]}`, one host per
 instance. The coordinator assigns node indices in inventory order (node 0,
 the bootnode, on the first instance), posts each instance its assignment,
 starts everything, applies churn by killing and restarting over HTTP, and
-fetches the traces at the end.
+fetches the traces at the end. Before fixing the phases it waits for every
+hostagent to answer (up to 15 min; instances finish cloud-init at their own
+pace), and at the end it retries each trace fetch a few times and reports the
+missing ones by region. `run` starts the coordinator without waiting on the
+SSM command (a long run would outlive the command's timeout) and polls the
+run log; a run that fails is pulled for its logs and destroyed.
 
 Spending cap: `deploy/aws.sh up` refuses a fleet whose on-demand cost over
 `MAX_HOURS` (6) exceeds `MAX_SPEND` ($200); the account has a $200 monthly
@@ -58,8 +63,9 @@ boot, so a forgotten fleet stops costing on its own. `deploy/aws.sh down` still 
 gateways, coordinator, bucket).
 
 Quotas: 10k instances need the account's vCPU (AWS, GCP) or server (Hetzner)
-limit raised first. Spot/preemptible is fine for short runs; for 24 h churn
-runs use on-demand, because a reclaimed instance is indistinguishable from
+limit raised first. Spot is for smokes only: AWS reclaimed 13 % of a 540-node fleet
+within 35 min (2026-09-28), and each reclaimed node loses its trace; evaluation
+runs use on-demand, also because a reclaimed instance is indistinguishable from
 churn in the traces.
 
 ## Grid'5000

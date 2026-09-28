@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -57,6 +58,25 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 		return err
 	}
 	star := cfg.Testbed.Wan.Star()
+	agents := make([]agent, len(inv.Hosts))
+	peers := map[int]string{}
+	for i, h := range inv.Hosts {
+		port := cc.AgentPort
+		if h.Port != 0 {
+			port = h.Port
+		}
+		agents[i] = agent{fmt.Sprintf("http://%s:%d", h.IP, port)}
+		peers[h.Index] = h.IP
+	}
+	// Instances finish cloud-init at their own pace; the phases are absolute
+	// from t0, so every agent must answer before t0 is fixed.
+	regions := make([]string, len(inv.Hosts))
+	for i, h := range inv.Hosts {
+		regions[i] = h.Region
+	}
+	if err := waitAgents(agents, regions, 15*time.Minute); err != nil {
+		return err
+	}
 	t0 := time.Now().Add(20 * time.Second).UnixMilli()
 	as, err := assign.Generate(cfg, func(i int) assign.Host {
 		ip := inv.Hosts[hostOf[i]].IP
@@ -78,16 +98,6 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 	}
 	b, _ = json.Marshal(placement)
 	os.WriteFile(filepath.Join(runDir, "placement.json"), b, 0o644)
-	agents := make([]agent, len(inv.Hosts))
-	peers := map[int]string{}
-	for i, h := range inv.Hosts {
-		port := cc.AgentPort
-		if h.Port != 0 {
-			port = h.Port
-		}
-		agents[i] = agent{fmt.Sprintf("http://%s:%d", h.IP, port)}
-		peers[h.Index] = h.IP
-	}
 	mine := make([][]assign.Assignment, len(agents))
 	for _, a := range as {
 		mine[hostOf[a.Idx]] = append(mine[hostOf[a.Idx]], a)
@@ -120,14 +130,38 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 	}
 	trDir := filepath.Join(runDir, "traces")
 	os.MkdirAll(trDir, 0o755)
+	// A node writes its trace at StopAt and the agent serves it from disk;
+	// a fetch that lands before the write is retried, then the node is given
+	// up (a reclaimed spot instance never answers: the dial fails fast).
 	var got atomic.Int32
+	var failMu sync.Mutex
+	failed := map[int]error{}
 	each(len(as), func(i int) error {
-		if agents[hostOf[i]].fetch("trace", i, filepath.Join(trDir, fmt.Sprintf("node%d.json", i))) == nil {
-			got.Add(1)
+		var err error
+		for attempt := 0; attempt < 3; attempt++ {
+			if err = agents[hostOf[i]].fetch("trace", i, filepath.Join(trDir, fmt.Sprintf("node%d.json", i))); err == nil {
+				got.Add(1)
+				return nil
+			}
+			time.Sleep(time.Duration(5<<attempt) * time.Second)
 		}
+		failMu.Lock()
+		failed[i] = err
+		failMu.Unlock()
 		return nil
 	})
 	fmt.Printf("fetched %d/%d traces\n", got.Load(), len(as))
+	if len(failed) > 0 {
+		byHost := map[string]int{}
+		var sample string
+		for i, err := range failed {
+			byHost[inv.Hosts[hostOf[i]].Region]++
+			if sample == "" {
+				sample = fmt.Sprintf("node %d: %v", i, err)
+			}
+		}
+		fmt.Printf("traces missing: %d, by region %v; e.g. %s\n", len(failed), byHost, sample)
+	}
 	if cfg.Testbed.Traces.HostSamplePeriod > 0 {
 		hmDir := filepath.Join(runDir, "hostmetrics")
 		os.MkdirAll(hmDir, 0o755)
@@ -158,7 +192,12 @@ type prepareRequest struct {
 
 type agent struct{ base string }
 
-var agentClient = &http.Client{Timeout: 60 * time.Second}
+var healthClient = &http.Client{Timeout: 5 * time.Second}
+
+var agentClient = &http.Client{
+	Timeout:   60 * time.Second,
+	Transport: &http.Transport{DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext},
+}
 
 // Prepare creates a netns, a veth pair and a netem qdisc per node, each with
 // its own `ip` invocation, so it costs on the order of a minute per 300
@@ -178,6 +217,57 @@ func (a agent) prepare(p prepareRequest) error {
 		return fmt.Errorf("prepare: %s", bytes.TrimSpace(msg))
 	}
 	return nil
+}
+
+// waitAgents polls every agent's health endpoint until all answer or the
+// deadline passes, reporting the stragglers by region on the way.
+func waitAgents(agents []agent, regions []string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	pending := make([]bool, len(agents))
+	for i := range pending {
+		pending[i] = true
+	}
+	lastReport := time.Time{}
+	for {
+		var mu sync.Mutex
+		left := 0
+		each(len(agents), func(h int) error {
+			if !pending[h] {
+				return nil
+			}
+			resp, err := healthClient.Get(agents[h].base + "/health")
+			if err == nil {
+				resp.Body.Close()
+				if resp.StatusCode == 200 {
+					mu.Lock()
+					pending[h] = false
+					mu.Unlock()
+					return nil
+				}
+			}
+			mu.Lock()
+			left++
+			mu.Unlock()
+			return nil
+		})
+		if left == 0 {
+			return nil
+		}
+		byRegion := map[string]int{}
+		for h, p := range pending {
+			if p {
+				byRegion[regions[h]]++
+			}
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%d agents never answered: %v", left, byRegion)
+		}
+		if time.Since(lastReport) > 30*time.Second {
+			fmt.Printf("waiting for %d agents: %v\n", left, byRegion)
+			lastReport = time.Now()
+		}
+		time.Sleep(5 * time.Second)
+	}
 }
 
 func (a agent) call(op string, idx int) error {

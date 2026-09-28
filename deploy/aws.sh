@@ -4,7 +4,8 @@
 #                                          refuses if nodes x on-demand price x MAX_HOURS (6) > MAX_SPEND ($200)
 #   deploy/aws.sh push                  rebuild and re-push the binaries only
 #   deploy/aws.sh run scenarios/x.yaml  run it on the coordinator, wait, pull the results, then destroy everything
-#                                       up and run destroy on any failure or interrupt too; KEEP=1 keeps the deployment
+#                                       up and run destroy on any failure or interrupt too (a failed run is pulled first);
+#                                       only a failed pull keeps the deployment; KEEP=1 keeps it always
 #   deploy/aws.sh check                 list what is still running in every region (instances, NAT gateways)
 #   deploy/aws.sh pull                  fetch the latest run directory from the coordinator into runs/
 #   deploy/aws.sh ssh                   shell on the coordinator (SSM)
@@ -67,6 +68,15 @@ for r,n in f.items():
     echo "$r: vCPU quota $q, need $need"
   done
 }
+# ssm_send starts a command and returns at once. The run itself is started this
+# way: the SSM shell only completes when the process tree exits, so a run that
+# lasts an hour would otherwise hit the command's execution timeout.
+ssm_send() {
+  params=$(python3 -c 'import json,sys; print(json.dumps({"commands":["export AWS_DEFAULT_REGION=$(cat /opt/topdisc/region); "+sys.argv[1]]}))' "$1")
+  aws ssm send-command --instance-ids "$(tfout coordinator_id)" --document-name AWS-RunShellScript \
+       --parameters "$params" --timeout-seconds 600 --query Command.CommandId --output text > /dev/null
+}
+
 ssm_run() {
   params=$(python3 -c 'import json,sys; print(json.dumps({"commands":["export AWS_DEFAULT_REGION=$(cat /opt/topdisc/region); "+sys.argv[1]]}))' "$1")
   id=$(aws ssm send-command --instance-ids "$(tfout coordinator_id)" --document-name AWS-RunShellScript \
@@ -96,22 +106,30 @@ case "$1" in
     build_push ;;
   push) build_push ;;
   run)
-    # Destroy at the end unless KEEP=1; a failed pull keeps the deployment so
-    # the results can still be fetched by hand (deploy/aws.sh pull / ssh).
+    # Destroy at the end unless KEEP=1. A run that failed is pulled for its
+    # logs and destroyed; only a failed pull keeps the deployment so the
+    # results can still be fetched by hand (deploy/aws.sh pull / ssh).
     [ -n "$KEEP" ] || trap 'st=$?; if [ $st -eq 0 ] || [ -z "$PULL_FAILED" ]; then "$0" down; "$0" check; else echo "pull failed: deployment kept; fix, then deploy/aws.sh pull && deploy/aws.sh down"; fi' EXIT
     aws s3 cp "$2" "s3://$(tfout binaries_bucket)/scenario.yaml"
     # the scenario's models (topic and churn fits) live next to it
     aws s3 cp --recursive --only-show-errors "$(dirname "$2")/models" "s3://$(tfout binaries_bucket)/models"
     ssm_wait
-    ssm_run "cd /opt/topdisc && aws s3 cp s3://$(tfout binaries_bucket)/scenario.yaml scenario.yaml && aws s3 cp --recursive --only-show-errors s3://$(tfout binaries_bucket)/models models && ./inventory-aws.sh && (nohup ./testbed scenario.yaml > run.out 2>&1; echo RUN-EXIT \$? >> run.out) > /dev/null 2>&1 &"
+    ssm_run "cd /opt/topdisc && aws s3 cp s3://$(tfout binaries_bucket)/scenario.yaml scenario.yaml && aws s3 cp --recursive --only-show-errors s3://$(tfout binaries_bucket)/models models && ./inventory-aws.sh && rm -f run.out"
+    ssm_send "cd /opt/topdisc && setsid sh -c './testbed scenario.yaml > run.out 2>&1; echo RUN-EXIT \$? >> run.out' > /dev/null 2>&1 < /dev/null &"
     echo "started on the coordinator; waiting"
     while :; do
       out=$(ssm_run "tail -c 4000 /opt/topdisc/run.out" 2>/dev/null || true)
       echo "$out" | grep -qE "^RUN-EXIT" && break
-      echo "$out" | grep -E "backend:|nodes started|\[churn\]" | tail -1
+      echo "$out" | grep -E "backend:|waiting for|nodes started|\[churn\]|traces missing" | tail -1
       sleep 30
     done
     echo "$out" | grep -vE "^PARAMS"
+    rc=$(echo "$out" | sed -n 's/^RUN-EXIT //p' | tail -1)
+    if [ "$rc" != 0 ]; then
+      echo "run failed (exit $rc); pulling what it wrote, then destroying (KEEP=1 to keep the deployment)"
+      "$0" pull || true
+      exit 1
+    fi
     "$0" pull || { PULL_FAILED=1; exit 1; } ;;
   check)
     for r in $(sed -n 's/^REGIONS = \[\(.*\)\]/\1/p' $TF/gen.py | tr -d '",'); do
