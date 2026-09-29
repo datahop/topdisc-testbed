@@ -19,12 +19,14 @@ closed = np.maximum(np.array([(s["end"] - s["start"]) / 3600 for s in S if s["en
 opened = np.maximum(np.array([(span - s["start"]) / 3600 for s in S if s["end"] is None]), PROBE_H)
 allen = np.concatenate([closed, opened])
 fig, ax = plt.subplots(1, 2, figsize=(13, 4.4))
-for arr, lab, st in ((allen, f"all sessions ({len(allen)})", "-"), (closed, f"sessions that ended ({len(closed)})", "--"), (opened, f"still up at the end ({len(opened)}, length = time until the crawl ended)", ":")):
-    x = np.sort(arr); ax[0].plot(x, np.arange(1, len(x) + 1) / len(x), st, label=lab)
+x = np.sort(closed); ax[0].plot(x, np.arange(1, len(x) + 1) / len(x), color="#C28F24")
+for q in (0.5, 0.9):
+    v = np.quantile(closed, q); ax[0].plot([v], [q], "o", color="#C28F24", ms=4)
+    ax[0].annotate(f"{int(q*100)} % under {v*60:.0f} min" if v < 1 else f"{int(q*100)} % under {v:.1f} h", (v, q), textcoords="offset points", xytext=(6, -12), fontsize=8)
 ax[0].set_xscale("log"); ax[0].set_xlim(PROBE_H, 30); ax[0].set_xticks([2/60, 15/60, 1, 6, 24]); ax[0].set_xticklabels(["2 min", "15 min", "1 h", "6 h", "24 h"])
-ax[0].set_xlabel("session length (log)"); ax[0].set_ylabel("CDF over sessions"); ax[0].grid(alpha=.3); ax[0].legend(fontsize=8, loc="upper left")
-ax[0].axvline(0.25, color="#C28F24", ls=":", lw=1); ax[0].text(0.26, 0.02, "ad lifetime", fontsize=8, color="#C28F24")
-ax[0].set_title("How long a node stays online")
+ax[0].set_xlabel("length of the session (log)"); ax[0].set_ylabel(f"share of the {len(closed)} sessions that ended"); ax[0].grid(alpha=.3)
+ax[0].axvline(0.25, color="grey", ls=":", lw=1); ax[0].text(0.26, 0.02, "15 min ad lifetime", fontsize=8, color="grey")
+ax[0].set_title(f"Sessions that ended during the crawl ({100*len(closed)/len(allen):.0f} % of all; the other {100*len(opened)/len(allen):.0f} % ran to the end)")
 # per node: hours online over the crawl
 online = np.array([sum(((s["end"] if s["end"] is not None else span) - s["start"]) for s in ss) / 3600 for ss in by.values()])
 x = np.sort(online); ax[1].plot(x, np.arange(1, len(x) + 1) / len(x))

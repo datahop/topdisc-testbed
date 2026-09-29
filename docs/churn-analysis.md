@@ -32,13 +32,14 @@ at any given moment; 24 585 were present in the first hour and 25 671 at the end
 
 ![session length](figures/churn-analysis/sessions.png)
 
-*Left: length of every session, 30 minute rule; sessions still open when the crawl ended
-are counted up to that moment. Right: hours online over the 24 hours, per node.*
+*Left: how long a stretch of uptime lasts, for the sessions that ended during the crawl
+(29 % of all sessions; the other 71 % were still running when the crawl stopped). Right:
+hours online over the 24 hours, per node.*
 
-The left panel counts sessions, the right one nodes. 71 % of all sessions were still open
-when the crawl ended, most of them having run the whole day. The 29 % that ended are short:
-42 % of them were a single answer, 58 % lasted under 15 minutes, nine in ten under six
-hours. Per node, 80 % were online for the whole 24 hours and 10 % for under two hours.
+A session is one uninterrupted stretch of being reachable; it ends after 30 minutes of
+silence. The left panel is about the flicker: of the sessions that ended, 42 % were a
+single answer, 58 % lasted under 15 minutes, nine in ten under six hours. The right panel
+is about the nodes: 80 % were online for the whole 24 hours, 10 % for under two hours.
 
 ## 4. Who leaves, who comes back
 
