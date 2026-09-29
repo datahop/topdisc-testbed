@@ -245,19 +245,66 @@ func idBucket(id string) int {
 // writeMetrics writes metrics.json and series.json into runDir from the raw traces.
 // epochMs is the registration start (assignment 0's RegisterAt): the common
 // clock of registrationTimingNs, registrationStartNs and searchStartMs.
+// leanTrace is the first pass: the only two things the per-trace folding
+// below needs a whole-run view of before it can start. Every other field is
+// left undeclared so the decoder drops it -- which is the point, since the
+// fields it drops (conn.found, the wire counters in every sample) are what
+// make a trace large.
+type leanTrace struct {
+	ID      string `json:"id"`
+	Samples []struct {
+		AtMs int64 `json:"at_ms"`
+	} `json:"samples"`
+}
+
+// writeMetrics writes metrics.json and series.json into runDir from the raw traces.
+// epochMs is the registration start (assignment 0's RegisterAt): the common
+// clock of registrationTimingNs, registrationStartNs and searchStartMs.
+//
+// Traces are read twice and held one at a time. Holding them all at once cost
+// ~104 GB at 25k nodes -- over half of it conn.found, the dialer's full
+// discovery history -- which put the aggregation out of reach of any machine
+// as the population grew. Everything here folds each trace into accumulators
+// sized by topic or by sample slot, so peak memory tracks the output rather
+// than the input.
 func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
-	traces := map[int]*rawTrace{}
+	tracePath := func(idx int) string {
+		return filepath.Join(trDir, fmt.Sprintf("node%d.json", idx))
+	}
+
+	// Pass 1 (lean): registrant identity per topic, and the series epoch.
+	topicOf := map[int]string{}
+	registrants := map[string]map[string]bool{} // topic hex -> 64-hex id
+	topicIds := map[string]int{}
+	idOf := map[int]string{}
+	present := map[int]bool{}
+	var t0 int64 = -1
 	for _, a := range as {
-		b, err := os.ReadFile(filepath.Join(trDir, fmt.Sprintf("node%d.json", a.Idx)))
+		name := a.Topics[0]
+		topicOf[a.Idx] = name
+		th := topicHex(name)
+		topicIds[th] = topicIndex(name)
+		b, err := os.ReadFile(tracePath(a.Idx))
 		if err != nil {
 			continue
 		}
-		var t rawTrace
-		if json.Unmarshal(b, &t) == nil {
-			traces[a.Idx] = &t
+		var lt leanTrace
+		if json.Unmarshal(b, &lt) != nil {
+			continue
+		}
+		present[a.Idx] = true
+		idOf[a.Idx] = lt.ID
+		if !a.Legacy {
+			if registrants[th] == nil {
+				registrants[th] = map[string]bool{}
+			}
+			registrants[th][lt.ID] = true
+		}
+		if len(lt.Samples) > 0 && (t0 < 0 || lt.Samples[0].AtMs < t0) {
+			t0 = lt.Samples[0].AtMs
 		}
 	}
-	if len(traces) == 0 {
+	if len(present) == 0 {
 		return fmt.Errorf("no traces")
 	}
 	epochMs := as[0].Phases.RegisterBase
@@ -266,115 +313,227 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 	}
 	ns := func(ms int64) int64 { return (ms - epochMs) * 1e6 }
 
-	// Ground truth: registrants per topic (TopDisc nodes register their topic).
-	topicOf := map[int]string{}
-	registrants := map[string]map[string]bool{} // topic hex -> 64-hex id
-	topicIds := map[string]int{}
-	idOf := map[int]string{}
-	for _, a := range as {
-		name := a.Topics[0]
-		topicOf[a.Idx] = name
-		th := topicHex(name)
-		topicIds[th] = topicIndex(name)
-		if t, ok := traces[a.Idx]; ok {
-			idOf[a.Idx] = t.ID
-			if !a.Legacy {
-				if registrants[th] == nil {
-					registrants[th] = map[string]bool{}
-				}
-				registrants[th][t.ID] = true
-			}
-		}
+	period := as[0].SampleMs
+	doSeries := period > 0 && t0 >= 0
+
+	// Accumulators. Each is sized by topic, by registrant or by sample slot --
+	// never by the number of traces held open.
+	var results []searchResult
+	bucketFull := map[string]map[string][]int64{}
+	complete := map[string]map[string]int64{}
+	cov := map[int]coverage{}
+	timing := map[string]map[string]int64{}
+	placements := map[string]map[string]*placeAgg{}
+	startNs := map[string]int64{}
+	slots := map[int]*overheadSample{}
+	waits := map[string]*waitOut{}
+	for th, k := range topicIds {
+		cov[k] = coverage{ByRegistrant: map[string]int{}, ByHost: map[string]int{}}
+		timing[th] = map[string]int64{}
+		placements[th] = map[string]*placeAgg{}
+	}
+	newSample := func(slot int) *overheadSample {
+		return &overheadSample{TSec: float64(slot*int(period)) / 1000, TxBytes: make([]int64, seriesBuckets), RxBytes: make([]int64, seriesBuckets),
+			TxMsgs: make([]int64, seriesBuckets), RxMsgs: make([]int64, seriesBuckets), ByType: map[string]*bucketed{}, Nodes: make([]int, seriesBuckets), CacheByTopic: map[string]int64{}}
 	}
 
-	// results[]: one per TopDisc searcher, its lookups merged.
-	var results []searchResult
+	// Pass 2: one trace in memory at a time, folded into every accumulator.
 	for _, a := range as {
-		t, ok := traces[a.Idx]
-		if !ok || t.Legacy {
+		if !present[a.Idx] {
 			continue
 		}
-		th := topicHex(topicOf[a.Idx])
-		target := len(registrants[th])
-		if registrants[th][t.ID] {
-			target--
+		b, err := os.ReadFile(tracePath(a.Idx))
+		if err != nil {
+			continue
 		}
-		r := searchResult{NodeIdx: a.Idx, NodeID: short(t.ID), Topic: topicIds[th], Target: target,
-			SearchStartMs: t.SearchAtMs - epochMs, TimeToFirstNs: 0,
-			NewFoundAtMs: []int64{}, FoundRegistrantIDs: []string{}, UniqueFoundAtMs: []int64{}, UniqueFoundIDs: []string{},
-			LookupLatencyMs: []int64{}, LookupResults: []int{}}
-		seen := map[string]bool{}
-		var first, last int64 = -1, 0
-		for _, l := range t.Lookups {
-			r.Lookups++
-			if l.HitTarget {
-				r.LookupsHitTarget++
-			} else {
-				r.HitTimeout = true
+		t := &rawTrace{}
+		if json.Unmarshal(b, t) != nil {
+			continue
+		}
+		b = nil
+
+		// results[]: one per TopDisc searcher, its lookups merged.
+		if !t.Legacy {
+			th := topicHex(topicOf[a.Idx])
+			target := len(registrants[th])
+			if registrants[th][t.ID] {
+				target--
 			}
-			r.LookupLatencyMs = append(r.LookupLatencyMs, l.LatencyMs)
-			r.LookupResults = append(r.LookupResults, l.Results)
-			if l.Queries >= 0 {
-				r.LookupQueries = append(r.LookupQueries, l.Queries)
-				r.LookupContacted = append(r.LookupContacted, l.Contacted)
-			}
-			r.SearchStats = addStats(r.SearchStats, l.Search)
-			r.Found += l.Results
-			end := l.StartMs + l.LatencyMs - t.SearchAtMs
-			if end > last {
-				last = end
-			}
-			for _, f := range l.Found {
-				at := l.StartMs + f.AtMs - t.SearchAtMs
-				r.FoundRegistrant++
-				if first < 0 || at < first {
-					first = at
+			r := searchResult{NodeIdx: a.Idx, NodeID: short(t.ID), Topic: topicIds[th], Target: target,
+				SearchStartMs: t.SearchAtMs - epochMs, TimeToFirstNs: 0,
+				NewFoundAtMs: []int64{}, FoundRegistrantIDs: []string{}, UniqueFoundAtMs: []int64{}, UniqueFoundIDs: []string{},
+				LookupLatencyMs: []int64{}, LookupResults: []int{}}
+			seen := map[string]bool{}
+			var first, last int64 = -1, 0
+			for _, l := range t.Lookups {
+				r.Lookups++
+				if l.HitTarget {
+					r.LookupsHitTarget++
+				} else {
+					r.HitTimeout = true
 				}
-				if seen[f.ID] {
+				r.LookupLatencyMs = append(r.LookupLatencyMs, l.LatencyMs)
+				r.LookupResults = append(r.LookupResults, l.Results)
+				if l.Queries >= 0 {
+					r.LookupQueries = append(r.LookupQueries, l.Queries)
+					r.LookupContacted = append(r.LookupContacted, l.Contacted)
+				}
+				r.SearchStats = addStats(r.SearchStats, l.Search)
+				r.Found += l.Results
+				end := l.StartMs + l.LatencyMs - t.SearchAtMs
+				if end > last {
+					last = end
+				}
+				for _, f := range l.Found {
+					at := l.StartMs + f.AtMs - t.SearchAtMs
+					r.FoundRegistrant++
+					if first < 0 || at < first {
+						first = at
+					}
+					if seen[f.ID] {
+						continue
+					}
+					seen[f.ID] = true
+					r.UniqueFoundIDs = append(r.UniqueFoundIDs, short(f.ID))
+					r.UniqueFoundAtMs = append(r.UniqueFoundAtMs, at)
+					r.NewFoundAtMs = append(r.NewFoundAtMs, at)
+				}
+			}
+			if c := t.Conn; c != nil {
+				// Connection-driven: the dialer's search is the node's one session.
+				for _, f := range c.Found {
+					if !registrants[th][f.ID] {
+						continue
+					}
+					at := c.StartMs + f.AtMs - t.SearchAtMs
+					r.Found++
+					r.FoundRegistrant++
+					if first < 0 || at < first {
+						first = at
+					}
+					if at > last {
+						last = at
+					}
+					if seen[f.ID] {
+						continue
+					}
+					seen[f.ID] = true
+					r.UniqueFoundIDs = append(r.UniqueFoundIDs, short(f.ID))
+					r.UniqueFoundAtMs = append(r.UniqueFoundAtMs, at)
+					r.NewFoundAtMs = append(r.NewFoundAtMs, at)
+				}
+				r.OutboundConns = t.Outbound
+				if c.SlotsFilledMs >= 0 {
+					r.SlotsFilledAtMs = c.StartMs + c.SlotsFilledMs - t.SearchAtMs
+				}
+				r.SearchStats = addStats(r.SearchStats, c.Search)
+			}
+			r.UniqueRegistrant, r.NewRegistrant = len(seen), len(seen)
+			r.FoundRegistrantIDs = append(r.FoundRegistrantIDs, r.UniqueFoundIDs...)
+			if first >= 0 {
+				r.TimeToFirstNs = first * 1e6
+			}
+			r.TimeToCompletionNs = last * 1e6
+			results = append(results, r)
+		}
+
+		// Per-bucket registration completion (advertiser side), ns since regStart.
+		if !a.Legacy {
+			th := topicHex(topicOf[a.Idx])
+			if bucketFull[th] == nil {
+				bucketFull[th], complete[th] = map[string][]int64{}, map[string]int64{}
+			}
+			if len(t.RegBucketFull) > 0 {
+				v := make([]int64, len(t.RegBucketFull))
+				for i, ms := range t.RegBucketFull {
+					v[i] = -1
+					if ms >= 0 {
+						v[i] = ns(ms)
+					}
+				}
+				bucketFull[th][t.ID] = v
+			}
+			if t.RegCompleteMs > 0 {
+				complete[th][t.ID] = ns(t.RegCompleteMs)
+			}
+		}
+
+		// Registration coverage, timing, placements from registrar snapshots.
+		if !a.Legacy {
+			startNs[t.ID] = ns(a.Phases.RegisterAt)
+		}
+		for th, k := range topicIds {
+			held := 0
+			for _, id := range t.AdsFinal[th] {
+				if id != t.ID && registrants[th][id] {
+					held++
+					cov[k].ByRegistrant[id]++
+				}
+			}
+			cov[k].ByHost[t.ID] = held
+			for id, atMs := range t.AdsFirstSeenMs[th] {
+				if id == t.ID || !registrants[th][id] {
 					continue
 				}
-				seen[f.ID] = true
-				r.UniqueFoundIDs = append(r.UniqueFoundIDs, short(f.ID))
-				r.UniqueFoundAtMs = append(r.UniqueFoundAtMs, at)
-				r.NewFoundAtMs = append(r.NewFoundAtMs, at)
+				v := ns(atMs)
+				if cur, ok := timing[th][id]; !ok || v < cur {
+					timing[th][id] = v
+				}
+				pa := placements[th][id]
+				if pa == nil {
+					pa = &placeAgg{}
+					placements[th][id] = pa
+				}
+				pa.SumNs += v
+				pa.Count++
 			}
 		}
-		if c := t.Conn; c != nil {
-			// Connection-driven: the dialer's search is the node's one session.
-			for _, f := range c.Found {
-				if !registrants[th][f.ID] {
-					continue
+
+		// series.json: align every node's samples on the sample period.
+		if doSeries {
+			bkt := idBucket(t.ID)
+			for _, smp := range t.Samples {
+				slot := int((smp.AtMs - t0 + period/2) / period)
+				s := slots[slot]
+				if s == nil {
+					s = newSample(slot)
+					slots[slot] = s
 				}
-				at := c.StartMs + f.AtMs - t.SearchAtMs
-				r.Found++
-				r.FoundRegistrant++
-				if first < 0 || at < first {
-					first = at
+				s.Nodes[bkt]++
+				s.CacheHeld += int64(smp.CacheHeld)
+				s.CacheCap += int64(smp.CacheCap)
+				for th, n := range smp.ByTopic {
+					s.CacheByTopic[th] += int64(n)
 				}
-				if at > last {
-					last = at
+				for typ, c := range smp.Wire {
+					s.TxBytes[bkt] += c["txBytes"]
+					s.RxBytes[bkt] += c["rxBytes"]
+					s.TxMsgs[bkt] += c["txMsgs"]
+					s.RxMsgs[bkt] += c["rxMsgs"]
+					bt := s.ByType[typ]
+					if bt == nil {
+						bt = &bucketed{make([]int64, seriesBuckets), make([]int64, seriesBuckets), make([]int64, seriesBuckets), make([]int64, seriesBuckets)}
+						s.ByType[typ] = bt
+					}
+					bt.TxBytes[bkt] += c["txBytes"]
+					bt.RxBytes[bkt] += c["rxBytes"]
+					bt.TxMsgs[bkt] += c["txMsgs"]
+					bt.RxMsgs[bkt] += c["rxMsgs"]
 				}
-				if seen[f.ID] {
-					continue
-				}
-				seen[f.ID] = true
-				r.UniqueFoundIDs = append(r.UniqueFoundIDs, short(f.ID))
-				r.UniqueFoundAtMs = append(r.UniqueFoundAtMs, at)
-				r.NewFoundAtMs = append(r.NewFoundAtMs, at)
 			}
-			r.OutboundConns = t.Outbound
-			if c.SlotsFilledMs >= 0 {
-				r.SlotsFilledAtMs = c.StartMs + c.SlotsFilledMs - t.SearchAtMs
+		}
+
+		for th, w := range t.Wait {
+			o := waits[th]
+			if o == nil {
+				o = &waitOut{Topic: th, QuotedMs: []int64{}, AdmittedMs: []int64{}}
+				waits[th] = o
 			}
-			r.SearchStats = addStats(r.SearchStats, c.Search)
+			o.Admitted += w.Admitted
+			o.Quoted += w.Quoted
+			o.QuotedMs = append(o.QuotedMs, w.QuotedMs...)
+			o.AdmittedMs = append(o.AdmittedMs, w.AdmittedMs...)
 		}
-		r.UniqueRegistrant, r.NewRegistrant = len(seen), len(seen)
-		r.FoundRegistrantIDs = append(r.FoundRegistrantIDs, r.UniqueFoundIDs...)
-		if first >= 0 {
-			r.TimeToFirstNs = first * 1e6
-		}
-		r.TimeToCompletionNs = last * 1e6
-		results = append(results, r)
 	}
 	sort.Slice(results, func(i, j int) bool { return results[i].NodeIdx < results[j].NodeIdx })
 
@@ -446,78 +605,6 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 		findCounts = append(findCounts, fc)
 	}
 
-	// Registration coverage, timing, placements from registrar snapshots.
-	// Per-bucket registration completion (advertiser side), ns since regStart.
-	bucketFull := map[string]map[string][]int64{}
-	complete := map[string]map[string]int64{}
-	for _, a := range as {
-		t, ok := traces[a.Idx]
-		if !ok || a.Legacy {
-			continue
-		}
-		th := topicHex(topicOf[a.Idx])
-		if bucketFull[th] == nil {
-			bucketFull[th], complete[th] = map[string][]int64{}, map[string]int64{}
-		}
-		if len(t.RegBucketFull) > 0 {
-			v := make([]int64, len(t.RegBucketFull))
-			for i, ms := range t.RegBucketFull {
-				v[i] = -1
-				if ms >= 0 {
-					v[i] = ns(ms)
-				}
-			}
-			bucketFull[th][t.ID] = v
-		}
-		if t.RegCompleteMs > 0 {
-			complete[th][t.ID] = ns(t.RegCompleteMs)
-		}
-	}
-
-	cov := map[int]coverage{}
-	timing := map[string]map[string]int64{}
-	placements := map[string]map[string]*placeAgg{}
-	startNs := map[string]int64{}
-	for th, k := range topicIds {
-		cov[k] = coverage{ByRegistrant: map[string]int{}, ByHost: map[string]int{}}
-		timing[th] = map[string]int64{}
-		placements[th] = map[string]*placeAgg{}
-	}
-	for _, a := range as {
-		t, ok := traces[a.Idx]
-		if !ok {
-			continue
-		}
-		if !a.Legacy {
-			startNs[t.ID] = ns(a.Phases.RegisterAt)
-		}
-		for th, k := range topicIds {
-			held := 0
-			for _, id := range t.AdsFinal[th] {
-				if id != t.ID && registrants[th][id] {
-					held++
-					cov[k].ByRegistrant[id]++
-				}
-			}
-			cov[k].ByHost[t.ID] = held
-			for id, atMs := range t.AdsFirstSeenMs[th] {
-				if id == t.ID || !registrants[th][id] {
-					continue
-				}
-				v := ns(atMs)
-				if cur, ok := timing[th][id]; !ok || v < cur {
-					timing[th][id] = v
-				}
-				pa := placements[th][id]
-				if pa == nil {
-					pa = &placeAgg{}
-					placements[th][id] = pa
-				}
-				pa.SumNs += v
-				pa.Count++
-			}
-		}
-	}
 	m := map[string]any{
 		"perTopic": perTopic, "results": results, "registrationCoverage": map[string]any{"byTopic": cov},
 		"registrationTimingNs": timing, "findCountByTopic": findCounts, "topicIds": topicIds,
@@ -536,57 +623,8 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 	}
 	f.Close()
 
-	// series.json: align every node's samples on the sample period.
-	period := as[0].SampleMs
-	if period <= 0 {
+	if !doSeries {
 		return nil
-	}
-	var t0 int64 = -1
-	for _, t := range traces {
-		if len(t.Samples) > 0 && (t0 < 0 || t.Samples[0].AtMs < t0) {
-			t0 = t.Samples[0].AtMs
-		}
-	}
-	if t0 < 0 {
-		return nil
-	}
-	slots := map[int]*overheadSample{}
-	newSample := func(slot int) *overheadSample {
-		s := &overheadSample{TSec: float64(slot*int(period)) / 1000, TxBytes: make([]int64, seriesBuckets), RxBytes: make([]int64, seriesBuckets),
-			TxMsgs: make([]int64, seriesBuckets), RxMsgs: make([]int64, seriesBuckets), ByType: map[string]*bucketed{}, Nodes: make([]int, seriesBuckets), CacheByTopic: map[string]int64{}}
-		return s
-	}
-	for _, t := range traces {
-		b := idBucket(t.ID)
-		for _, smp := range t.Samples {
-			slot := int((smp.AtMs - t0 + period/2) / period)
-			s := slots[slot]
-			if s == nil {
-				s = newSample(slot)
-				slots[slot] = s
-			}
-			s.Nodes[b]++
-			s.CacheHeld += int64(smp.CacheHeld)
-			s.CacheCap += int64(smp.CacheCap)
-			for th, n := range smp.ByTopic {
-				s.CacheByTopic[th] += int64(n)
-			}
-			for typ, c := range smp.Wire {
-				s.TxBytes[b] += c["txBytes"]
-				s.RxBytes[b] += c["rxBytes"]
-				s.TxMsgs[b] += c["txMsgs"]
-				s.RxMsgs[b] += c["rxMsgs"]
-				bt := s.ByType[typ]
-				if bt == nil {
-					bt = &bucketed{make([]int64, seriesBuckets), make([]int64, seriesBuckets), make([]int64, seriesBuckets), make([]int64, seriesBuckets)}
-					s.ByType[typ] = bt
-				}
-				bt.TxBytes[b] += c["txBytes"]
-				bt.RxBytes[b] += c["rxBytes"]
-				bt.TxMsgs[b] += c["txMsgs"]
-				bt.RxMsgs[b] += c["rxMsgs"]
-			}
-		}
 	}
 	keys := make([]int, 0, len(slots))
 	for k := range slots {
@@ -596,20 +634,6 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 	samples := make([]overheadSample, 0, len(keys))
 	for _, k := range keys {
 		samples = append(samples, *slots[k])
-	}
-	waits := map[string]*waitOut{}
-	for _, t := range traces {
-		for th, w := range t.Wait {
-			o := waits[th]
-			if o == nil {
-				o = &waitOut{Topic: th, QuotedMs: []int64{}, AdmittedMs: []int64{}}
-				waits[th] = o
-			}
-			o.Admitted += w.Admitted
-			o.Quoted += w.Quoted
-			o.QuotedMs = append(o.QuotedMs, w.QuotedMs...)
-			o.AdmittedMs = append(o.AdmittedMs, w.AdmittedMs...)
-		}
 	}
 	waitList := make([]waitOut, 0, len(waits))
 	for _, th := range sortedKeys(waits) {
