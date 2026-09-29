@@ -81,7 +81,7 @@ deploy/g5k/g5k.py check
 ```
 
 Sizing, measured on one `gros` machine at Nancy with the crawl workload
-(2026-09-28, PR #22): a node costs 21.6 MB RSS and about a third of a percent
+(2026-09-28): a node costs 21.6 MB RSS and about a third of a percent
 of one thread in steady state, so memory would allow some 3400 nodes per
 machine; what binds first is the host's networking. At 750 nodes per machine
 the kernel neighbour table overflowed its defaults and took the host off the
