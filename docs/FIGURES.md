@@ -264,3 +264,14 @@ Removed from the per-run report: `01_topic_distribution` (now a table),
 | real backends | 9 | 6 | 17 |
 
 Plus the §2 correctness checks (`checks.py`, #122).
+
+## Churn-rate axis across runs
+
+`figures/churn_axis.py --out DIR LABEL=RUN_DIR ...` puts several churn runs on
+one axis: departures per node per hour measured from each run's `churn.json`
+against the share of dead results, their age against the ad lifetime, and the
+outcome of the searches (recall for continuous searches, the share of
+searchers that filled their slots and the time it took for connection-driven
+ones). `churn_axis.png` and `churn_axis.md`. The crawl model's rate is set by
+`session_churn.window_real_hours`: 0 is real time, 6 and 24 compress that many
+hours of the crawl's churn into each hour of the run.

@@ -80,6 +80,18 @@ deploy/g5k/g5k.py run scenarios/g5k-smoke.yaml   # runs on the coordinator, wait
 deploy/g5k/g5k.py check
 ```
 
+Sizing, measured on one `gros` machine at Nancy with the crawl workload
+(2026-09-28): a node costs 21.6 MB RSS and about a third of a percent
+of one thread in steady state, so memory would allow some 3400 nodes per
+machine; what binds first is the host's networking. At 750 nodes per machine
+the kernel neighbour table overflowed its defaults and took the host off the
+network, and the agent ran out of file descriptors. `prepare` now raises the
+neighbour-table thresholds and the driver starts the agent with 65536
+descriptors; the scenarios keep `vnodes_per_machine` at 250, and 500 is the
+next step to validate. Prepare itself costs about 0.23 s per node (one `ip`
+invocation each for namespace, veth and qdisc), which is why it has its own
+deadline.
+
 `testbed.g5k.cluster` is required (EnOSlib has no default cluster for a
 site). `testbed fleet <scenario>` prints the machine count next to the
 region counts. The walltime is the hard cap. `KEEP=1` keeps the job after
