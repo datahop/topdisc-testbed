@@ -27,7 +27,7 @@ namespace on that host's private bridge, no per-node real IP or container
 needed. No subnet reservation either -- hosts route each other's private
 /16s over the ordinary prod network hostagent already needs for SSH.
 """
-import json, os, pathlib, subprocess, sys, time
+import json, os, pathlib, socket, subprocess, sys, time
 
 import yaml
 
@@ -126,8 +126,13 @@ def up(path):
                f"-legacy-binary /root/topdisc-node-legacy -workdir /root/run "
                f">/root/hostagent.log 2>&1 </dev/null &'")
         wait_healthy(pnodes)
+        # Resolve to addresses: every host routes its peers' /16s with
+        # `ip route replace ... via <peer>`, which takes an address, not the
+        # name EnOSlib hands back. A single-host run never routes a peer, so
+        # this only shows up once there are two.
         inventory = {"coordinator": coordinator,
-                     "hosts": [{"index": i, "ip": h, "nodes": g["vnodes_per_machine"]} for i, h in enumerate(pnodes)]}
+                     "hosts": [{"index": i, "ip": socket.gethostbyname(h), "nodes": g["vnodes_per_machine"]}
+                               for i, h in enumerate(pnodes)]}
         (HERE / "inventory.json").write_text(json.dumps(inventory, indent=1))
         sh(f"scp -q {REPO}/out/testbed {HERE}/inventory.json {path} root@{coordinator}:/root/")
         sh(f"scp -q -r {REPO}/scenarios/models root@{coordinator}:/root/")
