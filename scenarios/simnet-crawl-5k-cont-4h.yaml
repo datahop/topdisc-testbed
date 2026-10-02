@@ -1,8 +1,8 @@
 # Evaluation run, simnet, lookup-only: 5000 nodes over the 100 largest chains
 # of the 2026-09-18 crawl (topics and node addresses from the crawl), crawl
 # churn in real time with hard departures, one unpaced continuous search per
-# node for 4 h, no connection model. search_yield_floor 4 is the adaptive
-# search distance; 0 runs the default searcher for the A/B. About 56 GB RSS
+# node for 4 h, no connection model. search_yield_floor 8 is the adaptive
+# search distance; -1 runs the default searcher for the A/B. About 56 GB RSS
 # and 48 cores:
 #   GOMEMLIMIT=96GiB SIMNET_HEAPPROF=1h ./simnet scenarios/simnet-crawl-5k-cont-4h.yaml
 name: simnet-crawl-5k-cont-4h
@@ -24,7 +24,7 @@ scenario:
     search_timeout: 4h
   topic:
     ad_cache_size: 5000
-    search_yield_floor: 4
+    search_yield_floor: 8
   search:
     model: continuous
   session_churn:

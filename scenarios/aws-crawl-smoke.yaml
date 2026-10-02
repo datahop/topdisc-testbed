@@ -1,7 +1,7 @@
 # AWS smoke for the crawl workload before a large run: 540 instances over
 # three regions, the 20 largest crawl chains as topics (the 20th takes the
 # tail), every node registering and searching its own, connection-driven
-# search with real RLPx sessions, adaptive floor 4, no churn. Short phases
+# search with real RLPx sessions, adaptive floor 8, no churn. Short phases
 # so the fleet lives about 45 min; the point is that traces, metrics and the
 # figures come out right, not the numbers. 540 fits the account's 448-vCPU
 # per-region quota (2 vCPUs per t4g.nano, 216 nodes in the home region).
@@ -24,7 +24,7 @@ scenario:
     search_timeout: 10m
   topic:
     ad_cache_size: 5000
-    search_yield_floor: 4
+    search_yield_floor: 8
   search:
     model: conn
     target_count: 0

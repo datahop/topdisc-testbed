@@ -1,6 +1,6 @@
 # Search A/B over a topic mix: 5000 nodes, 5 Zipf topics, every node registers its own, no
 # churn, no connection model, one continuous unpaced search per node for 1 h.
-# search_yield_floor 4 is the adaptive search distance, 0 the default searcher.
+# search_yield_floor 8 is the adaptive search distance, -1 the default searcher.
 name: simnet-search-five-5k
 scenario:
   population:
@@ -19,7 +19,7 @@ scenario:
     search_timeout: 1h
   topic:
     ad_cache_size: 5000
-    search_yield_floor: 4
+    search_yield_floor: 8
   search:
     model: continuous
 testbed:
