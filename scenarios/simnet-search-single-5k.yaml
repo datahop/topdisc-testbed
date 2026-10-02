@@ -1,6 +1,6 @@
 # Search A/B with nothing else in the picture: 5000 nodes, one topic, no churn, no connection model, one continuous unpaced
 # search per node for 1 h. Measures registrar load against search
-# performance. search_yield_floor 4 is the adaptive search distance, 0 the
+# performance. search_yield_floor 8 is the adaptive search distance, -1 the
 # default searcher; search_aux_radius 1 additionally asks aux nodes only for
 # the active bucket and its neighbours.
 name: simnet-search-single-5k
@@ -20,7 +20,7 @@ scenario:
     search_timeout: 1h
   topic:
     ad_cache_size: 5000
-    search_yield_floor: 4
+    search_yield_floor: 8
   search:
     model: continuous
 testbed:

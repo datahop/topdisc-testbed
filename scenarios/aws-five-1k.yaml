@@ -1,7 +1,7 @@
 # AWS lookup-only run: 858 on-demand instances over four regions (the most the
 # 448/384-vCPU per-region quotas allow), 5 Zipf topics,
 # every node registering and searching its own, one continuous unpaced
-# search per node for 51 min (60 min run), no connection model, adaptive floor 4, no
+# search per node for 51 min (60 min run), no connection model, adaptive floor 8, no
 # churn. The real-backend counterpart of simnet-search-five-5k, for recall
 # over time and registrar load without the dialer in the loop.
 #   deploy/aws.sh up scenarios/aws-five-1k.yaml
@@ -23,7 +23,7 @@ scenario:
     search_timeout: 51m
   topic:
     ad_cache_size: 5000
-    search_yield_floor: 4
+    search_yield_floor: 8
   search:
     model: continuous
 testbed:

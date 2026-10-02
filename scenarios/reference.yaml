@@ -70,8 +70,8 @@ scenario:
     reg_bucket_standby: 0              # standby registrars per registration bucket; 0 = default 20
     topic_nodes_limit: 0               # topic nodes in a TOPICQUERY reply; 0 = default 16
     aux_nodes_limit: 0                 # closest-to-topic nodes attached to TOPICQUERY and REGTOPIC replies; 0 = default 8
-    search_yield_floor: 0              # adaptive search distance: query the farthest bucket whose replies carry at least this many ads; 0 = query every bucket
-    search_aux_radius: 0               # adaptive search: ask aux nodes only for the active bucket and its neighbours within this many buckets; 0 = every bucket with free space
+    search_yield_floor: 0              # adaptive search distance: query the farthest bucket whose replies carry at least this many ads; 0 = default 8, negative = default searcher (query every bucket)
+    search_aux_radius: 0               # adaptive search: ask aux nodes only for the active bucket and its neighbours within this many buckets; 0 = default 1, negative = every bucket with free space
     nodes_per_source_bucket: 0         # cap per source per bucket; 0 = default 1 (inert on topdisc)
     remove_on_expiry: false            # drop ads at expiry instead of renewing (inert on topdisc)
   search:

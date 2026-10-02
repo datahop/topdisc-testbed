@@ -233,7 +233,7 @@ Python simulator (#123, #124).
 |---|---|
 | `02b_time_to_first_cdf` | Time to the first result, per topic |
 | `11_discovery_rate` | New registrants per searcher per minute over time, per topic, for long-lived searches (continuous, conn): shows how fast discovery decays and when a topic runs out of new registrants |
-| `12_search_bucket` | Share of TOPICQUERY requests per search-table bucket (0 = farthest from the topic), per topic or topic pool, and for adaptive searches (`search_yield_floor` > 0) the median active bucket over search time: where each topic's searches settle |
+| `12_search_bucket` | Share of TOPICQUERY requests per search-table bucket (0 = farthest from the topic), per topic or topic pool, and for adaptive searches (`search_yield_floor` ≥ 0) the median active bucket over search time: where each topic's searches settle |
 | `oh_02_idspace_peak_rate`, `oh_04_idspace_peak_msgtype` | Peak sustained rate per node, total and by type |
 | `oh_09_cost_per_lookup` | To be replaced by a per-topic cost (see load) |
 | `cmp_01`–`cmp_13` (`compare_runs.py`) | Same scenario on two backends: lookups, discovery, registration, cache, registrar load, traffic, load vs distance |
