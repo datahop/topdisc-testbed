@@ -26,6 +26,7 @@ type Inventory struct {
 	Hosts       []struct {
 		Index  int    `json:"index"`
 		IP     string `json:"ip"`
+		Public string `json:"public_ip"` // advertised by the nodes when set; IP stays the control address
 		Nodes  int    `json:"nodes"`
 		Region string `json:"region"`
 		Port   int    `json:"port"` // hostagent port; 0 = testbed.cloud.agent_port
@@ -83,7 +84,11 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 		if star != nil {
 			ip = host.NodeIP(hostOf[i], local[i])
 		}
-		return assign.Host{IP: ip, BasePort: 30300 + local[i], StatusOff: 10000} // TraceFile: the hostagent fills its own path
+		h := assign.Host{IP: ip, BasePort: 30300 + local[i], StatusOff: 10000} // TraceFile: the hostagent fills its own path
+		if star == nil {
+			h.ExtIP = inv.Hosts[hostOf[i]].Public
+		}
+		return h
 	}, t0, filepath.Dir(cfg.SourcePath))
 	if err != nil {
 		return err
@@ -94,7 +99,7 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 	placement := make([]map[string]any, len(as))
 	for i := range as {
 		h := inv.Hosts[hostOf[i]]
-		placement[i] = map[string]any{"idx": i, "host": h.Index, "ip": h.IP, "region": h.Region}
+		placement[i] = map[string]any{"idx": i, "host": h.Index, "ip": h.IP, "public_ip": h.Public, "region": h.Region}
 	}
 	b, _ = json.Marshal(placement)
 	os.WriteFile(filepath.Join(runDir, "placement.json"), b, 0o644)

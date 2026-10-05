@@ -32,6 +32,7 @@ type assignment struct {
 	Idx        int      `json:"idx"`
 	Key        string   `json:"key"`
 	IP         string   `json:"ip"`
+	ExtIP      string   `json:"ext_ip"`
 	Port       int      `json:"port"`
 	StatusPort int      `json:"status_port"`
 	Bootnodes  []string `json:"bootnodes"`
@@ -214,6 +215,9 @@ func main() {
 		os.Exit(1)
 	}
 	srv.LocalNode().SetFallbackIP(net.ParseIP(asg.IP))
+	if asg.ExtIP != "" {
+		srv.LocalNode().SetStaticIP(net.ParseIP(asg.ExtIP))
+	}
 	srv.LocalNode().Set(svc)
 
 	var (

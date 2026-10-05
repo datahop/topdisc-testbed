@@ -20,6 +20,7 @@ module "{al(r)}" {{
   instance_types   = var.instance_types
   coordinator_type = var.coordinator_type
   spot             = var.spot
+  public_ips       = var.public_ips
   instance_profile = aws_iam_instance_profile.ssm.name
   cloud_init       = local.cloud_init
 }}

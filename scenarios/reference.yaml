@@ -14,6 +14,7 @@ testbed:
     inventory: inventory.json          # cloud backend: inventory.json written on the coordinator by deploy/inventory-*.sh
     home_region: us-east-1             # cloud backend: coordinator, bootnode and binaries bucket live here
     agent_port: 9000                   # cloud backend: hostagent port on every host
+    public_ips: false                  # AWS: a public IPv4 per node instance, and the nodes talk on those, so the per-/24 limits and the admission IP score run; false = private addresses (cheaper)
     verbosity: 2                       # cloud backend: node log level
     grace: 30s                         # cloud backend: wait after the last StopAt before fetching traces
   g5k:

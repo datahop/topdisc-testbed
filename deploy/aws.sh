@@ -6,7 +6,7 @@
 #   deploy/aws.sh run scenarios/x.yaml  run it on the coordinator, wait, pull the results, then destroy everything
 #                                       up and run destroy on any failure or interrupt too (a failed run is pulled first);
 #                                       only a failed pull keeps the deployment; KEEP=1 keeps it always
-#   deploy/aws.sh check                 list what is still running in every region (instances, NAT gateways)
+#   deploy/aws.sh check                 list what is still running in every region (instances, NAT gateways, elastic IPs)
 #   deploy/aws.sh pull                  fetch the latest run directory from the coordinator into runs/
 #   deploy/aws.sh ssh                   shell on the coordinator (SSM)
 #   deploy/aws.sh down                  terraform destroy
@@ -29,12 +29,14 @@ build_push() {
 MAX_SPEND=${MAX_SPEND:-200}
 MAX_HOURS=${MAX_HOURS:-6}
 # On-demand us-east-1 prices, $/h: nodes on t4g.nano, coordinator m7g.large,
-# one NAT gateway per active region. Spot is cheaper, so this is conservative.
+# a NAT gateway per active region with private addresses, a public IPv4 per
+# instance with public_ips. Spot is cheaper, so this is conservative.
 cost_guard() {
   est=$(echo "$1" | python3 -c '
 import json,sys
 f=json.load(sys.stdin); n=sum(f.values()); active=sum(1 for v in f.values() if v>0)
-print(round(n*0.0042 + 0.0816 + active*0.045, 2))')
+pub=sys.argv[1]=="true"
+print(round(n*0.0042 + 0.0816 + ((n+1)*0.005 if pub else active*0.045), 2))' "$2")
   total=$(python3 -c "print(round($est*$MAX_HOURS,2))")
   echo "estimated: \$$est/h on-demand, \$$total over MAX_HOURS=$MAX_HOURS (cap \$$MAX_SPEND); the coordinator scales the fleet to zero after $MAX_HOURS h"
   python3 -c "import sys; sys.exit(0 if $total <= $MAX_SPEND else 1)" || { echo "refusing: over MAX_SPEND; lower MAX_HOURS or the fleet"; exit 1; }
@@ -97,12 +99,13 @@ case "$1" in
     fleet=$(./testbed fleet "$sc")
     regions=$(echo "$fleet" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["regions"]))')
     home=$(echo "$fleet" | python3 -c 'import json,sys; print(json.load(sys.stdin)["home_region"])')
-    echo "fleet: $regions, home $home"
-    cost_guard "$regions"
+    pub=$(echo "$fleet" | python3 -c 'import json,sys; print(str(json.load(sys.stdin).get("public_ips", False)).lower())')
+    echo "fleet: $regions, home $home, public IPs $pub"
+    cost_guard "$regions" "$pub"
     quota_guard "$regions" "$home" "$@"
     terraform -chdir=$TF init -input=false >/dev/null
     terraform -chdir=$TF apply -auto-approve -input=false -var "regions=$regions" -var "home_region=$home" \
-      -var "max_hours=$MAX_HOURS" "$@"
+      -var "max_hours=$MAX_HOURS" -var "public_ips=$pub" "$@"
     build_push ;;
   push) build_push ;;
   run)
@@ -135,7 +138,8 @@ case "$1" in
     for r in $(sed -n 's/^REGIONS = \[\(.*\)\]/\1/p' $TF/gen.py | tr -d '",'); do
       n=$(aws ec2 describe-instances --region $r --filters Name=instance-state-name,Values=pending,running --query 'length(Reservations[].Instances[])' --output text)
       g=$(aws ec2 describe-nat-gateways --region $r --filter Name=state,Values=pending,available --query 'length(NatGateways)' --output text)
-      echo "$r: instances=$n nat-gateways=$g"
+      e=$(aws ec2 describe-addresses --region $r --query 'length(Addresses)' --output text)
+      echo "$r: instances=$n nat-gateways=$g elastic-ips=$e"
     done ;;
   pull)
     mkdir -p runs

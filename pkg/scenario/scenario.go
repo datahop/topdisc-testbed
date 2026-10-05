@@ -195,6 +195,7 @@ type CloudConfig struct {
 	Inventory  string        `yaml:"inventory"`
 	HomeRegion string        `yaml:"home_region"`
 	AgentPort  int           `yaml:"agent_port"`
+	PublicIPs  bool          `yaml:"public_ips"`
 	Verbosity  int           `yaml:"verbosity"`
 	Grace      time.Duration `yaml:"grace"`
 }
@@ -268,6 +269,7 @@ var paramDocs = []paramDoc{
 	{"testbed.cloud.inventory", "cloud backend: inventory.json written on the coordinator by deploy/inventory-*.sh"},
 	{"testbed.cloud.home_region", "cloud backend: coordinator, bootnode and binaries bucket live here"},
 	{"testbed.cloud.agent_port", "cloud backend: hostagent port on every host"},
+	{"testbed.cloud.public_ips", "AWS: a public IPv4 per node instance, and the nodes talk on those, so the per-/24 limits and the admission IP score run; false = private addresses (cheaper)"},
 	{"testbed.cloud.verbosity", "cloud backend: node log level"},
 	{"testbed.cloud.grace", "cloud backend: wait after the last StopAt before fetching traces"},
 	{"testbed.g5k.site", "Grid'5000 site of the reservation"},
