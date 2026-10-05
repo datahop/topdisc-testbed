@@ -13,6 +13,7 @@ module "us_east_1" {
   instance_types   = var.instance_types
   coordinator_type = var.coordinator_type
   spot             = var.spot
+  public_ips       = var.public_ips
   instance_profile = aws_iam_instance_profile.ssm.name
   cloud_init       = local.cloud_init
 }
@@ -30,6 +31,7 @@ module "us_west_2" {
   instance_types   = var.instance_types
   coordinator_type = var.coordinator_type
   spot             = var.spot
+  public_ips       = var.public_ips
   instance_profile = aws_iam_instance_profile.ssm.name
   cloud_init       = local.cloud_init
 }
@@ -47,6 +49,7 @@ module "eu_central_1" {
   instance_types   = var.instance_types
   coordinator_type = var.coordinator_type
   spot             = var.spot
+  public_ips       = var.public_ips
   instance_profile = aws_iam_instance_profile.ssm.name
   cloud_init       = local.cloud_init
 }
@@ -64,6 +67,7 @@ module "ap_southeast_1" {
   instance_types   = var.instance_types
   coordinator_type = var.coordinator_type
   spot             = var.spot
+  public_ips       = var.public_ips
   instance_profile = aws_iam_instance_profile.ssm.name
   cloud_init       = local.cloud_init
 }
@@ -81,6 +85,7 @@ module "sa_east_1" {
   instance_types   = var.instance_types
   coordinator_type = var.coordinator_type
   spot             = var.spot
+  public_ips       = var.public_ips
   instance_profile = aws_iam_instance_profile.ssm.name
   cloud_init       = local.cloud_init
 }

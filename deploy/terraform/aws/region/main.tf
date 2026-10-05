@@ -1,7 +1,11 @@
-# One region of the fleet: a VPC with a private node subnet, NAT for the
-# binaries download and SSM, and an autoscaling group of one-node instances.
-# The home region also hosts the coordinator. Created in every supported
-# region; a region with no nodes and no coordinator costs nothing (no NAT).
+# One region of the fleet: a VPC and an autoscaling group of one-node
+# instances. With public_ips every instance has a public IPv4, the subnets
+# route through the internet gateway, and the nodes talk on the public
+# addresses. Without it the instances are private, a NAT gateway serves the
+# binaries download and SSM, and the nodes talk over the peered VPCs. The
+# coordinator always drives the hostagents over the private addresses. The
+# home region also hosts the coordinator. Created in every supported region;
+# a region with no nodes and no coordinator costs nothing.
 terraform {
   required_providers {
     aws = {
@@ -19,6 +23,7 @@ variable "coordinator_type" { type = string }
 variable "spot" { type = bool }
 variable "instance_profile" { type = string }
 variable "cloud_init" { type = string }
+variable "public_ips" { type = bool }
 
 locals {
   active = var.nodes > 0 || var.coordinator
@@ -44,10 +49,11 @@ resource "aws_vpc" "tb" {
 }
 # One node subnet per AZ (/20 each), so spot can draw on the whole region.
 resource "aws_subnet" "nodes" {
-  count             = min(length(data.aws_availability_zones.az.names), 8)
-  vpc_id            = aws_vpc.tb.id
-  cidr_block        = cidrsubnet(var.cidr, 4, count.index)
-  availability_zone = data.aws_availability_zones.az.names[count.index]
+  count                   = min(length(data.aws_availability_zones.az.names), 8)
+  vpc_id                  = aws_vpc.tb.id
+  cidr_block              = cidrsubnet(var.cidr, 4, count.index)
+  availability_zone       = data.aws_availability_zones.az.names[count.index]
+  map_public_ip_on_launch = var.public_ips
 }
 resource "aws_subnet" "public" {
   vpc_id            = aws_vpc.tb.id
@@ -62,6 +68,17 @@ resource "aws_security_group" "intra" {
     protocol    = "-1"
     cidr_blocks = ["10.0.0.0/8"] # this VPC and the peered regions
   }
+  # With public addresses, node traffic comes from the other nodes' public
+  # addresses, which are not known in advance.
+  dynamic "ingress" {
+    for_each = var.public_ips ? ["udp", "tcp"] : []
+    content {
+      from_port   = 30300
+      to_port     = 30999
+      protocol    = ingress.value
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+  }
   egress {
     from_port   = 0
     to_port     = 0
@@ -75,12 +92,12 @@ resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.tb.id
 }
 resource "aws_eip" "nat" {
-  count  = local.active ? 1 : 0
+  count  = local.active && !var.public_ips ? 1 : 0
   domain = "vpc"
   tags   = { Name = "topdisc-testbed" }
 }
 resource "aws_nat_gateway" "nat" {
-  count         = local.active ? 1 : 0
+  count         = local.active && !var.public_ips ? 1 : 0
   allocation_id = aws_eip.nat[0].id
   subnet_id     = aws_subnet.public.id
   depends_on    = [aws_internet_gateway.igw]
@@ -103,7 +120,8 @@ resource "aws_route" "private_default" {
   count                  = local.active ? 1 : 0
   route_table_id         = aws_vpc.tb.main_route_table_id
   destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id         = aws_nat_gateway.nat[0].id
+  nat_gateway_id         = var.public_ips ? null : aws_nat_gateway.nat[0].id
+  gateway_id             = var.public_ips ? aws_internet_gateway.igw[0].id : null
 }
 resource "aws_vpc_endpoint" "s3" {
   vpc_id          = aws_vpc.tb.id
@@ -115,13 +133,14 @@ resource "aws_instance" "coordinator" {
   # scale-down.sh ends with `shutdown -h now`: with this the halt terminates the
   # instance without an API call, which it can no longer make once its NAT is gone
   instance_initiated_shutdown_behavior = "terminate"
-  count                  = var.coordinator ? 1 : 0
-  ami                    = data.aws_ami.al2023_arm.id
-  instance_type          = var.coordinator_type
-  subnet_id              = aws_subnet.nodes[0].id
-  vpc_security_group_ids = [aws_security_group.intra.id]
-  iam_instance_profile   = var.instance_profile
-  user_data              = var.cloud_init
+  count                                = var.coordinator ? 1 : 0
+  ami                                  = data.aws_ami.al2023_arm.id
+  instance_type                        = var.coordinator_type
+  subnet_id                            = aws_subnet.nodes[0].id
+  associate_public_ip_address          = var.public_ips
+  vpc_security_group_ids               = [aws_security_group.intra.id]
+  iam_instance_profile                 = var.instance_profile
+  user_data                            = var.cloud_init
   # A restarted instance does not re-run cloud-init; replace it instead.
   user_data_replace_on_change = true
   root_block_device {
@@ -137,7 +156,10 @@ resource "aws_launch_template" "node" {
   image_id    = data.aws_ami.al2023_arm.id
   user_data   = base64encode(var.cloud_init)
   iam_instance_profile { name = var.instance_profile }
-  vpc_security_group_ids = [aws_security_group.intra.id]
+  network_interfaces {
+    associate_public_ip_address = var.public_ips
+    security_groups             = [aws_security_group.intra.id]
+  }
   block_device_mappings {
     device_name = "/dev/xvda"
     ebs {

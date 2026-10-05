@@ -57,6 +57,7 @@ type Assignment struct {
 	Idx        int           `json:"idx"`
 	Key        string        `json:"key"` // hex secp256k1 private key
 	IP         string        `json:"ip"`
+	ExtIP      string        `json:"ext_ip,omitempty"` // address other nodes reach it on, when not IP (a cloud instance's public address)
 	Port       int           `json:"port"`
 	StatusPort int           `json:"status_port"`
 	Bootnodes  []string      `json:"bootnodes"`
@@ -75,6 +76,7 @@ type Assignment struct {
 // Host describes where a node runs; the backend supplies one per node.
 type Host struct {
 	IP        string
+	ExtIP     string // advertised address when it differs from IP; empty = IP
 	BasePort  int
 	StatusOff int    // status port = port + StatusOff
 	TraceFile string // per-node trace path
@@ -142,7 +144,11 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 	stopAt := searchAt + ph.SearchTimeout.Milliseconds()
 	// Node 0 is the bootnode for everyone.
 	h0 := hosts(0)
-	boot := fmt.Sprintf("enode://%s@%s:%d", hex.EncodeToString(crypto.FromECDSAPub(&keys[0].PublicKey)[1:]), h0.IP, h0.BasePort)
+	bootIP := h0.IP
+	if h0.ExtIP != "" {
+		bootIP = h0.ExtIP
+	}
+	boot := fmt.Sprintf("enode://%s@%s:%d", hex.EncodeToString(crypto.FromECDSAPub(&keys[0].PublicKey)[1:]), bootIP, h0.BasePort)
 	legacy := legacySet(rng, topics, sc.Population.LegacyFrac)
 	if !sc.Population.LegacyBootnode {
 		legacy[0] = false
@@ -151,7 +157,7 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 	for i := range out {
 		h := hosts(i)
 		a := Assignment{
-			Idx: i, Key: hex.EncodeToString(crypto.FromECDSA(keys[i])), IP: h.IP, Port: h.BasePort, StatusPort: h.BasePort + h.StatusOff, TraceFile: h.TraceFile,
+			Idx: i, Key: hex.EncodeToString(crypto.FromECDSA(keys[i])), IP: h.IP, ExtIP: h.ExtIP, Port: h.BasePort, StatusPort: h.BasePort + h.StatusOff, TraceFile: h.TraceFile,
 			Topics: topics[i], MaxPeers: sc.ConnModel.MaxPeers, DialRatio: sc.ConnModel.DialRatio,
 			Phases: Phases{StartAt: t0 + startOff[i], RegisterBase: registerAt, RegisterAt: registerAt + regOff[i], SearchAt: searchAt + int64(i)*ph.SearchStagger.Milliseconds(), StopAt: stopAt},
 			Search: Search{Model: sc.Search.Model, TargetCount: sc.Search.TargetCount, RequestTimeout: sc.Search.RequestTimeout.Milliseconds(),

@@ -5,11 +5,12 @@
 set -e
 for r in $(cat /opt/topdisc/regions); do
   aws ec2 describe-instances --region "$r" --filters Name=tag:role,Values=host Name=instance-state-name,Values=running \
-    --query 'Reservations[].Instances[].PrivateIpAddress' --output text | tr '\t' '\n' | sed "s/^/$r /"
+    --query 'Reservations[].Instances[].[PrivateIpAddress,PublicIpAddress]' --output text | sed "s/^/$r /"
 done | python3 -c '
 import json,sys
 rows=sorted(l.split() for l in sys.stdin if l.strip())
-print(json.dumps({"coordinator":"","hosts":[{"index":i,"ip":ip,"nodes":1,"region":r} for i,(r,ip) in enumerate(rows)]}))
+# ip is the private control address; nodes advertise public_ip
+print(json.dumps({"coordinator":"","hosts":[{"index":i,"ip":ip,"public_ip":(pub if pub!="None" else ""),"nodes":1,"region":r} for i,(r,ip,pub) in enumerate(rows)]}))
 ' > inventory.json
 python3 -c '
 import json,collections

@@ -22,6 +22,10 @@ variable "spot" {
   description = "spot for nodes; not for 24h churn runs unless reclaims are logged as departures"
   default     = false
 }
+variable "public_ips" {
+  description = "a public IPv4 per instance, used by the nodes; false = private addresses over the peered VPCs"
+  default     = false
+}
 variable "max_hours" {
   description = "the coordinator scales every autoscaling group to zero this long after boot"
   default     = 6

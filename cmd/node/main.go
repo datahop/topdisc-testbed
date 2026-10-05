@@ -173,6 +173,9 @@ func main() {
 		os.Exit(1)
 	}
 	srv.LocalNode().SetFallbackIP(net.ParseIP(*ip))
+	if asg.ExtIP != "" {
+		srv.LocalNode().SetStaticIP(net.ParseIP(asg.ExtIP))
+	}
 	srv.LocalNode().Set(svcOf(*topicName)) // the service, readable by legacy nodes too
 
 	// Registrar side: every second, which advertisers' ads this node holds,
