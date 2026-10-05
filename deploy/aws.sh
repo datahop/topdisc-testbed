@@ -7,9 +7,9 @@
 #                                       up and run destroy on any failure or interrupt too (a failed run is pulled first);
 #                                       only a failed pull keeps the deployment; KEEP=1 keeps it always
 #   deploy/aws.sh check                 list what is still running in every region (instances, NAT gateways, elastic IPs)
-#   deploy/aws.sh pull                  fetch the latest run directory from the coordinator into runs/
+#   deploy/aws.sh pull                  fetch the latest run directory into runs/ (the coordinator saves every run to the bucket)
 #   deploy/aws.sh ssh                   shell on the coordinator (SSM)
-#   deploy/aws.sh down                  terraform destroy
+#   deploy/aws.sh down                  copy every saved run to runs/archives, then terraform destroy
 set -e
 cd "$(dirname "$0")/.."
 TF="deploy/terraform/aws"
@@ -118,7 +118,9 @@ case "$1" in
     aws s3 cp --recursive --only-show-errors "$(dirname "$2")/models" "s3://$(tfout binaries_bucket)/models"
     ssm_wait
     ssm_run "cd /opt/topdisc && aws s3 cp s3://$(tfout binaries_bucket)/scenario.yaml scenario.yaml && aws s3 cp --recursive --only-show-errors s3://$(tfout binaries_bucket)/models models && ./inventory-aws.sh && rm -f run.out"
-    ssm_send "cd /opt/topdisc && setsid sh -c './testbed scenario.yaml > run.out 2>&1; echo RUN-EXIT \$? >> run.out' > /dev/null 2>&1 < /dev/null &"
+    # The coordinator saves the run to the bucket itself, so a laptop that is
+    # away at the end loses nothing; pull then only downloads.
+    ssm_send "cd /opt/topdisc && setsid sh -c './testbed scenario.yaml > run.out 2>&1; rc=\$?; ./save-runs.sh >> run.out 2>&1; echo RUN-EXIT \$rc >> run.out' > /dev/null 2>&1 < /dev/null &"
     echo "started on the coordinator; waiting"
     while :; do
       out=$(ssm_run "tail -c 4000 /opt/topdisc/run.out" 2>/dev/null || true)
@@ -144,12 +146,23 @@ case "$1" in
   pull)
     mkdir -p runs
     b=$(tfout binaries_bucket)
-    d=$(ssm_run "cd /opt/topdisc && d=\$(ls -td *-2* | head -1) && tar czf /tmp/\$d.tgz \$d && aws s3 cp /tmp/\$d.tgz s3://$b/runs/\$d.tgz >/dev/null && echo PULLED \$d" | sed -n 's/^PULLED //p')
-    [ -n "$d" ] || { echo "pull: no run archive produced on the coordinator"; exit 1; }
-    aws s3 cp "s3://$b/runs/$d.tgz" - | tar xzf - -C runs
+    d=$(ssm_run "cd /opt/topdisc && ./save-runs.sh >/dev/null 2>&1; d=\$(ls -td *-2*/ | head -1) && d=\$(basename \$d) && aws s3 ls s3://$b/runs/\$d.tgz >/dev/null && echo PULLED \$d" | sed -n 's/^PULLED //p')
+    [ -n "$d" ] || { echo "pull: no run archive in s3://$b/runs/"; exit 1; }
+    for i in 1 2 3 4 5; do
+      aws s3 cp --only-show-errors "s3://$b/runs/$d.tgz" "runs/$d.tgz" && tar xzf "runs/$d.tgz" -C runs && rm -f "runs/$d.tgz" && break
+      echo "pull: download failed (try $i of 5); retrying"; sleep 20
+    done
     [ -f "runs/$d/nodes.json" ] || { echo "pull: runs/$d incomplete"; exit 1; }
     echo "runs/$d ($(ls runs/$d/traces | wc -l | tr -d ' ') traces)" ;;
   ssh) aws ssm start-session --target "$(tfout coordinator_id)" ;;
-  down) terraform -chdir=$TF destroy -auto-approve -input=false -var "regions={}" ;;
+  down)
+    # The bucket goes with the deployment: copy every saved run first, and
+    # refuse to destroy while that fails (FORCE=1 destroys anyway).
+    if b=$(tfout binaries_bucket 2>/dev/null) && [ -n "$b" ]; then
+      mkdir -p runs/archives
+      aws s3 sync --only-show-errors "s3://$b/runs/" runs/archives/ || [ -n "$FORCE" ] || { echo "down: could not copy s3://$b/runs/ to runs/archives; not destroying (FORCE=1 to destroy anyway)"; exit 1; }
+      ls runs/archives/*.tgz 2>/dev/null | sed 's/^/kept: /'
+    fi
+    terraform -chdir=$TF destroy -auto-approve -input=false -var "regions={}" ;;
   *) sed -n 2,9p "$0"; exit 2 ;;
 esac
