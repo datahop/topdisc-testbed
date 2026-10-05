@@ -205,18 +205,47 @@ def run(path):
         down()
 
 
+def free_gb(path):
+    import shutil
+    return shutil.disk_usage(path).free // 1024**3
+
+
 def pull():
+    """Fetch the run directory in order of what cannot be rebuilt.
+
+    At 25k nodes the traces are ~2 MB each -- 50 GB -- while the aggregates
+    built from them are under 2 GB. Pulling the whole directory in one rsync
+    means a transfer that runs out of room takes the aggregates down with it,
+    and a Grid'5000 frontend's home quota is smaller than the traces. So the
+    aggregates land first and the traces follow, compressed, only if they fit.
+    """
     st = load_state()
     c = st["coordinator"]
     d = subprocess.run(f"ssh root@{c} 'ls -td {WORK}/*-2* | head -1'", shell=True, text=True, capture_output=True, check=True).stdout.strip()
     if not d:
         sys.exit("pull: no run directory on the coordinator")
     (REPO / "runs").mkdir(exist_ok=True)
-    sh(f"rsync -aq root@{c}:{d} {REPO}/runs/")
     local = REPO / "runs" / os.path.basename(d)
+    local.mkdir(parents=True, exist_ok=True)
+
+    sh(f"rsync -a --info=progress2 --exclude=traces/ root@{c}:{d}/ {local}/")
     if not (local / "nodes.json").exists():
-        sys.exit(f"pull: {local} incomplete")
-    print(f"runs/{local.name} ({len(list((local / 'traces').glob('*.json')))} traces)")
+        sys.exit(f"pull: {local} has no nodes.json -- the run did not finish writing its aggregates. "
+                 f"The traces are still on {c}:{d}/traces; rebuild with cmd/recollect.")
+    print(f"runs/{local.name}: aggregates and hostmetrics in ({free_gb(local)} GB free here)")
+
+    raw_mb = int(subprocess.run(f"ssh root@{c} 'du -sm {d}/traces 2>/dev/null | cut -f1'",
+                                shell=True, text=True, capture_output=True).stdout.strip() or 0)
+    want = max(1, raw_mb // 1024 // 4)   # gzipped JSON traces run about a fifth
+    if free_gb(local) < want + 5:
+        print(f"pull: traces left on the coordinator -- {raw_mb // 1024} GB raw needs about {want} GB "
+              f"compressed and there are {free_gb(local)} GB free here. They are a rebuild path for the "
+              f"aggregates (cmd/recollect), not an input to any figure, so the run above is complete "
+              f"without them. To fetch them somewhere with room:\n"
+              f"  ssh root@{c} 'tar czf - -C {d} traces' > traces.tgz", file=sys.stderr)
+        return
+    sh(f"ssh root@{c} 'tar czf - -C {d} traces' > {local}/traces.tgz")
+    print(f"runs/{local.name}: traces.tgz in ({(local / 'traces.tgz').stat().st_size // 1024**3} GB)")
 
 
 def down():
