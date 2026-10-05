@@ -13,8 +13,12 @@ running hostagent directly (no Distem).
 Runs from a Grid'5000 frontend (no credentials needed) or from outside with
 ~/.python-grid5000.yaml. State (job id, node list) is kept in
 deploy/g5k/state.json next to this file. G5K_CLUSTER=<cluster> overrides
-testbed.g5k.cluster for one run (e.g. when the scenario's usual cluster is
-busy) without editing a tracked scenario file.
+testbed.g5k.cluster, and G5K_RESERVATION="YYYY-MM-DD HH:MM:SS" sets an advance
+reservation, for one run (e.g. when the scenario's usual cluster is busy, or
+when the job has to start in the night window) without editing a tracked
+scenario file. WORKDIR=<path> (default
+/tmp/topdisc) is where agents and the coordinator write; `run` refuses to start
+unless the coordinator has MIN_FREE_GB (default 100) free there.
 
 Distem (LXC-vnode-per-node, one real IP per node out of a reserved /22) was
 the original design here but has no working install path on any Debian
@@ -35,7 +39,16 @@ HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 STATE = HERE / "state.json"
 KEEP = bool(os.environ.get("KEEP"))
+SKIP_BUILD = bool(os.environ.get("SKIP_BUILD"))
 AGENT_PORT = 9000
+# Everything a run writes -- each agent's per-node working directories, and on
+# the coordinator the fetched traces and the aggregates built from them -- goes
+# here rather than under /root. A 25k-node run's traces are far larger than the
+# root filesystem of a gros machine (31 GB), and when the coordinator fills up
+# mid-collection the aggregates are lost with no way back short of rebuilding
+# them from the agents. /tmp on these machines is the 375 GB data disk.
+WORK = os.environ.get("WORKDIR", "/tmp/topdisc")
+MIN_FREE_GB = int(os.environ.get("MIN_FREE_GB", "100"))
 
 
 def sh(cmd, **kw):
@@ -54,18 +67,33 @@ def save_state(st):
 def scenario(path):
     cfg = yaml.safe_load(open(path))
     g5k = (cfg.get("testbed") or {}).get("g5k") or {}
-    # defaults as in `testbed reference`. G5K_CLUSTER overrides the scenario
-    # (same pattern as KEEP below) for picking a different cluster between
-    # runs without editing a tracked scenario file, e.g. when gros is busy.
+    # defaults as in `testbed reference`. G5K_CLUSTER and G5K_RESERVATION
+    # override the scenario (same pattern as KEEP below) for picking a different
+    # cluster or start time between runs without editing a tracked scenario
+    # file, e.g. when gros is busy, or when a run has to land in the night
+    # window the usage policy reserves for jobs this size.
     return cfg, {
         "site": g5k.get("site", "nancy"), "cluster": os.environ.get("G5K_CLUSTER", g5k.get("cluster", "")),
-        "walltime": g5k.get("walltime", "02:00:00"), "reservation": g5k.get("reservation", ""),
+        "walltime": g5k.get("walltime", "02:00:00"),
+        "reservation": os.environ.get("G5K_RESERVATION", g5k.get("reservation", "")),
         "queue": g5k.get("queue", "default"), "env": g5k.get("env", "debian11-x64-base"),
         "vnodes_per_machine": int(g5k.get("vnodes_per_machine", 250)),
     }
 
 
 def build():
+    # The Grid'5000 frontends have no Go toolchain, so the usual way to drive a
+    # run from one is to cross-compile out/ elsewhere and rsync it over.
+    # SKIP_BUILD=1 then says "these binaries are the ones I meant"; it checks
+    # they are all there rather than letting `up` discover a missing one after
+    # the machines are already deployed.
+    if SKIP_BUILD:
+        missing = [b for b in ("testbed", "hostagent", "topdisc-node", "topdisc-node-legacy")
+                   if not (REPO / "out" / b).exists()]
+        if missing or not (REPO / "testbed").exists():
+            sys.exit(f"SKIP_BUILD=1 but these are not built: {missing + ([] if (REPO / 'testbed').exists() else ['./testbed'])}")
+        print(f"build: skipped, using out/ ({', '.join(b.name for b in sorted((REPO / 'out').iterdir()))})")
+        return
     sh(f"cd {REPO} && CGO_ENABLED=0 go build -o testbed ./cmd/testbed")
     for bin, pkg in [("testbed", "./cmd/testbed"), ("hostagent", "./cmd/hostagent"), ("topdisc-node", "./cmd/node")]:
         sh(f"cd {REPO} && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o out/{bin} {pkg}")
@@ -123,7 +151,7 @@ def up(path):
             sh(f"ssh root@{h} 'chmod +x /root/hostagent /root/topdisc-node /root/topdisc-node-legacy; "
                f"ulimit -n 65536; "
                f"nohup /root/hostagent -serve :{AGENT_PORT} -node-binary /root/topdisc-node "
-               f"-legacy-binary /root/topdisc-node-legacy -workdir /root/run "
+               f"-legacy-binary /root/topdisc-node-legacy -workdir {WORK}/run "
                f">/root/hostagent.log 2>&1 </dev/null &'")
         wait_healthy(pnodes)
         # Resolve to addresses: every host routes its peers' /16s with
@@ -134,8 +162,9 @@ def up(path):
                      "hosts": [{"index": i, "ip": socket.gethostbyname(h), "nodes": g["vnodes_per_machine"]}
                                for i, h in enumerate(pnodes)]}
         (HERE / "inventory.json").write_text(json.dumps(inventory, indent=1))
-        sh(f"scp -q {REPO}/out/testbed {HERE}/inventory.json {path} root@{coordinator}:/root/")
-        sh(f"scp -q -r {REPO}/scenarios/models root@{coordinator}:/root/")
+        sh(f"ssh root@{coordinator} 'mkdir -p {WORK}'")
+        sh(f"scp -q {REPO}/out/testbed {HERE}/inventory.json {path} root@{coordinator}:{WORK}/")
+        sh(f"scp -q -r {REPO}/scenarios/models root@{coordinator}:{WORK}/")
         print(f"up: {len(pnodes)} machines, coordinator {coordinator}, inventory {HERE}/inventory.json")
     except Exception:
         if not KEEP:
@@ -148,11 +177,18 @@ def run(path):
     st = load_state()
     c = st["coordinator"]
     name = os.path.basename(path)
-    sh(f"scp -q {path} root@{c}:/root/{name}")
-    sh(f"ssh root@{c} 'cd /root && (nohup ./testbed {name} > run.out 2>&1; echo RUN-EXIT $? >> run.out) >/dev/null 2>&1 &'")
+    sh(f"scp -q {path} root@{c}:{WORK}/{name}")
+    free_gb = int(subprocess.run(f"ssh root@{c} 'df -BG --output=avail {WORK} | tail -1'",
+                                 shell=True, text=True, capture_output=True).stdout.strip().rstrip("G") or 0)
+    if free_gb < MIN_FREE_GB:
+        sys.exit(f"run: coordinator has {free_gb} GB free on {WORK}, want >= {MIN_FREE_GB}. "
+                 f"The traces of a 25k-node run do not fit on the root filesystem; "
+                 f"set WORKDIR to a larger partition.")
+    print(f"coordinator {WORK}: {free_gb} GB free")
+    sh(f"ssh root@{c} 'cd {WORK} && (nohup ./testbed {name} > run.out 2>&1; echo RUN-EXIT $? >> run.out) >/dev/null 2>&1 &'")
     print("started on the coordinator; waiting")
     while True:
-        out = subprocess.run(f"ssh root@{c} tail -c 4000 /root/run.out", shell=True, text=True, capture_output=True).stdout
+        out = subprocess.run(f"ssh root@{c} tail -c 4000 {WORK}/run.out", shell=True, text=True, capture_output=True).stdout
         if "RUN-EXIT" in out:
             break
         last = [l for l in out.splitlines() if l.startswith(("backend", "nodes started", "[churn]"))]
@@ -172,7 +208,7 @@ def run(path):
 def pull():
     st = load_state()
     c = st["coordinator"]
-    d = subprocess.run(f"ssh root@{c} 'ls -td /root/*-2* | head -1'", shell=True, text=True, capture_output=True, check=True).stdout.strip()
+    d = subprocess.run(f"ssh root@{c} 'ls -td {WORK}/*-2* | head -1'", shell=True, text=True, capture_output=True, check=True).stdout.strip()
     if not d:
         sys.exit("pull: no run directory on the coordinator")
     (REPO / "runs").mkdir(exist_ok=True)
