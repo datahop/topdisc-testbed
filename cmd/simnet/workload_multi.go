@@ -91,12 +91,26 @@ func runMultiTopicWorkload(all []nodeRec, numTopics int, zipfS float64, seed int
 	// Discv5 routing but do not register or search. nodeTopic[i] == -1
 	// marks "no topic" for legacy nodes; registrantsByTopic only contains
 	// flagged registrants.
+	// A legacy node still has a service: it searches its topic by a DHT
+	// random walk (legacyTopics) and counts as a provider for other legacy
+	// searchers (providersByTopic), but it never registers.
 	nodeTopics := make([][]int, len(all))
+	legacyTopics := make([][]int, len(all))
 	registrantsByTopic := make(map[int]map[enode.ID]struct{}, numTopics)
+	providersByTopic := make(map[int]map[enode.ID]struct{}, numTopics)
+	for i := range all {
+		for _, t := range topicIdx[i] {
+			if providersByTopic[t] == nil {
+				providersByTopic[t] = make(map[enode.ID]struct{})
+			}
+			providersByTopic[t][all[i].ln.ID()] = struct{}{}
+		}
+	}
 	var activeCount, legacyCount int
 	for i := range all {
 		if all[i].legacy {
 			nodeTopics[i] = []int{-1}
+			legacyTopics[i] = topicIdx[i]
 			legacyCount++
 			continue
 		}
@@ -120,10 +134,10 @@ func runMultiTopicWorkload(all []nodeRec, numTopics int, zipfS float64, seed int
 		}
 	}
 	if topicModel != nil {
-		fmt.Printf("workload: %d nodes total, %d DISC-NG-active across %d topics (crawl model shares, seed=%d), %d legacy passive\n",
+		fmt.Printf("workload: %d nodes total, %d DISC-NG-active across %d topics (crawl model shares, seed=%d), %d legacy (DHT walk)\n",
 			len(all), activeCount, numTopics, seed, legacyCount)
 	} else {
-		fmt.Printf("workload: %d nodes total, %d DISC-NG-active across %d topics (Zipf s=%.2f, seed=%d), %d legacy passive\n",
+		fmt.Printf("workload: %d nodes total, %d DISC-NG-active across %d topics (Zipf s=%.2f, seed=%d), %d legacy (DHT walk)\n",
 			len(all), activeCount, numTopics, zipfS, seed, legacyCount)
 	}
 	for t, c := range dist {
@@ -205,7 +219,7 @@ func runMultiTopicWorkload(all []nodeRec, numTopics int, zipfS float64, seed int
 	if pacing.Dead != nil {
 		pacing.Dead.begin()
 	}
-	results := runMultiTopicSearches(all, nodeTopics, topics, registrantsByTopic, searchTimeout, pacing, pacing.Dead)
+	results := runMultiTopicSearches(all, nodeTopics, topics, registrantsByTopic, searchTimeout, pacing, pacing.Dead, legacyTopics, providersByTopic)
 	if pacing.Dead != nil {
 		pacing.Dead.report()
 		deadResults = pacing.Dead.snapshot()
