@@ -150,6 +150,10 @@ type searchResult struct {
 	// the one clock that registrationTimingNs also uses, so a discovery can be
 	// measured against when the registrant's ad was actually placed.
 	SearchStartMs int64 `json:"searchStartMs"`
+
+	// Legacy marks the search of a node without TopDisc (a DHT random walk);
+	// its Target counts every node of the topic, TopDisc or not.
+	Legacy bool `json:"legacy,omitempty"`
 }
 
 // searchEpoch is the run's common time origin (registration start). Workloads
@@ -254,10 +258,11 @@ func runSearches(searchers []nodeRec, registrants map[enode.ID]struct{}, target 
 	return results
 }
 
-func runMultiTopicSearches(all []nodeRec, nodeTopics [][]int, topics []topicindex.TopicID, registrantsByTopic map[int]map[enode.ID]struct{}, timeout time.Duration, pacing searchPacing, deadTracker *deadResultTracker) []searchResult {
+func runMultiTopicSearches(all []nodeRec, nodeTopics [][]int, topics []topicindex.TopicID, registrantsByTopic map[int]map[enode.ID]struct{}, timeout time.Duration, pacing searchPacing, deadTracker *deadResultTracker, legacyTopics [][]int, providersByTopic map[int]map[enode.ID]struct{}) []searchResult {
 	type sjob struct {
 		n        nodeRec
 		topicIdx int
+		legacy   bool
 	}
 	var jobs []sjob
 	for i, n := range all {
@@ -265,7 +270,12 @@ func runMultiTopicSearches(all []nodeRec, nodeTopics [][]int, topics []topicinde
 			if ti < 0 {
 				continue
 			}
-			jobs = append(jobs, sjob{n, ti})
+			jobs = append(jobs, sjob{n, ti, false})
+		}
+		if legacyTopics != nil {
+			for _, ti := range legacyTopics[i] {
+				jobs = append(jobs, sjob{n, ti, true})
+			}
 		}
 	}
 	results := make([]searchResult, len(jobs))
@@ -298,6 +308,10 @@ func runMultiTopicSearches(all []nodeRec, nodeTopics [][]int, topics []topicinde
 			// Stagger spreads concurrent search activity across the run.
 			if pacing.Stagger > 0 {
 				time.Sleep(time.Duration(slot) * pacing.Stagger)
+			}
+			if job.legacy {
+				results[slot] = runLegacyWalker(job.n, job.topicIdx, deadline, pacing, providersByTopic[job.topicIdx], stats)
+				return
 			}
 			target := len(registrantsByTopic[job.topicIdx]) - 1 // exclude self
 			if target < 0 {

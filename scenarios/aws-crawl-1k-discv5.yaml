@@ -1,0 +1,35 @@
+# Baseline without TopDisc: every node runs plain discv5 and publishes its
+# service in its node record ("svc" entry). A node finds the providers of its
+# service the only way plain discv5 allows: random-target DHT lookups, keeping
+# the nodes whose record carries its service, for 1 h. Same workload as the
+# TopDisc runs (the 100 largest chains of the 2026-09-18 crawl, no churn), so
+# share found, time to find and lookups per search compare directly.
+# 858 on-demand instances, one node each, over four regions.
+#   deploy/aws.sh up scenarios/aws-crawl-1k-discv5.yaml && deploy/aws.sh run scenarios/aws-crawl-1k-discv5.yaml
+name: aws-crawl-1k-discv5
+scenario:
+  population:
+    nodes: 858
+    topics: 100
+    topic_model: models/crawl-2026-09-18.json
+    seed: 1
+    legacy_frac: 1
+    legacy_bootnode: true
+  network:
+    regions: {us-east-1: 0.2564, us-west-2: 0.2215, eu-central-1: 0.2611, ap-southeast-1: 0.2610}
+  phases:
+    bootstrap_wait: 180s
+    start_window: 15m
+    register_wait: 15m
+    search_stagger: 100ms
+    search_timeout: 1h
+  topic:
+    ad_cache_size: 5000
+    search_yield_floor: 8
+  search:
+    model: continuous
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json
+    home_region: us-east-1

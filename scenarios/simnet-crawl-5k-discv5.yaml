@@ -1,0 +1,42 @@
+# Baseline without TopDisc: every node runs plain discv5 and publishes its
+# service in its node record ("svc" entry). A node finds the providers of its
+# service the only way plain discv5 allows: random-target DHT lookups, keeping
+# the nodes whose record carries its service, for 1 h. Same workload as the
+# TopDisc runs (the 100 largest chains of the 2026-09-18 crawl, no churn), so
+# share found, time to find and lookups per search compare directly.
+#   ./simnet scenarios/simnet-crawl-5k-discv5.yaml
+name: simnet-crawl-5k-discv5
+scenario:
+  population:
+    nodes: 5000
+    topics: 100
+    topic_model: models/crawl-2026-09-18.json
+    addresses: crawl
+    seed: 1
+    legacy_frac: 1
+    legacy_bootnode: true
+  network:
+    latency_ms: 30
+    bandwidth_mibps: 1000
+  phases:
+    bootstrap_wait: 180s
+    start_window: 15m
+    register_wait: 15m
+    search_stagger: 100ms
+    search_timeout: 1h
+  topic:
+    ad_cache_size: 5000
+    search_yield_floor: 8
+  search:
+    model: continuous
+testbed:
+  simulator:
+    link_buf: 32768
+    router_buf: 32768
+    router_shards: 16
+  traces:
+    metrics: metrics.json
+    overhead: oh.json
+    overhead_series: series.json
+    overhead_series_period: 5m
+    checkpoint_interval: 15m

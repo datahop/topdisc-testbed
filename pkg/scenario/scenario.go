@@ -292,7 +292,7 @@ var paramDocs = []paramDoc{
 	{"scenario.population.addresses", "simnet: where node IP addresses come from: index (default, node i is 33.i/256.i%256.1, its own /24) or crawl (the /24 is drawn from the topic_model's per-topic prefix histogram, so nodes share /24s as the crawled network does and the per-/24 limits and the admission IP score see real diversity)"},
 	{"scenario.population.common_topic", "topics > 1: everyone also registers and searches topic 0"},
 	{"scenario.population.seed", "RNG seed for every random draw; 0 = time"},
-	{"scenario.population.legacy_frac", "fraction of nodes that are legacy discv5: simnet removes the topic-discovery ENR flag; real backends run stock upstream geth (legacy_binary), the same fraction within every service"},
+	{"scenario.population.legacy_frac", "fraction of nodes that are legacy discv5: they never register and find the providers of their service by DHT random walks (simnet drops the topic-discovery ENR flag; real backends run stock upstream geth, legacy_binary); real backends draw the same fraction within every service"},
 	{"scenario.population.legacy_bootnode", "let node 0 (the bootnode) be drawn legacy too; default keeps it TopDisc-capable, since a fresh stock bootnode serves no nodes until it has revalidated its table (~20 nodes/min)"},
 	{"scenario.population.vanilla_frac", "fraction running stock upstream geth (needs -tags vanilla)"},
 	{"scenario.network.latency_ms", "simnet: per-pair one-way latency, ms (cloud: given by regions)"},

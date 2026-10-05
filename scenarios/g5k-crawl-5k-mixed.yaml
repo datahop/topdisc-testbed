@@ -1,0 +1,42 @@
+# Mixed network: legacy_frac of the nodes of every service run plain discv5
+# (DHT random walk, "svc" record entry), the rest TopDisc. TopDisc nodes can
+# only find TopDisc registrants; plain nodes find any node of their service.
+# Sweep legacy_frac over 0.25, 0.5, 0.75 and 0.9 against the all-TopDisc run
+# (legacy_frac 0) and the all-plain run (*-discv5).
+# 20 machines at 250 nodes each. Node addresses are private 10.x.
+#   deploy/g5k/g5k.py up scenarios/g5k-crawl-5k-mixed.yaml && deploy/g5k/g5k.py run scenarios/g5k-crawl-5k-mixed.yaml
+name: g5k-crawl-5k-mixed
+scenario:
+  population:
+    nodes: 5000
+    topics: 100
+    topic_model: models/crawl-2026-09-18.json
+    seed: 1
+    legacy_frac: 0.5
+  network:
+    model: regions
+    regions: {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}
+  phases:
+    bootstrap_wait: 180s
+    start_window: 15m
+    register_wait: 15m
+    search_stagger: 100ms
+    search_timeout: 1h
+  topic:
+    ad_cache_size: 5000
+    search_yield_floor: 8
+  search:
+    model: continuous
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json          # g5k.py copies it next to the scenario on the coordinator
+    home_region: us-east-1
+  g5k:
+    site: nancy
+    cluster: gros
+    vnodes_per_machine: 250
+    walltime: "03:00:00"
+  wan:
+    enabled: true
+    rate_kbps: 1000
