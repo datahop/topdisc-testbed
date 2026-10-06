@@ -27,10 +27,25 @@ write_files:
       Restart=always
       [Install]
       WantedBy=multi-user.target
+  - path: /opt/topdisc/save-runs.sh
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      # Uploads every run directory to the bucket once, so the results survive
+      # the fleet: after each run, and again before the scale-down.
+      cd /opt/topdisc || exit 0
+      b=$(cat bucket 2>/dev/null); [ -n "$b" ] || exit 0
+      for d in $(ls -d *-2*/ 2>/dev/null); do
+        d=$(basename "$d")
+        [ -e "$d.saved" ] && continue
+        tar czf "/tmp/$d.tgz" "$d" && aws s3 cp --only-show-errors --region "$(cat region)" "/tmp/$d.tgz" "s3://$b/runs/$d.tgz" && touch "$d.saved" && echo "saved $d to s3://$b/runs/$d.tgz"
+        rm -f "/tmp/$d.tgz"
+      done
   - path: /opt/topdisc/scale-down.sh
     permissions: "0755"
     content: |
       #!/bin/sh
+      /opt/topdisc/save-runs.sh >> /opt/topdisc/scale-down.log 2>&1
       # Hard spending stop, independent of the machine that ran terraform:
       # every region's fleet to zero, NAT gateways and their addresses gone,
       # then this coordinator terminates itself. What is left (VPCs, IAM,
@@ -73,6 +88,7 @@ runcmd:
 %{ if binaries_s3 != "" ~}
   - echo "${region}" > /opt/topdisc/region
   - echo "${regions}" > /opt/topdisc/regions
+  - echo "${binaries_s3}" | cut -d/ -f3 > /opt/topdisc/bucket
   - until aws s3 cp --region ${region} "${binaries_s3}" /opt/topdisc/binaries.tgz; do sleep 15; done
 %{ else ~}
   - until curl -fsSL "${binaries_url}" -o /opt/topdisc/binaries.tgz; do sleep 15; done
