@@ -224,10 +224,12 @@ func runMultiTopicWorkload(all []nodeRec, numTopics int, zipfS float64, seed int
 		pacing.Dead.report()
 		deadResults = pacing.Dead.snapshot()
 	}
+	// The metrics first: the node-state dump reads every node's tables and can
+	// outlast the run's watchdog at scale under churn.
+	reportMultiTopic(results, registrantsByTopic, topics, regTimingNs, metricsOut, allCov)
 	if metricsOut != "" {
 		dumpNodeState(filepath.Dir(metricsOut), all, nodeTopics, topics)
 	}
-	reportMultiTopic(results, registrantsByTopic, topics, regTimingNs, metricsOut, allCov)
 	if reachOut != "" {
 		dumpReach(reachOut, all, topics)
 	}
