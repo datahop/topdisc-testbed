@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/datahop/topdisc-testbed/pkg/addr"
 	"github.com/datahop/topdisc-testbed/pkg/assign"
 	"github.com/datahop/topdisc-testbed/pkg/host"
 	"github.com/datahop/topdisc-testbed/pkg/scenario"
@@ -54,11 +55,32 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 	if n := sc.Population.Nodes; n > capacity {
 		return fmt.Errorf("%d nodes but the inventory holds %d", n, capacity)
 	}
-	hostOf, local, err := place(cfg, inv)
+	star := cfg.Testbed.Wan.Star()
+	var pool *addr.Pool
+	if sc.Population.Addresses == "crawl" {
+		if star == nil {
+			return fmt.Errorf("population.addresses crawl needs testbed.wan enabled: without network namespaces every node shares its machine's address")
+		}
+		topicIdx, model, err := assign.Topics(cfg, filepath.Dir(cfg.SourcePath))
+		if err != nil {
+			return err
+		}
+		pool, err = addr.Draw(sc.Population.Nodes, model, sc.Population.Topics, sc.Population.Seed, func(i int) int {
+			if i < len(topicIdx) && len(topicIdx[i]) > 0 {
+				return topicIdx[i][len(topicIdx[i])-1]
+			}
+			return -1
+		})
+		if err != nil {
+			return err
+		}
+		n, pfx, largest := pool.Summary()
+		fmt.Printf("addresses: crawl model, %d nodes over %d /24s, largest /24 holds %d\n", n, pfx, largest)
+	}
+	hostOf, local, err := place(cfg, inv, pool)
 	if err != nil {
 		return err
 	}
-	star := cfg.Testbed.Wan.Star()
 	agents := make([]agent, len(inv.Hosts))
 	peers := map[int]string{}
 	for i, h := range inv.Hosts {
@@ -81,7 +103,10 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 	t0 := time.Now().Add(20 * time.Second).UnixMilli()
 	as, err := assign.Generate(cfg, func(i int) assign.Host {
 		ip := inv.Hosts[hostOf[i]].IP
-		if star != nil {
+		switch {
+		case pool != nil:
+			ip = pool.IP(i).String()
+		case star != nil:
 			ip = host.NodeIP(hostOf[i], local[i])
 		}
 		h := assign.Host{IP: ip, BasePort: 30300 + local[i], StatusOff: 10000} // TraceFile: the hostagent fills its own path
@@ -107,8 +132,13 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 	for _, a := range as {
 		mine[hostOf[a.Idx]] = append(mine[hostOf[a.Idx]], a)
 	}
+	routes := prefixRoutes(pool, hostOf, inv)
 	if err := each(len(agents), func(h int) error {
-		if err := agents[h].prepare(prepareRequest{Host: h, Peers: peers, Wan: star, Seed: sc.Population.Seed, Verbosity: cc.Verbosity, SamplePeriodMs: cfg.Testbed.Traces.HostSamplePeriod.Milliseconds(), Assignments: mine[h]}); err != nil {
+		req := prepareRequest{Host: h, Peers: peers, Wan: star, Seed: sc.Population.Seed, Verbosity: cc.Verbosity, SamplePeriodMs: cfg.Testbed.Traces.HostSamplePeriod.Milliseconds(), Assignments: mine[h]}
+		if pool != nil {
+			req.RealAddrs, req.Routes = true, routes[h]
+		}
+		if err := agents[h].prepare(req); err != nil {
 			return fmt.Errorf("host %d (%s): %w", h, inv.Hosts[h].IP, err)
 		}
 		return nil
@@ -193,6 +223,13 @@ type prepareRequest struct {
 	Verbosity      int                 `json:"verbosity"`
 	SamplePeriodMs int64               `json:"sample_period_ms"`
 	Assignments    []assign.Assignment `json:"assignments"`
+	// Routes are the /24s that live on other machines, each via that
+	// machine's address. Set only for a run on crawl addresses, where the
+	// nodes' /24s are scattered across the address space and cannot be
+	// summarised by one prefix per machine the way the synthetic 10.x
+	// addressing is.
+	Routes    []host.Route `json:"routes,omitempty"`
+	RealAddrs bool         `json:"real_addrs,omitempty"`
 }
 
 type agent struct{ base string }
@@ -336,7 +373,76 @@ func each(n int, f func(i int) error) error {
 // unless pinned; the rest fill the remaining slots in inventory order, which
 // is region-sorted, and that is fine because node indices are random keys.
 // Inventories without regions are packed in order.
-func place(cfg scenario.Config, inv Inventory) (hostOf, local []int, err error) {
+// prefixRoutes gives each machine the routes to the /24s that live on other
+// machines. With crawl addresses a machine's nodes are scattered across the
+// address space, so there is no per-machine prefix to summarise them with and
+// every other /24 needs its own route -- about 13k of them per machine, which
+// a Linux FIB carries without trouble.
+func prefixRoutes(pool *addr.Pool, hostOf []int, inv Inventory) [][]host.Route {
+	out := make([][]host.Route, len(inv.Hosts))
+	if pool == nil {
+		return out
+	}
+	owner := map[uint32]int{}
+	for pre, idxs := range pool.Groups() {
+		owner[pre] = hostOf[idxs[0]] // Draw keeps a /24 on one machine
+	}
+	for h := range inv.Hosts {
+		for pre, o := range owner {
+			if o != h {
+				out[h] = append(out[h], host.Route{Prefix: addr.CIDR(pre), Via: inv.Hosts[o].IP})
+			}
+		}
+	}
+	return out
+}
+
+// placeByPrefix puts every node of a /24 on one machine, filling machines in
+// turn and taking the largest /24s first so a prefix with hundreds of nodes
+// still fits somewhere. Keeping a /24 whole is what lets the machines route
+// each other per /24 instead of per node.
+func placeByPrefix(cfg scenario.Config, inv Inventory, pool *addr.Pool) (hostOf, local []int, err error) {
+	n := cfg.Scenario.Population.Nodes
+	hostOf, local = make([]int, n), make([]int, n)
+	cap_ := make([]int, len(inv.Hosts))
+	for h, hs := range inv.Hosts {
+		cap_[h] = hs.Nodes
+	}
+	groups := pool.Groups()
+	order := make([]uint32, 0, len(groups))
+	for pre := range groups {
+		order = append(order, pre)
+	}
+	sort.Slice(order, func(i, j int) bool {
+		if len(groups[order[i]]) != len(groups[order[j]]) {
+			return len(groups[order[i]]) > len(groups[order[j]])
+		}
+		return order[i] < order[j]
+	})
+	used := make([]int, len(inv.Hosts))
+	for _, pre := range order {
+		g := groups[pre]
+		h := -1
+		for c := range cap_ {
+			if cap_[c]-used[c] >= len(g) && (h < 0 || cap_[c]-used[c] > cap_[h]-used[h]) {
+				h = c
+			}
+		}
+		if h < 0 {
+			return nil, nil, fmt.Errorf("placement: /24 %s holds %d nodes, more than any machine has room for", addr.CIDR(pre), len(g))
+		}
+		for _, i := range g {
+			hostOf[i], local[i] = h, used[h]
+			used[h]++
+		}
+	}
+	return hostOf, local, nil
+}
+
+func place(cfg scenario.Config, inv Inventory, pool *addr.Pool) (hostOf, local []int, err error) {
+	if pool != nil {
+		return placeByPrefix(cfg, inv, pool)
+	}
 	n := cfg.Scenario.Population.Nodes
 	hostOf, local = make([]int, n), make([]int, n)
 	type slot struct{ host, k int }
