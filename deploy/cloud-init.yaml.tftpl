@@ -81,6 +81,13 @@ write_files:
       OnBootSec=${max_hours}h
       [Install]
       WantedBy=timers.target
+%{ if coordinator_type != "" ~}
+# Only the coordinator needs the SSM agent. Thousands of node agents
+# registering at once hit the account's SSM rate limit, and the coordinator's
+# agent then backs off for minutes; stop it on every other instance.
+bootcmd:
+  - [sh, -c, 'T=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60"); t=$(curl -s -H "X-aws-ec2-metadata-token: $T" http://169.254.169.254/latest/meta-data/instance-type); [ "$t" = "${coordinator_type}" ] || { systemctl disable --now amazon-ssm-agent; true; }']
+%{ endif ~}
 runcmd:
   - sysctl --system
   - (command -v dnf && dnf install -y iproute-tc) || (apt-get update && apt-get install -y iproute2)
