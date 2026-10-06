@@ -49,11 +49,12 @@ resource "aws_iam_role_policy" "s3" {
 
 locals {
   cloud_init = templatefile("${path.module}/../../cloud-init.yaml.tftpl", {
-    binaries_url = ""
-    binaries_s3  = "s3://${aws_s3_bucket.binaries.id}/topdisc-linux-arm64.tgz"
-    region       = var.home_region
-    regions      = join(" ", sort(keys(var.regions)))
-    max_hours    = var.max_hours
+    binaries_url     = ""
+    binaries_s3      = "s3://${aws_s3_bucket.binaries.id}/topdisc-linux-arm64.tgz"
+    region           = var.home_region
+    regions          = join(" ", sort(keys(var.regions)))
+    max_hours        = var.max_hours
+    coordinator_type = var.coordinator_type
   })
 }
 

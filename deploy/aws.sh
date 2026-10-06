@@ -117,7 +117,15 @@ case "$1" in
     # the scenario's models (topic and churn fits) live next to it
     aws s3 cp --recursive --only-show-errors "$(dirname "$2")/models" "s3://$(tfout binaries_bucket)/models"
     ssm_wait
-    ssm_run "cd /opt/topdisc && aws s3 cp s3://$(tfout binaries_bucket)/scenario.yaml scenario.yaml && aws s3 cp --recursive --only-show-errors s3://$(tfout binaries_bucket)/models models && ./inventory-aws.sh && rm -f run.out"
+    # Autoscaling groups fill over several minutes: list the fleet until it holds
+    # every node of the scenario (25 min at most), so the run does not start short.
+    want=$(go run ./cmd/testbed fleet "$2" | python3 -c 'import json,sys; print(sum(json.load(sys.stdin)["regions"].values()))')
+    for i in $(seq 1 50); do
+      ssm_run "cd /opt/topdisc && aws s3 cp s3://$(tfout binaries_bucket)/scenario.yaml scenario.yaml && aws s3 cp --recursive --only-show-errors s3://$(tfout binaries_bucket)/models models && ./inventory-aws.sh && rm -f run.out"
+      have=$(ssm_run "cd /opt/topdisc && python3 -c 'import json; print(len(json.load(open(\"inventory.json\"))[\"hosts\"]))'" 2>/dev/null)
+      [ "${have:-0}" -ge "$want" ] && break
+      echo "fleet: ${have:-0} of $want hosts running; waiting"; sleep 30
+    done
     # The coordinator saves the run to the bucket itself, so a laptop that is
     # away at the end loses nothing; pull then only downloads.
     ssm_send "cd /opt/topdisc && setsid sh -c './testbed scenario.yaml > run.out 2>&1; rc=\$?; ./save-runs.sh >> run.out 2>&1; echo RUN-EXIT \$rc >> run.out' > /dev/null 2>&1 < /dev/null &"
@@ -163,6 +171,11 @@ case "$1" in
       aws s3 sync --only-show-errors "s3://$b/runs/" runs/archives/ || [ -n "$FORCE" ] || { echo "down: could not copy s3://$b/runs/ to runs/archives; not destroying (FORCE=1 to destroy anyway)"; exit 1; }
       ls runs/archives/*.tgz 2>/dev/null | sed 's/^/kept: /'
     fi
-    terraform -chdir=$TF destroy -auto-approve -input=false -var "regions={}" ;;
+    # Draining thousands of instances can outlast an autoscaling group's
+    # 10-minute delete timeout; destroy again until nothing is left.
+    for i in 1 2 3; do
+      terraform -chdir=$TF destroy -auto-approve -input=false -var "regions={}" && break
+      echo "down: destroy incomplete (try $i of 3); retrying"
+    done ;;
   *) sed -n 2,9p "$0"; exit 2 ;;
 esac
