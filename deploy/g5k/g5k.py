@@ -40,6 +40,9 @@ REPO = HERE.parent.parent
 STATE = HERE / "state.json"
 KEEP = bool(os.environ.get("KEEP"))
 SKIP_BUILD = bool(os.environ.get("SKIP_BUILD"))
+# Machines reserved beyond what the run needs, so one lost to kadeploy does
+# not cost the reservation. None lets `up` size it from the fleet.
+SPARES = int(os.environ["G5K_SPARES"]) if os.environ.get("G5K_SPARES") else None
 AGENT_PORT = 9000
 # Everything a run writes -- each agent's per-node working directories, and on
 # the coordinator the fetched traces and the aggregates built from them -- goes
@@ -100,21 +103,30 @@ def build():
     sh(f"cd {REPO}/legacy && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ../out/topdisc-node-legacy ./cmd/node-legacy")
 
 
-def wait_healthy(hosts, timeout=60):
+def wait_healthy(hosts, need, timeout=60):
+    """Return the hosts whose agent answered, in the order given.
+
+    A machine that kadeploy lost, or whose agent never came up, used to abort
+    the run here. Returning the survivors lets `up` decide: a run only needs
+    `need` of them, and a spare or two is cheaper than losing the night.
+    """
     import urllib.request
     deadline = time.time() + timeout
-    left = set(hosts)
+    left, ok = set(hosts), set()
     while left and time.time() < deadline:
         for h in list(left):
             try:
                 urllib.request.urlopen(f"http://{h}:{AGENT_PORT}/health", timeout=2).read()
-                left.discard(h)
+                left.discard(h); ok.add(h)
             except Exception:
                 pass
         if left:
             time.sleep(2)
     if left:
-        sys.exit(f"hostagent never came up on: {', '.join(sorted(left))}")
+        print(f"hostagent never came up on {len(left)}: {', '.join(sorted(left))}", file=sys.stderr)
+    if len(ok) < need:
+        sys.exit(f"only {len(ok)} of {len(hosts)} machines are healthy, need {need}")
+    return [h for h in hosts if h in ok]
 
 
 def up(path):
@@ -123,7 +135,13 @@ def up(path):
     build()
     fleet = json.loads(sh(f"cd {REPO} && ./testbed fleet {path}", capture=True).stdout)
     machines = max(1, fleet["g5k_machines"])
-    print(f"fleet: {fleet['regions']} -> {machines} machines x {g['vnodes_per_machine']} vnodes on {g['site']}")
+    # Reserve a couple more than the run needs. On 2026-10-05 one machine of a
+    # hundred failed kadeploy, the inventory came out 250 nodes short of the
+    # population, and the coordinator refused to start -- twenty minutes of a
+    # night window spent on a single dead node. Spares are far cheaper.
+    spares = SPARES if SPARES is not None else max(1, round(machines * 0.04))
+    print(f"fleet: {fleet['regions']} -> {machines} machines x {g['vnodes_per_machine']} vnodes "
+          f"on {g['site']} (reserving {machines + spares})")
 
     conf = en.G5kConf.from_settings(job_name="topdisc", walltime=g["walltime"], job_type=["deploy"],
                                     env_name=g["env"], queue=g["queue"],
@@ -136,14 +154,12 @@ def up(path):
     if not g["cluster"]:
         sys.exit(f"g5k: testbed.g5k.cluster is required (site {g['site']}); "
                   f"EnOSlib's G5kConf needs a specific cluster, not just a site")
-    conf = conf.add_machine(roles=["pnode"], nodes=machines, cluster=g["cluster"])
+    conf = conf.add_machine(roles=["pnode"], nodes=machines + spares, cluster=g["cluster"])
     provider = en.G5k(conf)
     try:
         roles, networks = provider.init()
-        pnodes = [h.address for h in roles["pnode"]]
-        coordinator = pnodes[0]
-        save_state({"site": g["site"], "cluster": g["cluster"], "env": g["env"], "pnodes": pnodes, "coordinator": coordinator, "scenario": path})
-        for h in pnodes:
+        deployed = [h.address for h in roles["pnode"]]
+        for h in deployed:
             sh(f"scp -q {REPO}/out/hostagent {REPO}/out/topdisc-node {REPO}/out/topdisc-node-legacy root@{h}:/root/")
             # ulimit: one agent supervises vnodes_per_machine node processes,
             # each with its own netns, veth and log; the login default of 1024
@@ -153,19 +169,39 @@ def up(path):
                f"nohup /root/hostagent -serve :{AGENT_PORT} -node-binary /root/topdisc-node "
                f"-legacy-binary /root/topdisc-node-legacy -workdir {WORK}/run "
                f">/root/hostagent.log 2>&1 </dev/null &'")
-        wait_healthy(pnodes)
+        # Take the machines the run needs from the ones that actually answered,
+        # and spread the population over them. With spares in hand this is the
+        # configured density exactly; if kadeploy lost more than the spares, it
+        # is a denser run rather than a dead one -- but only up to a point,
+        # since density is what the host-level limits were sized against.
+        healthy = wait_healthy(deployed, machines)
+        pnodes = healthy[:machines]
+        pop = int(((cfg.get("scenario") or {}).get("population") or {}).get("nodes") or 0)
+        per = g["vnodes_per_machine"]
+        if len(pnodes) < machines or per * len(pnodes) < pop:
+            per = -(-pop // len(pnodes))            # ceil
+            cap = int(g["vnodes_per_machine"] * 1.25)
+            if per > cap:
+                sys.exit(f"{len(pnodes)} healthy machines would need {per} nodes each for a "
+                         f"population of {pop}, over the {cap} ceiling "
+                         f"({g['vnodes_per_machine']} configured + 25%)")
+            print(f"{len(deployed) - len(healthy)} machines lost; {len(pnodes)} x {per} "
+                  f"covers {pop} (configured {g['vnodes_per_machine']})", file=sys.stderr)
+        coordinator = pnodes[0]
+        save_state({"site": g["site"], "cluster": g["cluster"], "env": g["env"], "pnodes": pnodes,
+                    "coordinator": coordinator, "scenario": path, "vnodes_per_machine": per})
         # Resolve to addresses: every host routes its peers' /16s with
         # `ip route replace ... via <peer>`, which takes an address, not the
         # name EnOSlib hands back. A single-host run never routes a peer, so
         # this only shows up once there are two.
         inventory = {"coordinator": coordinator,
-                     "hosts": [{"index": i, "ip": socket.gethostbyname(h), "nodes": g["vnodes_per_machine"]}
+                     "hosts": [{"index": i, "ip": socket.gethostbyname(h), "nodes": per}
                                for i, h in enumerate(pnodes)]}
         (HERE / "inventory.json").write_text(json.dumps(inventory, indent=1))
         sh(f"ssh root@{coordinator} 'mkdir -p {WORK}'")
         sh(f"scp -q {REPO}/out/testbed {HERE}/inventory.json {path} root@{coordinator}:{WORK}/")
         sh(f"scp -q -r {REPO}/scenarios/models root@{coordinator}:{WORK}/")
-        print(f"up: {len(pnodes)} machines, coordinator {coordinator}, inventory {HERE}/inventory.json")
+        print(f"up: {len(pnodes)} machines x {per} nodes, coordinator {coordinator}, inventory {HERE}/inventory.json")
     except Exception:
         if not KEEP:
             print("up failed; releasing", file=sys.stderr)
