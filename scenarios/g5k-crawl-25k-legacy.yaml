@@ -1,0 +1,68 @@
+# Evaluation run, Grid'5000, no churn: 25000 real node processes over the
+# 100 largest chains of the 2026-09-18 crawl (topics by the crawl's shares),
+# every node up for the whole run, real RLPx sessions filled from the topic search.
+# Every 25k run is fixed at 50 machines x 500 nodes with a 6 h search, so that
+# runs stay comparable with one another. The network reaches steady state
+# about an hour into the search -- traffic settles within 2% and ads held
+# within 1% -- so the remaining five hours are there to be compared against,
+# not to discover anything new. The walltime covers setup, 22.5 min of
+# registration, the run, and the trace collection, which at this size is the
+# longest tail of the night.
+# Every node runs stock upstream geth v1.17.5 (legacy/) with no topic
+# discovery at all: it publishes its service in the ENR and finds providers by
+# random-target Kademlia lookups, which is all a topic-unaware client can do.
+# node-legacy writes the same trace record as cmd/node, so this run drops into
+# the same figures as g5k-crawl-25k-realip and the pair differs by the protocol
+# alone -- same addresses, same shape, same 6 h.
+# legacy_bootnode stays false on purpose. A stock bootnode serves nothing until
+# it has revalidated its table at ~20 nodes/min, which at 25000 nodes is around
+# 20 h of bootstrap; the bootnode being TopDisc-capable gives the legacy nodes
+# no topic ability, it only lets them find each other.
+# search_yield_floor is inert here -- there is no topic search to adapt.
+# Grid'5000: one hostagent per kadeployed machine, vnodes_per_machine node
+# processes in their own network namespaces (netns + netem, testbed.wan), no
+# Distem.
+# addresses: crawl gives every node the address a crawled peer had, so the
+# per-/24 limits on the routing table and on a registration bucket, and the
+# ad cache's ipTree admission score, all run against real address diversity
+# instead of being skipped as LAN. A /24 is kept whole on one machine so the
+# machines route each other per /24.
+name: g5k-crawl-25k-legacy
+scenario:
+  population:
+    nodes: 25000
+    topics: 100
+    topic_model: models/crawl-2026-09-18.json
+    addresses: crawl
+    seed: 1
+    legacy_frac: 1.0
+  network:
+    model: regions
+    regions: {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}
+  phases:
+    bootstrap_wait: 180s
+    start_window: 15m
+    register_wait: 22m30s
+    search_stagger: 10ms
+    search_timeout: 6h
+  topic:
+    ad_cache_size: 5000
+    search_yield_floor: 4
+  search:
+    model: conn
+    target_count: 0
+  conn_model:
+    enabled: true
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json          # g5k.py copies it next to the scenario on the coordinator
+    home_region: us-east-1
+  g5k:
+    site: nancy
+    cluster: gros
+    vnodes_per_machine: 500
+    walltime: "10:00:00"
+  wan:
+    enabled: true
+    rate_kbps: 1000
