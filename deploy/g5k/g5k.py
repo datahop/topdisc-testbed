@@ -156,19 +156,39 @@ def up(path):
                   f"EnOSlib's G5kConf needs a specific cluster, not just a site")
     conf = conf.add_machine(roles=["pnode"], nodes=machines + spares, cluster=g["cluster"])
     provider = en.G5k(conf)
+    # Only the reservation itself is worth unwinding automatically. Once there
+    # are machines in hand, a failure past this point is something to look at,
+    # not something to answer by throwing the night away: on 2026-10-07 one
+    # machine came back from kadeploy with an unwritable /root, the scp to it
+    # raised, and the handler released all 52 with the night half gone.
     try:
         roles, networks = provider.init()
+    except Exception:
+        if not KEEP:
+            print("reservation failed; releasing", file=sys.stderr)
+            provider.destroy()
+        raise
+    try:
         deployed = [h.address for h in roles["pnode"]]
+        broken = []
         for h in deployed:
-            sh(f"scp -q {REPO}/out/hostagent {REPO}/out/topdisc-node {REPO}/out/topdisc-node-legacy root@{h}:/root/")
-            # ulimit: one agent supervises vnodes_per_machine node processes,
-            # each with its own netns, veth and log; the login default of 1024
-            # is the first thing to bind as that number grows.
-            sh(f"ssh root@{h} 'chmod +x /root/hostagent /root/topdisc-node /root/topdisc-node-legacy; "
-               f"ulimit -n 65536; "
-               f"nohup /root/hostagent -serve :{AGENT_PORT} -node-binary /root/topdisc-node "
-               f"-legacy-binary /root/topdisc-node-legacy -workdir {WORK}/run "
-               f">/root/hostagent.log 2>&1 </dev/null &'")
+            # A machine that cannot take the binaries is not one of the machines
+            # this run has. Dropping it here lets the healthy count below decide
+            # whether enough are left, instead of aborting on the first bad one.
+            try:
+                sh(f"scp -q {REPO}/out/hostagent {REPO}/out/topdisc-node {REPO}/out/topdisc-node-legacy root@{h}:/root/")
+                # ulimit: one agent supervises vnodes_per_machine node processes,
+                # each with its own netns, veth and log; the login default of 1024
+                # is the first thing to bind as that number grows.
+                sh(f"ssh root@{h} 'chmod +x /root/hostagent /root/topdisc-node /root/topdisc-node-legacy; "
+                   f"ulimit -n 65536; "
+                   f"nohup /root/hostagent -serve :{AGENT_PORT} -node-binary /root/topdisc-node "
+                   f"-legacy-binary /root/topdisc-node-legacy -workdir {WORK}/run "
+                   f">/root/hostagent.log 2>&1 </dev/null &'")
+            except subprocess.CalledProcessError as e:
+                print(f"{h}: cannot stage the binaries, dropping it ({e})", file=sys.stderr)
+                broken.append(h)
+        deployed = [h for h in deployed if h not in broken]
         # Take the machines the run needs from the ones that actually answered,
         # and spread the population over them. With spares in hand this is the
         # configured density exactly; if kadeploy lost more than the spares, it
@@ -203,9 +223,8 @@ def up(path):
         sh(f"scp -q -r {REPO}/scenarios/models root@{coordinator}:{WORK}/")
         print(f"up: {len(pnodes)} machines x {per} nodes, coordinator {coordinator}, inventory {HERE}/inventory.json")
     except Exception:
-        if not KEEP:
-            print("up failed; releasing", file=sys.stderr)
-            provider.destroy()
+        print("up failed after the machines were reserved. They are still held: "
+              "fix and re-run `up`, or release with `g5k.py down`.", file=sys.stderr)
         raise
 
 
