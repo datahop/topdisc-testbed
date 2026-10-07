@@ -18,7 +18,7 @@ import (
 // routes between them would be wrong), and no machine is given more nodes
 // than it has room for.
 func TestCrawlAddressPlacement(t *testing.T) {
-	path := filepath.Join("..", "..", "scenarios", "g5k-crawl-25k-6h-realip.yaml")
+	path := filepath.Join("..", "..", "scenarios", "g5k-crawl-25k-realip.yaml")
 	if _, err := os.Stat(path); err != nil {
 		t.Skip("scenario not present")
 	}
