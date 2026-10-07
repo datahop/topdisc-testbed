@@ -66,11 +66,16 @@ check() { # check <description> <command...>
   if "${@:2}" >/dev/null 2>&1; then echo "  ok    $1"; else echo "  FAIL  $1"; fail=1; fi
 }
 echo "crawl-address network smoke test"
+# The far machine's bridge address is deliberately NOT reachable: in
+# real-address mode the machines route each other per /24 and no longer carry
+# a route to each other's bridge subnet. Nothing needs it -- a node's default
+# route is its own bridge, and cross-machine traffic goes node -> own bridge ->
+# machine -> per-/24 route -> far machine -> far bridge -> far node, which is
+# what the checks below actually exercise. Asserting it cost a night once.
 check "node reaches its own machine's bridge"  ip netns exec n1 ping -c1 -W2 $A_BR
-check "node reaches the far machine's bridge"  ip netns exec n1 ping -c1 -W2 $B_BR
 check "node reaches a node on the far machine" ip netns exec n1 ping -c2 -W2 $B_NODE
 check "and the far node answers back"          ip netns exec n2 ping -c2 -W2 $A_NODE
-check "UDP carries both ways"                  ip netns exec n1 timeout 3 bash -c "echo hi >/dev/udp/$B_NODE/9"
+check "UDP leaves the namespace"               ip netns exec n1 timeout 3 bash -c "echo hi >/dev/udp/$B_NODE/9"
 
 echo
 if [ $fail -eq 0 ]; then echo "PASS - the addressing and routing hold"; else

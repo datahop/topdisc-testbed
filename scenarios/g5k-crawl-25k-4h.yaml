@@ -1,8 +1,11 @@
 # Evaluation run, Grid'5000, no churn: 25000 real node processes over the
 # 100 largest chains of the 2026-09-18 crawl (topics by the crawl's shares),
 # every node up for the whole run, real RLPx sessions filled from the topic
-# search, 4 h. g5k-crawl-25k-4h-churn adds the crawl's churn. 100 machines at 250 nodes
-# each; the walltime covers setup, 22.5 min of registration and the run.
+# search, 4 h. g5k-crawl-25k-4h-churn adds the crawl's churn. Every 25k run
+# uses 50 machines at 500 nodes, so runs stay comparable with one another
+# and a reservation fits one night window. The walltime covers setup, 22.5
+# min of registration, the run, and the trace collection, which at 25k nodes
+# is the longest tail of the night.
 # search_yield_floor 8 is the adaptive search distance, -1 the default.
 # Grid'5000: one hostagent per kadeployed machine, vnodes_per_machine node
 # processes in their own network namespaces (netns + netem, testbed.wan), no
@@ -40,8 +43,8 @@ testbed:
   g5k:
     site: nancy
     cluster: gros
-    vnodes_per_machine: 250
-    walltime: "06:00:00"
+    vnodes_per_machine: 500
+    walltime: "08:00:00"
   wan:
     enabled: true
     rate_kbps: 1000
