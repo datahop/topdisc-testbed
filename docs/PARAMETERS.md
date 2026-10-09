@@ -97,6 +97,6 @@ backend's `testbed:` block: `simnet-smoke`, `simnet-10k`, `simnet-10k-churn`,
 churn), `simnet-search-single-5k`, `simnet-search-five-5k` (search A/B);
 `local-100`, `local-100-continuous`, `local-100-legacy` (real processes on one
 host); `aws-smoke`, `aws-1k`, `aws-10k`; `g5k-smoke`, `g5k-1k`, `g5k-10k` (the
-Grid'5000 ladder), `g5k-five-5k` (the counterpart of `aws-five-1k`) and `g5k-crawl-25k-4h`, `g5k-crawl-25k-4h-churn`,
+Grid'5000 ladder), `g5k-five-5k` (the counterpart of `aws-five-1k`) and `g5k-crawl-25k`, `g5k-crawl-25k-churn`, `g5k-crawl-25k-floor4`, `g5k-crawl-25k-realip`,
 `g5k-phase3-10k`, `g5k-phase3-10k-churn` (the evaluation runs prepared for
 Grid'5000); `reference.yaml` (every key documented).
