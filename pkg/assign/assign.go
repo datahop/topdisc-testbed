@@ -102,15 +102,10 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 			}
 		}
 	}
-	var topicModel *churn.Model
-	if sc.Population.TopicModel != "" {
-		var err error
-		topicModel, err = churn.Load(filepath.Join(modelDir, sc.Population.TopicModel))
-		if err != nil {
-			return nil, err
-		}
+	topicIdx, _, err := drawTopics(cfg, modelDir, rng)
+	if err != nil {
+		return nil, err
 	}
-	topicIdx := DrawTopics(rng, n, sc.Population.Topics, sc.Population.ZipfS, topicModel, sc.Population.CommonTopic)
 	topics := make([][]string, n)
 	for i, ts := range topicIdx {
 		for _, t := range ts {
@@ -253,6 +248,31 @@ func legacySet(rng *rand.Rand, topics [][]string, frac float64) []bool {
 // crawl model's shares when there is one, from a Zipf draw otherwise; a
 // second, common topic 0 when commonTopic is set. All-register runs put
 // everyone on topic 0.
+// Topics draws each node's topics exactly as Generate does. A caller that
+// needs a node's topic before the assignments exist -- the crawl address pool
+// draws a node's /24 from its topic's prefixes -- must not re-implement the
+// draw, because any drift silently gives the addresses a different topic
+// structure than the run has. It also returns the loaded model.
+func Topics(cfg scenario.Config, modelDir string) ([][]int, *churn.Model, error) {
+	idx, m, err := drawTopics(cfg, modelDir, rand.New(rand.NewSource(cfg.Scenario.Population.Seed)))
+	return idx, m, err
+}
+
+// drawTopics loads the topic model and draws from rng. Generate passes its own
+// rng so the draw consumes the same stream the rest of Generate continues on.
+func drawTopics(cfg scenario.Config, modelDir string, rng *rand.Rand) ([][]int, *churn.Model, error) {
+	sc := cfg.Scenario
+	var m *churn.Model
+	if sc.Population.TopicModel != "" {
+		var err error
+		m, err = churn.Load(filepath.Join(modelDir, sc.Population.TopicModel))
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	return DrawTopics(rng, sc.Population.Nodes, sc.Population.Topics, sc.Population.ZipfS, m, sc.Population.CommonTopic), m, nil
+}
+
 func DrawTopics(rng *rand.Rand, n, numTopics int, zipfS float64, model *churn.Model, commonTopic bool) [][]int {
 	out := make([][]int, n)
 	if numTopics <= 1 && model == nil {

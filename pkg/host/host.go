@@ -28,6 +28,14 @@ func BridgeAddr(h int) string { return fmt.Sprintf("10.%d.255.254", 100+h) }
 func NodeIP(h, k int) string  { return fmt.Sprintf("10.%d.%d.%d", 100+h, (k+1)>>8, (k+1)&255) }
 func nsName(idx int) string   { return "tb" + strconv.Itoa(idx) }
 
+// Route is one prefix reachable through another machine. A run on the
+// synthetic addressing needs one per machine; a run on crawl addresses needs
+// one per /24, because its nodes are scattered across the address space.
+type Route struct {
+	Prefix string `json:"prefix"`
+	Via    string `json:"via"`
+}
+
 type Runner struct {
 	NodeBinary   string
 	LegacyBinary string // for assignments with Legacy set
@@ -37,6 +45,11 @@ type Runner struct {
 	Wan          *wan.Star // nil: plain processes on the host's own address
 	Host         int       // this host's index (subnet)
 	Seed         int64
+	// Routes and RealAddrs come from the coordinator for a run on crawl
+	// addresses: each node keeps the address the crawl gave it, so the
+	// per-/24 limits and the ad cache's ipTree score see real diversity.
+	Routes    []Route
+	RealAddrs bool
 
 	mu     sync.Mutex
 	procs  map[int]*exec.Cmd
@@ -92,20 +105,55 @@ func (r *Runner) Prepare(as []assign.Assignment, peers map[int]string) error {
 		fmt.Sprintf("ip addr add %s/16 dev %s", BridgeAddr(r.Host), Bridge),
 		fmt.Sprintf("ip link set %s up", Bridge),
 	}
-	for h, addr := range peers {
-		if h != r.Host {
-			cmds = append(cmds, fmt.Sprintf("ip route replace %s via %s", Subnet(h), addr))
-		}
+	if r.RealAddrs {
+		// A node's address no longer tells you which machine it is on, so
+		// reverse-path filtering has nothing to check it against. Debian
+		// ships this off, but a kadeploy image that turned it on would drop
+		// every packet between namespaces without a word.
+		cmds = append(cmds,
+			"sysctl -q -w net.ipv4.conf.all.rp_filter=0",
+			"sysctl -q -w net.ipv4.conf.default.rp_filter=0")
 	}
 	rng := rand.New(rand.NewSource(r.Seed + int64(r.Host)))
+	var routes []string
 	for k, a := range as {
 		d := r.Wan.Delay(rng)
 		r.delay[a.Idx] = d
 		ns := nsName(a.Idx)
+		if r.RealAddrs {
+			// The address is a /32 out of a foreign /24, so nothing is on-link
+			// in either direction: the namespace reaches the bridge through an
+			// explicit host route and everything else through it, and the
+			// machine reaches the namespace through a host route on the bridge,
+			// which is what makes it ARP there and the namespace answer.
+			veth := "v" + ns
+			cmds = append(cmds, r.Wan.Commands(ns, Bridge, a.IP+"/32", d)...)
+			cmds = append(cmds,
+				fmt.Sprintf("ip -n %s route add %s/32 dev %s", ns, BridgeAddr(r.Host), veth),
+				fmt.Sprintf("ip -n %s route add default via %s", ns, BridgeAddr(r.Host)))
+			routes = append(routes, fmt.Sprintf("route replace %s/32 dev %s", a.IP, Bridge))
+			continue
+		}
 		cmds = append(cmds, r.Wan.Commands(ns, Bridge, NodeIP(r.Host, k)+"/16", d)...)
 		cmds = append(cmds, fmt.Sprintf("ip -n %s route add default via %s", ns, BridgeAddr(r.Host)))
 	}
-	return root(cmds)
+	if r.RealAddrs {
+		for _, rt := range r.Routes {
+			routes = append(routes, fmt.Sprintf("route replace %s via %s", rt.Prefix, rt.Via))
+		}
+	} else {
+		for h, addr := range peers {
+			if h != r.Host {
+				routes = append(routes, fmt.Sprintf("route replace %s via %s", Subnet(h), addr))
+			}
+		}
+	}
+	if err := root(cmds); err != nil {
+		return err
+	}
+	// One `ip` per route costs a process each: at ~13k routes per machine on
+	// crawl addresses that is minutes of forking before the run can start.
+	return ipBatch(routes)
 }
 
 // Start launches node idx (again, with the same identity, if it ran before).
@@ -179,6 +227,20 @@ func rootArgs(args ...string) []string {
 		return args
 	}
 	return append([]string{"sudo", "-n"}, args...)
+}
+
+// ipBatch feeds many route commands to a single `ip -batch -`.
+func ipBatch(cmds []string) error {
+	if len(cmds) == 0 {
+		return nil
+	}
+	a := rootArgs("ip", "-batch", "-")
+	c := exec.Command(a[0], a[1:]...)
+	c.Stdin = strings.NewReader(strings.Join(cmds, "\n") + "\n")
+	if out, err := c.CombinedOutput(); err != nil {
+		return fmt.Errorf("ip -batch (%d routes): %v: %s", len(cmds), err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func root(cmds []string) error {
