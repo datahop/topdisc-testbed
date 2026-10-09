@@ -1,11 +1,11 @@
 # The Grid'5000 run g5k-crawl-25k-6h-realip of 2026-10-06 with the continuous
 # search model instead of the connection model: every node keeps one topic
-# search open for 6 h and takes every result, with no dialing, so recall shows
-# how much of its topic the search reaches. Everything else is as in that run:
+# search open for 2 h and takes every result, with no dialing, so recall shows
+# how much of its topic the search reaches. Everything else is as in that run but the search lasts 2 h:
 # 25000 nodes over the 100 largest chains of the 2026-09-18 crawl, crawl node
 # addresses, no churn, 50 machines at 500 nodes each, search floor 4.
-#   deploy/g5k/g5k.py up scenarios/g5k-crawl-25k-6h-continuous.yaml
-name: g5k-crawl-25k-6h-continuous
+#   deploy/g5k/g5k.py up scenarios/g5k-crawl-25k-2h-continuous.yaml
+name: g5k-crawl-25k-2h-continuous
 scenario:
   population:
     nodes: 25000
@@ -25,7 +25,7 @@ scenario:
     start_window: 15m
     register_wait: 22m30s
     search_stagger: 10ms
-    search_timeout: 6h
+    search_timeout: 2h
   topic:
     ad_cache_size: 5000
     search_yield_floor: 4
@@ -46,7 +46,7 @@ testbed:
     cluster: gros
     env: debian11-x64-base
     vnodes_per_machine: 500
-    walltime: "13:00:00"
+    walltime: "09:00:00"
   wan:
     enabled: true
     delay_min_ms: 4
