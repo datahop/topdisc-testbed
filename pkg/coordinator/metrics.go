@@ -275,6 +275,13 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 	// Pass 1 (lean): registrant identity per topic, and the series epoch.
 	topicOf := map[int]string{}
 	registrants := map[string]map[string]bool{} // topic hex -> 64-hex id
+	// Who counts as a provider differs by searcher. A TopDisc searcher can only
+	// find nodes that ran REGTOPIC, so registrants excludes legacy nodes. A
+	// legacy searcher has no topic protocol and walks the DHT filtering on the
+	// "svc" ENR entry, so for it every node carrying the topic is a provider,
+	// legacy or not. Scoring a legacy search against registrants credits it
+	// with nothing -- which is what silently voided the all-legacy baseline.
+	providers := map[string]map[string]bool{} // topic hex -> 64-hex id
 	topicIds := map[string]int{}
 	idOf := map[int]string{}
 	present := map[int]bool{}
@@ -294,6 +301,10 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 		}
 		present[a.Idx] = true
 		idOf[a.Idx] = lt.ID
+		if providers[th] == nil {
+			providers[th] = map[string]bool{}
+		}
+		providers[th][lt.ID] = true
 		if !a.Legacy {
 			if registrants[th] == nil {
 				registrants[th] = map[string]bool{}
@@ -352,11 +363,16 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 		}
 		b = nil
 
-		// results[]: one per TopDisc searcher, its lookups merged.
-		if !t.Legacy {
+		// results[]: one per searcher, its lookups merged -- a TopDisc node's
+		// topic queries, or a legacy node's random walk.
+		if !t.Legacy || t.Conn != nil || len(t.Lookups) > 0 {
 			th := topicHex(topicOf[a.Idx])
-			target := len(registrants[th])
-			if registrants[th][t.ID] {
+			prov := registrants[th]
+			if t.Legacy {
+				prov = providers[th]
+			}
+			target := len(prov)
+			if prov[t.ID] {
 				target--
 			}
 			r := searchResult{NodeIdx: a.Idx, NodeID: short(t.ID), Topic: topicIds[th], Target: target,
@@ -402,7 +418,7 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 			if c := t.Conn; c != nil {
 				// Connection-driven: the dialer's search is the node's one session.
 				for _, f := range c.Found {
-					if !registrants[th][f.ID] {
+					if !prov[f.ID] {
 						continue
 					}
 					at := c.StartMs + f.AtMs - t.SearchAtMs
