@@ -61,6 +61,13 @@ type lookup struct {
 	LatencyMs int64 `json:"latency_ms"`
 	Results   int   `json:"results"`
 	HitTarget bool  `json:"hit_target"`
+	// Which providers the walk turned up and when, the same shape cmd/node
+	// records. Without it a walk reports only how many it found, so the
+	// aggregator can build no recall-over-time curve and no per-provider
+	// timing for a legacy searcher -- the figures the TopDisc runs are read
+	// through. The count alone also hides whether a walk was still making
+	// progress when the phase ended.
+	Found []found `json:"found"`
 }
 
 // svcEntry is the "svc" ENR entry every testbed node carries: the service it
@@ -325,6 +332,11 @@ func main() {
 			"idx":  asg.Idx, "id": srv.Self().ID().String(), "legacy": true, "outbound": out, "inbound": in,
 			"peer_drops": drops, "refill_ms": refills, "lookups": lookups, "first_capable_ms": firstCapableMs,
 			"ads_held": 0, "wire": map[string]any{},
+			// The phase clock, as cmd/node records it. Leaving it out left the
+			// aggregator subtracting a zero search start, so every discovery
+			// time it derived for a legacy searcher came out as an absolute
+			// epoch value instead of ms into the search.
+			"register_at_ms": asg.Phases.RegisterAt, "search_at_ms": asg.Phases.SearchAt,
 		}, "", " ")
 		os.WriteFile(asg.TraceFile, b, 0o644)
 	}
@@ -351,18 +363,28 @@ func randomWalk(disc interface {
 	if timeout > 0 && start.Add(timeout).Before(stop) {
 		stop = start.Add(timeout)
 	}
+	// Insertion order is the discovery order, so the slice carries both the
+	// identities and when each one first appeared.
 	seen := map[enode.ID]struct{}{}
+	var order []found
 	var paceStart time.Time
 	add := func(nodes []*enode.Node) bool {
 		for _, n := range nodes {
-			if isProvider(n) {
-				seen[n.ID()] = struct{}{}
+			if !isProvider(n) {
+				continue
 			}
+			if _, dup := seen[n.ID()]; dup {
+				continue
+			}
+			seen[n.ID()] = struct{}{}
+			order = append(order, found{ID: n.ID().String(), AtMs: time.Since(start).Milliseconds()})
 		}
 		return target > 0 && len(seen) >= target
 	}
 	done := func(hit bool) lookup {
-		return lookup{StartMs: start.UnixMilli(), LatencyMs: time.Since(start).Milliseconds(), Results: len(seen), HitTarget: hit}
+		f := make([]found, len(order))
+		copy(f, order) // progress callbacks hand out snapshots; the walk keeps appending
+		return lookup{StartMs: start.UnixMilli(), LatencyMs: time.Since(start).Milliseconds(), Results: len(seen), HitTarget: hit, Found: f}
 	}
 	if add(disc.AllNodes()) {
 		return done(true)
