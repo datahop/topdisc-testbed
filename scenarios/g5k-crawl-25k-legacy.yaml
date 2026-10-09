@@ -12,8 +12,12 @@
 # discovery at all: it publishes its service in the ENR and finds providers by
 # random-target Kademlia lookups, which is all a topic-unaware client can do.
 # node-legacy writes the same trace record as cmd/node, so this run drops into
-# the same figures as g5k-crawl-25k-realip and the pair differs by the protocol
-# alone -- same addresses, same shape, same 6 h.
+# the same figures as g5k-crawl-25k-realip. The pair still differs by more than
+# the protocol: a TopDisc searcher under the conn model dials what its topic
+# search finds, so comparing the two on providers found compares an active
+# search against a walk, not one protocol against another. Read the pair for
+# cost and speed; docs/topdisc-vs-discv5.md does the like-for-like version in
+# simnet.
 # legacy_bootnode stays false on purpose. A stock bootnode serves nothing until
 # it has revalidated its table at ~20 nodes/min, which at 25000 nodes is around
 # 20 h of bootstrap; the bootnode being TopDisc-capable gives the legacy nodes
@@ -49,10 +53,16 @@ scenario:
     ad_cache_size: 5000
     search_yield_floor: 4
   search:
-    model: conn
-    target_count: 0
-  conn_model:
-    enabled: true
+    # continuous, not conn: the random-target walk in node-legacy sits behind
+    # lookupOnly, which is true only for continuous and scheduled. Under conn
+    # no walk is ever started and the only providers a node notices are the
+    # ones the dialer happens to hand it while filling its outbound slots --
+    # which it stops doing once they are full. The 2026-10-08 run was
+    # configured that way and issued zero DHT lookups across all 24999 nodes:
+    # 88.7% of its provider sightings landed in the first 10 s and there were
+    # none at all between 10 s and the 6 h teardown. Matches
+    # g5k-crawl-5k-discv5.
+    model: continuous
 testbed:
   backend: cloud
   cloud:
