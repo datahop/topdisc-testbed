@@ -194,13 +194,21 @@ def up(path):
         # configured density exactly; if kadeploy lost more than the spares, it
         # is a denser run rather than a dead one -- but only up to a point,
         # since density is what the host-level limits were sized against.
-        healthy = wait_healthy(deployed, machines)
-        pnodes = healthy[:machines]
+        # The floor is how few machines the population still fits on at the
+        # density ceiling, not how many the scenario asked for. Passing
+        # `machines` here aborted on the very case the lines below exist to
+        # handle: on 2026-10-12 three reservations collided, OAR granted 48 of
+        # the 52 asked for, all 48 deployed and answered, and `up` exited with
+        # "only 48 of 48 machines are healthy, need 50" -- a night lost to
+        # arithmetic, with the recomputation two lines further down unreached.
         pop = int(((cfg.get("scenario") or {}).get("population") or {}).get("nodes") or 0)
+        cap = int(g["vnodes_per_machine"] * 1.25)
+        floor = max(1, -(-pop // cap)) if pop else machines
+        healthy = wait_healthy(deployed, min(machines, floor))
+        pnodes = healthy[:machines]
         per = g["vnodes_per_machine"]
         if len(pnodes) < machines or per * len(pnodes) < pop:
             per = -(-pop // len(pnodes))            # ceil
-            cap = int(g["vnodes_per_machine"] * 1.25)
             if per > cap:
                 sys.exit(f"{len(pnodes)} healthy machines would need {per} nodes each for a "
                          f"population of {pop}, over the {cap} ceiling "
