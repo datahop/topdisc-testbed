@@ -300,12 +300,14 @@ def run(path):
     except Exception:
         print("pull failed: deployment kept; fix, then g5k.py pull && g5k.py down", file=sys.stderr)
         raise
-    if not traces:
+    if traces is False:
         print("run: the aggregates are in but the traces were not fetched (see above)"
               + ("" if KEEP else "; the machines are released now, so they are gone (KEEP=1 keeps "
                  "the deployment for a retry)"), file=sys.stderr)
     if not KEEP:
         down()
+    if traces is False:
+        sys.exit(1)
 
 
 def free_gb(path):
@@ -348,7 +350,7 @@ def pull():
               f"aggregates (cmd/recollect), not an input to any figure, so the run above is complete "
               f"without them. To fetch them somewhere with room:\n"
               f"  ssh root@{c} 'tar czf - -C {d} traces' > traces.tgz", file=sys.stderr)
-        return False
+        return None  # skipped on purpose: nothing to retry
     tgz = local / "traces.tgz"
     try:
         sh(f"ssh root@{c} 'tar czf - -C {d} traces' > {tgz}")
@@ -398,7 +400,7 @@ if __name__ == "__main__":
             sys.exit(f"{verb} needs a scenario")
         globals()[verb](sys.argv[2])
     elif verb == "pull":
-        if not pull():
+        if pull() is False:
             sys.exit(1)
     else:
         globals()[verb]()
