@@ -124,7 +124,7 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 	placement := make([]map[string]any, len(as))
 	for i := range as {
 		h := inv.Hosts[hostOf[i]]
-		placement[i] = map[string]any{"idx": i, "host": h.Index, "ip": h.IP, "public_ip": h.Public, "region": h.Region}
+		placement[i] = map[string]any{"idx": i, "host": h.Index, "ip": h.IP, "public_ip": h.Public, "region": h.Region, "node_ip": as[i].IP}
 	}
 	b, _ = json.Marshal(placement)
 	os.WriteFile(filepath.Join(runDir, "placement.json"), b, 0o644)
@@ -376,7 +376,7 @@ func each(n int, f func(i int) error) error {
 // prefixRoutes gives each machine the routes to the /24s that live on other
 // machines. With crawl addresses a machine's nodes are scattered across the
 // address space, so there is no per-machine prefix to summarise them with and
-// every other /24 needs its own route -- about 13k of them per machine, which
+// every other /24 needs its own route -- about 9k of them per machine, which
 // a Linux FIB carries without trouble.
 func prefixRoutes(pool *addr.Pool, hostOf []int, inv Inventory) [][]host.Route {
 	out := make([][]host.Route, len(inv.Hosts))
@@ -385,7 +385,7 @@ func prefixRoutes(pool *addr.Pool, hostOf []int, inv Inventory) [][]host.Route {
 	}
 	owner := map[uint32]int{}
 	for pre, idxs := range pool.Groups() {
-		owner[pre] = hostOf[idxs[0]] // Draw keeps a /24 on one machine
+		owner[pre] = hostOf[idxs[0]] // placeByPrefix keeps a /24 on one machine
 	}
 	for h := range inv.Hosts {
 		for pre, o := range owner {
