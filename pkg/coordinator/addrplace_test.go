@@ -90,20 +90,27 @@ func TestCrawlAddressPlacement(t *testing.T) {
 		}
 	}
 	routes := prefixRoutes(pool, hostOf, inv)
-	min, max := len(routes[0]), len(routes[0])
-	for _, r := range routes {
-		if len(r) < min {
-			min = len(r)
+	owned := make([]map[string]bool, len(inv.Hosts))
+	for h := range owned {
+		owned[h] = map[string]bool{}
+	}
+	for pre, idxs := range pool.Groups() {
+		owned[hostOf[idxs[0]]][addr.CIDR(pre)] = true
+	}
+	nroutes := make([]int, len(routes))
+	for h, r := range routes {
+		nroutes[h] = len(r)
+		if len(r) != prefixes-len(owned[h]) {
+			t.Fatalf("machine %d has %d routes, want %d (%d /24s minus %d of its own)", h, len(r), prefixes-len(owned[h]), prefixes, len(owned[h]))
 		}
-		if len(r) > max {
-			max = len(r)
+		for _, rt := range r {
+			if owned[h][rt.Prefix] {
+				t.Fatalf("machine %d routes its own /24 %s via %s", h, rt.Prefix, rt.Via)
+			}
 		}
 	}
 	t.Logf("nodes per machine: min %d max %d; routes per machine: min %d max %d",
-		minOf(used), maxOf(used), min, max)
-	if max != prefixes-minOwned(pool, hostOf, len(inv.Hosts)) && min == 0 {
-		t.Fatalf("no routes built")
-	}
+		minOf(used), maxOf(used), minOf(nroutes), maxOf(nroutes))
 }
 
 func minOf(v []int) int {
@@ -123,11 +130,4 @@ func maxOf(v []int) int {
 		}
 	}
 	return m
-}
-func minOwned(p *addr.Pool, hostOf []int, hosts int) int {
-	own := make([]int, hosts)
-	for _, idxs := range p.Groups() {
-		own[hostOf[idxs[0]]]++
-	}
-	return maxOf(own)
 }

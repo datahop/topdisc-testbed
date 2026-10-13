@@ -1,9 +1,9 @@
-# Evaluation run, simnet: 10000 nodes over the 100 largest chains of the
-# 2026-09-18 crawl (topics by the crawl's shares, node addresses by the
-# crawl's /24 histogram), crawl churn in real time with hard departures,
-# connection-driven search, 4 h. search_yield_floor 8 is the adaptive search
-# distance; -1 runs the default searcher for the A/B. Needs about 76 GB RSS:
-#   GOMEMLIMIT=96GiB SIMNET_HEAPPROF=1h ./simnet scenarios/simnet-crawl-10k-4h.yaml
+# Address control, simnet: 2000 nodes over the 100 largest chains of the
+# 2026-09-18 crawl (topics by the crawl's shares) on simnet's default index
+# addresses, one node per /24, so the per-/24 limits and the admission IP
+# score never see a shared prefix; no churn, connection-driven search, 4 min,
+# search floor 4. The control for simnet-crawl-ip-check, which differs by
+# addresses: crawl alone.
 name: simnet-crawl-ip-control
 scenario:
   population:
