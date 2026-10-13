@@ -103,4 +103,4 @@ records spurious leaves. `cmd/pingset` pings a list of ENRs from a fresh
 endpoint and is the check for that condition (nodes that answer the crawler
 but not a fresh endpoint mean the path, not the nodes, is failing).
 
-Published crawls and how to fetch them: `data/crawl/README.md`.
+The crawl datasets, where they are kept and how to fetch them: `data/crawl/README.md`.
