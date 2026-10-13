@@ -2,7 +2,7 @@
 # Copy a crawl dataset from where it is kept, verify it and unpack the event log.
 #
 #   CRAWL_SRC=<source> cmd/crawl/fetch.sh <crawl-date> [dir]
-#   e.g. CRAWL_SRC=london:workspace/datahop/runs/2026-09-18-crawl24h-aws cmd/crawl/fetch.sh 2026-09-18 data/crawl
+#   e.g. CRAWL_SRC=user@host:/srv/crawls/2026-09-18 cmd/crawl/fetch.sh 2026-09-18 data/crawl
 #
 # CRAWL_SRC (or a third argument) is the directory holding one crawl's
 # SHA256SUMS: an http(s) base URL, an scp-style host:path, or a local path.
@@ -22,7 +22,7 @@ if [ -z "$src" ]; then
 fetch.sh: no source given (set CRAWL_SRC or pass it as the third argument).
 
 The crawl dataset is no longer on S3. It is kept by the project on its
-London host at ~/workspace/datahop/runs/2026-09-18-crawl24h-aws/
+London host; ask the maintainers for access
 (events in data/events.jsonl.gz, checksums in SHA256SUMS); ask the
 project for access. Scenarios do not need it: they read
 scenarios/models/crawl-2026-09-18.json from the repo.
@@ -40,7 +40,8 @@ esac
 mkdir -p "$dir/data" "$dir/derived/gap10" "$dir/derived/gap30"
 
 get SHA256SUMS SHA256SUMS
-get data/events.jsonl.gz data/events.jsonl.gz 2>/dev/null || get events.jsonl.gz data/events.jsonl.gz
+get data/events.jsonl.gz data/events.jsonl.gz 2>/dev/null || get events.jsonl.gz data/events.jsonl.gz 2>/dev/null \
+  || { echo "fetch: $src has no data/events.jsonl.gz" >&2; exit 1; }
 get crawl.log crawl.log
 get bootnodes.txt bootnodes.txt
 for g in gap10 gap30; do

@@ -14,7 +14,7 @@ only needed to rebuild the sessions or the model with `cmd/crawl/sessions.py`
 and `cmd/crawl/model.py`.
 
 ```
-CRAWL_SRC=london:workspace/datahop/runs/2026-09-18-crawl24h-aws cmd/crawl/fetch.sh 2026-09-18   # -> data/crawl/2026-09-18/
+CRAWL_SRC=user@host:/srv/crawls/2026-09-18 cmd/crawl/fetch.sh 2026-09-18   # -> data/crawl/2026-09-18/
 python3 cmd/crawl/sessions.py data/crawl/2026-09-18/data/events.jsonl --down-after 30
 ```
 
@@ -33,7 +33,7 @@ discv5 list plus the consensus lists of mainnet, hoodi, holesky and sepolia.
 | `crawl.log`, `bootnodes.txt`, `SHA256SUMS` | | run log, inputs, checksums |
 
 12 files, 961 MiB. Kept on the project's London host at
-`~/workspace/datahop/runs/2026-09-18-crawl24h-aws/` (events under
+the project's London host (events under
 `data/events.jsonl.gz`, checksums in `SHA256SUMS`), with a second copy held
 by the maintainer. No longer on S3.
 
