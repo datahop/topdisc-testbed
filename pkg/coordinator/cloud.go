@@ -121,6 +121,8 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 	if err := assign.Write(filepath.Join(runDir, "assignments"), as); err != nil {
 		return err
 	}
+	// node_ip is the node's bind address; node_ext_ip, when present, the one it
+	// advertises. Readers join on node_ext_ip, else node_ip.
 	placement := make([]map[string]any, len(as))
 	for i := range as {
 		h := inv.Hosts[hostOf[i]]
