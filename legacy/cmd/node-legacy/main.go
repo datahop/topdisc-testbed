@@ -397,6 +397,7 @@ func randomWalk(disc interface {
 		return done(true)
 	}
 	for time.Now().Before(stop) {
+		rounds++ // counted when sent, so a lookup cut off by the deadline still counts
 		res := make(chan []*enode.Node, 1)
 		go func() {
 			var target enode.ID
@@ -405,7 +406,6 @@ func randomWalk(disc interface {
 		}()
 		select {
 		case nodes := <-res:
-			rounds++
 			if add(nodes) {
 				return done(true)
 			}

@@ -489,7 +489,7 @@ def plot_lookup_contacts(results, fig, label, groups):
         elif r.get("targetContacted", -1) >= 0:
             nodes_by[t].append(r["targetContacted"])
             queries_by[t].append(r["targetQueries"])
-    if not any(nodes_by.values()):
+    if not any(nodes_by.values()) and not any(queries_by.values()):
         return False
     axes = fig.subplots(1, 2, squeeze=False)[0]
     suffix = " per lookup" if scheduled else " to reach F_lookup"
