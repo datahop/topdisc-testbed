@@ -406,7 +406,7 @@ func runSessionChurn(c *connTable, window, gap time.Duration, alwaysOn, scale fl
 	var wg sync.WaitGroup
 	for i := range c.out {
 		frac, churns := sessionLength(rng, alwaysOn, scale)
-		if !churns {
+		if !churns || i == 0 { // the bootnode never churns
 			continue
 		}
 		wg.Add(1)

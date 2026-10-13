@@ -4,6 +4,8 @@ import (
 	"math/rand"
 	"testing"
 	"time"
+
+	"github.com/datahop/topdisc-testbed/pkg/scenario"
 )
 
 func TestLookupTimes(t *testing.T) {
@@ -57,5 +59,34 @@ func TestStartOffsets(t *testing.T) {
 	}
 	if z := StartOffsets(1, 3, 0); z[2] != 0 {
 		t.Fatalf("zero window: %v", z)
+	}
+}
+
+// The bootnode (node 0) never gets a churn schedule: a returning node has no
+// other node to bootstrap from.
+func TestBootnodeNeverChurns(t *testing.T) {
+	cfg := scenario.Default()
+	cfg.Scenario.Population.Nodes = 200
+	cfg.Scenario.Population.Topics = 100
+	cfg.Scenario.Population.TopicModel = "crawl-2026-09-18.json"
+	cfg.Scenario.Phases.SearchTimeout = 4 * time.Hour
+	cfg.Scenario.SessionChurn.Enabled = true
+	cfg.Scenario.SessionChurn.Model = "crawl-2026-09-18.json"
+	hosts := func(int) Host { return Host{IP: "10.0.0.1", BasePort: 30300} }
+	as, err := Generate(cfg, hosts, 0, "../../scenarios/models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(as[0].Churn) != 0 {
+		t.Fatalf("bootnode has a churn schedule: %v", as[0].Churn)
+	}
+	churning := 0
+	for _, a := range as[1:] {
+		if len(a.Churn) > 0 {
+			churning++
+		}
+	}
+	if churning == 0 {
+		t.Fatal("no node churns: the model was not applied")
 	}
 }

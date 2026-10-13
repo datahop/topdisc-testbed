@@ -32,6 +32,9 @@ func runModelChurn(c *connTable, m *churn.Model, window time.Duration, windowRea
 
 	sched := make(map[int][]churn.Event, len(c.out))
 	for i := range c.out {
+		if i == 0 { // the bootnode never churns
+			continue
+		}
 		if ev := m.ScheduleTopic(rand.New(rand.NewSource(churn.NodeSeed(seed, i))), window.Seconds(), windowRealHours, topicOf(i)); len(ev) > 0 {
 			sched[i] = ev
 		}
