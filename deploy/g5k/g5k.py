@@ -110,9 +110,22 @@ class Unrunnable(Exception):
 
 
 def held(provider):
-    jobs = ", ".join(f"{getattr(j, 'site', '?')}/{getattr(j, 'uid', j)}"
-                     for j in getattr(provider, "jobs", None) or []) or "see `g5k.py check`"
+    try:  # provider.jobs asks the Grid'5000 API, which may be what failed
+        jobs = ", ".join(f"{getattr(j, 'site', '?')}/{getattr(j, 'uid', j)}"
+                         for j in getattr(provider, "jobs", None) or []) or "see `g5k.py check`"
+    except Exception:
+        jobs = "see `g5k.py check`"
     return f"the machines are still held (OAR job {jobs}): fix and re-run `up`, or release with `g5k.py down`"
+
+
+def release(provider):
+    """Release the reservation; on failure say that it is still held."""
+    try:
+        provider.destroy()
+        return True
+    except BaseException as e:
+        print(f"release failed ({e}); {held(provider)}", file=sys.stderr)
+        return False
 
 
 def wait_healthy(hosts, need, timeout=60):
@@ -175,15 +188,15 @@ def up(path):
     # raised, and the handler released all 52 with the night half gone.
     try:
         roles, networks = provider.init()
-    except Exception:
+    except BaseException:
         if not KEEP:
             print("reservation failed; releasing", file=sys.stderr)
-            provider.destroy()
+            release(provider)
         raise
     # Written now rather than with the inventory so that `down` addresses the
     # right site whatever stops `up` from here on.
-    save_state({"site": g["site"], "cluster": g["cluster"], "env": g["env"], "scenario": path, "workdir": WORK})
     try:
+        save_state({"site": g["site"], "cluster": g["cluster"], "env": g["env"], "scenario": path, "workdir": WORK})
         deployed = [h.address for h in roles["pnode"]]
         broken = []
         for h in deployed:
@@ -249,8 +262,8 @@ def up(path):
         if KEEP:
             sys.exit(held(provider))
         print("releasing the reservation (KEEP=1 keeps it)", file=sys.stderr)
-        provider.destroy()
-        STATE.unlink()
+        if release(provider):
+            STATE.unlink()
         sys.exit(1)
     except BaseException:
         # BaseException so a sys.exit or Ctrl-C prints the hint too.
@@ -289,7 +302,8 @@ def run(path):
         raise
     if not traces:
         print("run: the aggregates are in but the traces were not fetched (see above)"
-              + ("" if KEEP else "; they go with the machines"), file=sys.stderr)
+              + ("" if KEEP else "; the machines are released now, so they are gone (KEEP=1 keeps "
+                 "the deployment for a retry)"), file=sys.stderr)
     if not KEEP:
         down()
 
@@ -338,11 +352,13 @@ def pull():
     tgz = local / "traces.tgz"
     try:
         sh(f"ssh root@{c} 'tar czf - -C {d} traces' > {tgz}")
-    except Exception as e:
+    except BaseException as e:
         # The aggregates are already in; a broken stream must not stop `run`
         # from releasing, nor leave a truncated archive that looks whole.
         tgz.unlink(missing_ok=True)
-        print(f"pull: traces failed ({e}); the aggregates are in. Retry before `down`:\n"
+        if not isinstance(e, Exception):
+            raise
+        print(f"pull: traces failed ({e}); the aggregates are in. To retry while the machines are up:\n"
               f"  ssh root@{c} 'tar czf - -C {d} traces' > {tgz}", file=sys.stderr)
         return False
     print(f"runs/{local.name}: traces.tgz in ({tgz.stat().st_size // 1024**3} GB)")
@@ -381,5 +397,8 @@ if __name__ == "__main__":
         if len(sys.argv) < 3:
             sys.exit(f"{verb} needs a scenario")
         globals()[verb](sys.argv[2])
+    elif verb == "pull":
+        if not pull():
+            sys.exit(1)
     else:
         globals()[verb]()
