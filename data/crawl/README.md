@@ -2,12 +2,19 @@
 
 Traces from `cmd/crawl`: every discv5 record seen over a day, with its chain,
 and every answer and miss of the nodes that answered at least once, so
-sessions (arrival, leave, rejoin) can be rebuilt at any threshold. The raw
-event logs live in S3; `cmd/crawl/fetch.sh <date>` downloads a crawl, checks
-it and unpacks it here.
+sessions (arrival, leave, rejoin) can be rebuilt at any threshold.
+
+The raw files are not published: the S3 bucket that held them was deleted on
+2026-10-09. The project keeps them on its London host (see below); ask the
+project for access. `cmd/crawl/fetch.sh <date>` copies a crawl from a source
+given in `CRAWL_SRC` (http(s) URL, scp-style `host:path` or local path),
+checks it and unpacks it here. Scenarios do not need these files: they read
+`scenarios/models/crawl-2026-09-18.json` from the repo. The raw files are
+only needed to rebuild the sessions or the model with `cmd/crawl/sessions.py`
+and `cmd/crawl/model.py`.
 
 ```
-cmd/crawl/fetch.sh 2026-09-18            # -> data/crawl/2026-09-18/
+CRAWL_SRC=london:workspace/datahop/runs/2026-09-18-crawl24h-aws cmd/crawl/fetch.sh 2026-09-18   # -> data/crawl/2026-09-18/
 python3 cmd/crawl/sessions.py data/crawl/2026-09-18/data/events.jsonl --down-after 30
 ```
 
@@ -25,7 +32,10 @@ discv5 list plus the consensus lists of mainnet, hoodi, holesky and sepolia.
 | `derived/gap10/`, `derived/gap30/` | ~10 MB gz | `nodes.csv`, `sessions.csv`, `enr_changes.csv`, `summary.txt` for a 10-min and a 30-min gap |
 | `crawl.log`, `bootnodes.txt`, `SHA256SUMS` | | run log, inputs, checksums |
 
-S3 prefix: `s3://datahop-testbed-data/crawl/2026-09-18/` (public read).
+12 files, 961 MiB. Kept on the project's London host at
+`~/workspace/datahop/runs/2026-09-18-crawl24h-aws/` (events under
+`data/events.jsonl.gz`, checksums in `SHA256SUMS`), with a second copy held
+by the maintainer. No longer on S3.
 
 ### What is in it
 
