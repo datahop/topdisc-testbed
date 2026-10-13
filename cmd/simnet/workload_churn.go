@@ -61,6 +61,12 @@ func (cs *churnState) leaveRandom(rng *rand.Rand) (nodeRec, bool) {
 		return nodeRec{}, false
 	}
 	i := rng.Intn(len(cs.alive))
+	if cs.alive[i].idx == 0 { // the bootnode never leaves
+		if len(cs.alive) == 1 {
+			return nodeRec{}, false
+		}
+		i = (i + 1 + rng.Intn(len(cs.alive)-1)) % len(cs.alive)
+	}
 	rec := cs.alive[i]
 	last := len(cs.alive) - 1
 	cs.alive[i] = cs.alive[last]

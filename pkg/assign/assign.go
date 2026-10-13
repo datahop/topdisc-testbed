@@ -172,7 +172,7 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 		if sc.Search.Model == "scheduled" && sc.Search.Intervals > 0 {
 			a.Search.LookupAtMs = LookupTimes(rand.New(rand.NewSource(sc.Population.Seed+int64(i)*40503)), a.Phases.SearchAt, stopAt, sc.Search.Intervals)
 		}
-		if model != nil {
+		if model != nil && i != 0 { // the bootnode never churns
 			a.Churn = model.ScheduleTopic(rand.New(rand.NewSource(churn.NodeSeed(sc.Population.Seed, i))), ph.SearchTimeout.Seconds(), sc.SessionChurn.WindowHours, ChurnTopic(model, sc, topicIdx[i]))
 		}
 		out[i] = a
