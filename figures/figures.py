@@ -479,7 +479,7 @@ def plot_lookup_contacts(results, fig, label, groups):
     each lookup; other models count what a search needed to reach F_lookup
     distinct registrants.
     """
-    scheduled = any(r.get("lookupContacted") for r in results)
+    scheduled = any(r.get("lookupContacted") or r.get("lookupQueries") for r in results)
     nodes_by, queries_by = collections.defaultdict(list), collections.defaultdict(list)
     for r in results:
         t = r["topic"]

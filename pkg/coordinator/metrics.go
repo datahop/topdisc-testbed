@@ -392,6 +392,8 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 				r.LookupResults = append(r.LookupResults, l.Results)
 				if l.Queries >= 0 {
 					r.LookupQueries = append(r.LookupQueries, l.Queries)
+				}
+				if l.Contacted >= 0 {
 					r.LookupContacted = append(r.LookupContacted, l.Contacted)
 				}
 				r.SearchStats = addStats(r.SearchStats, l.Search)
