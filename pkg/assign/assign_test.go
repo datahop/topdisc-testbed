@@ -73,20 +73,23 @@ func TestBootnodeNeverChurns(t *testing.T) {
 	cfg.Scenario.SessionChurn.Enabled = true
 	cfg.Scenario.SessionChurn.Model = "crawl-2026-09-18.json"
 	hosts := func(int) Host { return Host{IP: "10.0.0.1", BasePort: 30300} }
-	as, err := Generate(cfg, hosts, 0, "../../scenarios/models")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(as[0].Churn) != 0 {
-		t.Fatalf("bootnode has a churn schedule: %v", as[0].Churn)
-	}
-	churning := 0
-	for _, a := range as[1:] {
-		if len(a.Churn) > 0 {
-			churning++
+	for seed := int64(1); seed <= 20; seed++ {
+		cfg.Scenario.Population.Seed = seed
+		as, err := Generate(cfg, hosts, 0, "../../scenarios/models")
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if churning == 0 {
-		t.Fatal("no node churns: the model was not applied")
+		if len(as[0].Churn) != 0 {
+			t.Fatalf("seed %d: bootnode has a churn schedule: %v", seed, as[0].Churn)
+		}
+		churning := 0
+		for _, a := range as[1:] {
+			if len(a.Churn) > 0 {
+				churning++
+			}
+		}
+		if churning == 0 {
+			t.Fatalf("seed %d: no node churns: the model was not applied", seed)
+		}
 	}
 }
