@@ -32,11 +32,12 @@ type NodeSample struct {
 }
 
 type monitor struct {
-	mu      sync.Mutex
-	samples []Sample
-	lastCPU map[int]float64 // idx -> cumulative cpu seconds
-	lastAt  time.Time
-	stop    chan struct{}
+	mu       sync.Mutex
+	samples  []Sample
+	lastCPU  map[int]float64 // idx -> cumulative cpu seconds
+	lastAt   time.Time
+	stop     chan struct{}
+	stopOnce sync.Once
 }
 
 // Monitor samples every period until Stop; samples are kept in memory and
@@ -58,10 +59,16 @@ func (r *Runner) Monitor(period time.Duration) {
 	}()
 }
 
+// StopMonitor is idempotent. The coordinator stops every agent at the end of
+// a run and the next run prepares against the same agent, so a fleet that
+// serves more than one run stops the same monitor twice; closing the channel
+// again panicked the handler before main could swap in the new Runner, which
+// left the agent wedged on the stale one for every later prepare.
 func (r *Runner) StopMonitor() {
-	if r.mon != nil {
-		close(r.mon.stop)
+	if r.mon == nil {
+		return
 	}
+	r.mon.stopOnce.Do(func() { close(r.mon.stop) })
 }
 
 func (r *Runner) Samples() []Sample {
