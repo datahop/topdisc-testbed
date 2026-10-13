@@ -68,6 +68,11 @@ type lookup struct {
 	// through. The count alone also hides whether a walk was still making
 	// progress when the phase ended.
 	Found []found `json:"found"`
+	// Random-target lookups the walk ran: the cost cmd/node reports as
+	// TOPICQUERY requests, so the two compare. Stock geth's Lookup does not
+	// expose how many nodes it asked, so Contacted stays "not reported".
+	Queries   int `json:"queries"`
+	Contacted int `json:"contacted"`
 }
 
 // svcEntry is the "svc" ENR entry every testbed node carries: the service it
@@ -367,6 +372,7 @@ func randomWalk(disc interface {
 	// identities and when each one first appeared.
 	seen := map[enode.ID]struct{}{}
 	var order []found
+	rounds := 0
 	var paceStart time.Time
 	add := func(nodes []*enode.Node) bool {
 		for _, n := range nodes {
@@ -382,14 +388,16 @@ func randomWalk(disc interface {
 		return target > 0 && len(seen) >= target
 	}
 	done := func(hit bool) lookup {
-		f := make([]found, len(order))
-		copy(f, order) // progress callbacks hand out snapshots; the walk keeps appending
-		return lookup{StartMs: start.UnixMilli(), LatencyMs: time.Since(start).Milliseconds(), Results: len(seen), HitTarget: hit, Found: f}
+		// Capacity-capped so the walk's later appends never land in a snapshot
+		// a progress callback already holds.
+		f := order[:len(order):len(order)]
+		return lookup{StartMs: start.UnixMilli(), LatencyMs: time.Since(start).Milliseconds(), Results: len(seen), HitTarget: hit, Found: f, Queries: rounds, Contacted: -1}
 	}
 	if add(disc.AllNodes()) {
 		return done(true)
 	}
 	for time.Now().Before(stop) {
+		rounds++ // counted when sent, so a lookup cut off by the deadline still counts
 		res := make(chan []*enode.Node, 1)
 		go func() {
 			var target enode.ID

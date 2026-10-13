@@ -82,11 +82,11 @@ func runLegacyWalker(n nodeRec, topicIdx int, deadlineAt time.Time, pacing searc
 		}
 		var tgt enode.ID
 		crand.Read(tgt[:])
+		rounds++ // counted when sent, so a lookup cut off by the deadline still counts
 		out := make(chan []*enode.Node, 1)
 		go func() { out <- d.Lookup(tgt) }()
 		select {
 		case nodes := <-out:
-			rounds++
 			add(nodes)
 		case <-time.After(time.Until(deadlineAt)):
 		}

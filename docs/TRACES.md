@@ -186,7 +186,7 @@ Real backends add to `metrics.json`:
 
 | Field | Contents |
 |---|---|
-| `results[].lookupQueries`, `results[].lookupContacted` | TOPICQUERY requests sent and distinct nodes queried, per lookup |
+| `results[].lookupQueries`, `results[].lookupContacted` | TOPICQUERY requests sent and distinct nodes queried, per lookup. For a plain-discv5 node `lookupQueries` counts DHT lookups, each 10 to 30 FINDNODE requests, and `lookupContacted` is absent |
 | `registrationBucketFullNs{}` | topic hex → registrant → per registration bucket (far to close), ns since registration start when the bucket first held its target number of ads; -1 = never |
 | `registrationCompleteNs{}` | topic hex → registrant → ns when every bucket was full or out of candidates |
 

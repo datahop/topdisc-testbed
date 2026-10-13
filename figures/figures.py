@@ -479,7 +479,7 @@ def plot_lookup_contacts(results, fig, label, groups):
     each lookup; other models count what a search needed to reach F_lookup
     distinct registrants.
     """
-    scheduled = any(r.get("lookupContacted") for r in results)
+    scheduled = any(r.get("lookupContacted") or r.get("lookupQueries") for r in results)
     nodes_by, queries_by = collections.defaultdict(list), collections.defaultdict(list)
     for r in results:
         t = r["topic"]
@@ -489,12 +489,12 @@ def plot_lookup_contacts(results, fig, label, groups):
         elif r.get("targetContacted", -1) >= 0:
             nodes_by[t].append(r["targetContacted"])
             queries_by[t].append(r["targetQueries"])
-    if not any(nodes_by.values()):
+    if not any(nodes_by.values()) and not any(queries_by.values()):
         return False
     axes = fig.subplots(1, 2, squeeze=False)[0]
     suffix = " per lookup" if scheduled else " to reach F_lookup"
     for ax, data, what in ((axes[0], nodes_by, "distinct nodes contacted"),
-                           (axes[1], queries_by, "TOPICQUERY requests sent")):
+                           (axes[1], queries_by, "TOPICQUERY requests sent (plain discv5: DHT lookups)")):
         for name, ts, colour, lw in groups:
             xs = np.sort([v for t in ts for v in data.get(t, [])])
             if xs.size:
