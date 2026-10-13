@@ -32,8 +32,7 @@ discv5 list plus the consensus lists of mainnet, hoodi, holesky and sepolia.
 | `derived/gap10/`, `derived/gap30/` | ~10 MB gz | `nodes.csv`, `sessions.csv`, `enr_changes.csv`, `summary.txt` for a 10-min and a 30-min gap |
 | `crawl.log`, `bootnodes.txt`, `SHA256SUMS` | | run log, inputs, checksums |
 
-12 files, 961 MiB. Kept on the project's London host at
-the project's London host (events under
+12 files, 961 MiB. Kept on the project's London host (events under
 `data/events.jsonl.gz`, checksums in `SHA256SUMS`), with a second copy held
 by the maintainer. No longer on S3.
 

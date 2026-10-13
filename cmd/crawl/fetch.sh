@@ -21,10 +21,9 @@ if [ -z "$src" ]; then
   cat >&2 <<EOF
 fetch.sh: no source given (set CRAWL_SRC or pass it as the third argument).
 
-The crawl dataset is no longer on S3. It is kept by the project on its
-London host; ask the maintainers for access
-(events in data/events.jsonl.gz, checksums in SHA256SUMS); ask the
-project for access. Scenarios do not need it: they read
+The crawl dataset is no longer on S3. The project keeps it on its London
+host (events in data/events.jsonl.gz, checksums in SHA256SUMS); ask the
+maintainers for access. Scenarios do not need it: they read
 scenarios/models/crawl-2026-09-18.json from the repo.
 EOF
   exit 2
