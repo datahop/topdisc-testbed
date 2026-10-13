@@ -27,6 +27,8 @@ type PrepareRequest struct {
 	Verbosity      int                 `json:"verbosity"`
 	SamplePeriodMs int64               `json:"sample_period_ms"`
 	Assignments    []assign.Assignment `json:"assignments"`
+	Routes         []host.Route        `json:"routes,omitempty"`
+	RealAddrs      bool                `json:"real_addrs,omitempty"`
 }
 
 func main() {
@@ -54,7 +56,8 @@ func main() {
 		}
 		os.RemoveAll(*work)
 		r = &host.Runner{NodeBinary: *bin, LegacyBinary: *legacyBin, Verbosity: p.Verbosity, AsgDir: filepath.Join(*work, "assignments"),
-			LogDir: filepath.Join(*work, "logs"), Wan: p.Wan, Host: p.Host, Seed: p.Seed}
+			LogDir: filepath.Join(*work, "logs"), Wan: p.Wan, Host: p.Host, Seed: p.Seed,
+			Routes: p.Routes, RealAddrs: p.RealAddrs}
 		os.MkdirAll(filepath.Join(*work, "traces"), 0o755)
 		for i := range p.Assignments {
 			p.Assignments[i].TraceFile = filepath.Join(*work, "traces", fmt.Sprintf("node%d.json", p.Assignments[i].Idx))
