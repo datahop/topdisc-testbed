@@ -494,7 +494,7 @@ def plot_lookup_contacts(results, fig, label, groups):
     axes = fig.subplots(1, 2, squeeze=False)[0]
     suffix = " per lookup" if scheduled else " to reach F_lookup"
     for ax, data, what in ((axes[0], nodes_by, "distinct nodes contacted"),
-                           (axes[1], queries_by, "TOPICQUERY requests sent")):
+                           (axes[1], queries_by, "TOPICQUERY requests sent (plain discv5: DHT lookups)")):
         for name, ts, colour, lw in groups:
             xs = np.sort([v for t in ts for v in data.get(t, [])])
             if xs.size:

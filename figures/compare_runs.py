@@ -428,7 +428,7 @@ def main():
     row("lookups reaching F_lookup", lambda v: f"{v:.1f}%", [100 * l[4] / max(l[3], 1) for l in lk])
     row("lookup latency p50 / p95 (s)", lambda v: f"{v[0]:.2f} / {v[1]:.2f}", [(pct(l[0], 50), pct(l[0], 95)) for l in lk])
     row("nodes contacted per lookup p50 / p95", lambda v: f"{v[0]:.0f} / {v[1]:.0f}", [(pct(l[1], 50), pct(l[1], 95)) for l in lk])
-    row("TOPICQUERY per lookup p50", lambda v: f"{v:.0f}", [pct(l[2], 50) for l in lk])
+    row("TOPICQUERY per lookup p50 (plain discv5: DHT lookups)", lambda v: f"{v:.0f}", [pct(l[2], 50) for l in lk])
     if not scheduled:
         row("time to first result p50 (s)", lambda v: f"{v:.2f}", [pct([x["timeToFirstNs"] / 1e9 for x in r.results if x.get("timeToFirstNs", 0) > 0], 50) for r in runs])
     def first_adm(r):
