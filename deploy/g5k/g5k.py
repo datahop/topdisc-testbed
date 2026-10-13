@@ -17,8 +17,9 @@ testbed.g5k.cluster, and G5K_RESERVATION="YYYY-MM-DD HH:MM:SS" sets an advance
 reservation, for one run (e.g. when the scenario's usual cluster is busy, or
 when the job has to start in the night window) without editing a tracked
 scenario file. WORKDIR=<path> (default
-/tmp/topdisc) is where agents and the coordinator write; `run` refuses to start
-unless the coordinator has MIN_FREE_GB (default 100) free there.
+/tmp/topdisc), read at `up` and remembered in the state for run/pull, is where
+agents and the coordinator write; `run` refuses to start unless the
+coordinator has MIN_FREE_GB (default 100) free there.
 
 Distem (LXC-vnode-per-node, one real IP per node out of a reserved /22) was
 the original design here but has no working install path on any Debian
@@ -103,6 +104,17 @@ def build():
     sh(f"cd {REPO}/legacy && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ../out/topdisc-node-legacy ./cmd/node-legacy")
 
 
+class Unrunnable(Exception):
+    """The machines in hand cannot carry the run. Re-running `up` meets the
+    same job and the same dead machines, so holding them helps nobody."""
+
+
+def held(provider):
+    jobs = ", ".join(f"{getattr(j, 'site', '?')}/{getattr(j, 'uid', j)}"
+                     for j in getattr(provider, "jobs", None) or []) or "see `g5k.py check`"
+    return f"the machines are still held (OAR job {jobs}): fix and re-run `up`, or release with `g5k.py down`"
+
+
 def wait_healthy(hosts, need, timeout=60):
     """Return the hosts whose agent answered, in the order given.
 
@@ -125,7 +137,7 @@ def wait_healthy(hosts, need, timeout=60):
     if left:
         print(f"hostagent never came up on {len(left)}: {', '.join(sorted(left))}", file=sys.stderr)
     if len(ok) < need:
-        sys.exit(f"only {len(ok)} of {len(hosts)} machines are healthy, need {need}")
+        raise Unrunnable(f"only {len(ok)} of {len(hosts)} machines are healthy, need {need}")
     return [h for h in hosts if h in ok]
 
 
@@ -168,6 +180,9 @@ def up(path):
             print("reservation failed; releasing", file=sys.stderr)
             provider.destroy()
         raise
+    # Written now rather than with the inventory so that `down` addresses the
+    # right site whatever stops `up` from here on.
+    save_state({"site": g["site"], "cluster": g["cluster"], "env": g["env"], "scenario": path, "workdir": WORK})
     try:
         deployed = [h.address for h in roles["pnode"]]
         broken = []
@@ -210,14 +225,13 @@ def up(path):
         if len(pnodes) < machines or per * len(pnodes) < pop:
             per = -(-pop // len(pnodes))            # ceil
             if per > cap:
-                sys.exit(f"{len(pnodes)} healthy machines would need {per} nodes each for a "
-                         f"population of {pop}, over the {cap} ceiling "
-                         f"({g['vnodes_per_machine']} configured + 25%)")
+                raise Unrunnable(f"{len(pnodes)} healthy machines would need {per} nodes each for a "
+                                 f"population of {pop}, over the {cap} ceiling "
+                                 f"({g['vnodes_per_machine']} configured + 25%)")
             print(f"{len(deployed) - len(healthy)} machines lost; {len(pnodes)} x {per} "
                   f"covers {pop} (configured {g['vnodes_per_machine']})", file=sys.stderr)
         coordinator = pnodes[0]
-        save_state({"site": g["site"], "cluster": g["cluster"], "env": g["env"], "pnodes": pnodes,
-                    "coordinator": coordinator, "scenario": path, "vnodes_per_machine": per})
+        save_state({**load_state(), "pnodes": pnodes, "coordinator": coordinator, "vnodes_per_machine": per})
         # Resolve to addresses: every host routes its peers' /16s with
         # `ip route replace ... via <peer>`, which takes an address, not the
         # name EnOSlib hands back. A single-host run never routes a peer, so
@@ -230,28 +244,37 @@ def up(path):
         sh(f"scp -q {REPO}/out/testbed {HERE}/inventory.json {path} root@{coordinator}:{WORK}/")
         sh(f"scp -q -r {REPO}/scenarios/models root@{coordinator}:{WORK}/")
         print(f"up: {len(pnodes)} machines x {per} nodes, coordinator {coordinator}, inventory {HERE}/inventory.json")
-    except Exception:
-        print("up failed after the machines were reserved. They are still held: "
-              "fix and re-run `up`, or release with `g5k.py down`.", file=sys.stderr)
+    except Unrunnable as e:
+        print(f"up: {e}", file=sys.stderr)
+        if KEEP:
+            sys.exit(held(provider))
+        print("releasing the reservation (KEEP=1 keeps it)", file=sys.stderr)
+        provider.destroy()
+        STATE.unlink()
+        sys.exit(1)
+    except BaseException:
+        # BaseException so a sys.exit or Ctrl-C prints the hint too.
+        print(f"up failed after the machines were reserved; {held(provider)}", file=sys.stderr)
         raise
 
 
 def run(path):
     st = load_state()
     c = st["coordinator"]
+    work = st.get("workdir", WORK)
     name = os.path.basename(path)
-    sh(f"scp -q {path} root@{c}:{WORK}/{name}")
-    free_gb = int(subprocess.run(f"ssh root@{c} 'df -BG --output=avail {WORK} | tail -1'",
+    sh(f"scp -q {path} root@{c}:{work}/{name}")
+    free_gb = int(subprocess.run(f"ssh root@{c} 'df -BG --output=avail {work} | tail -1'",
                                  shell=True, text=True, capture_output=True).stdout.strip().rstrip("G") or 0)
     if free_gb < MIN_FREE_GB:
-        sys.exit(f"run: coordinator has {free_gb} GB free on {WORK}, want >= {MIN_FREE_GB}. "
+        sys.exit(f"run: coordinator has {free_gb} GB free on {work}, want >= {MIN_FREE_GB}. "
                  f"The traces of a 25k-node run do not fit on the root filesystem; "
-                 f"set WORKDIR to a larger partition.")
-    print(f"coordinator {WORK}: {free_gb} GB free")
-    sh(f"ssh root@{c} 'cd {WORK} && (nohup ./testbed {name} > run.out 2>&1; echo RUN-EXIT $? >> run.out) >/dev/null 2>&1 &'")
+                 f"re-run `up` with WORKDIR on a larger partition.")
+    print(f"coordinator {work}: {free_gb} GB free")
+    sh(f"ssh root@{c} 'cd {work} && (nohup ./testbed {name} > run.out 2>&1; echo RUN-EXIT $? >> run.out) >/dev/null 2>&1 &'")
     print("started on the coordinator; waiting")
     while True:
-        out = subprocess.run(f"ssh root@{c} tail -c 4000 {WORK}/run.out", shell=True, text=True, capture_output=True).stdout
+        out = subprocess.run(f"ssh root@{c} tail -c 4000 {work}/run.out", shell=True, text=True, capture_output=True).stdout
         if "RUN-EXIT" in out:
             break
         last = [l for l in out.splitlines() if l.startswith(("backend", "nodes started", "[churn]"))]
@@ -260,10 +283,13 @@ def run(path):
         time.sleep(30)
     print("\n".join(l for l in out.splitlines() if not l.startswith("PARAMS")))
     try:
-        pull()
+        traces = pull()
     except Exception:
         print("pull failed: deployment kept; fix, then g5k.py pull && g5k.py down", file=sys.stderr)
         raise
+    if not traces:
+        print("run: the aggregates are in but the traces were not fetched (see above)"
+              + ("" if KEEP else "; they go with the machines"), file=sys.stderr)
     if not KEEP:
         down()
 
@@ -281,10 +307,12 @@ def pull():
     means a transfer that runs out of room takes the aggregates down with it,
     and a Grid'5000 frontend's home quota is smaller than the traces. So the
     aggregates land first and the traces follow, compressed, only if they fit.
+    Returns whether the traces came too.
     """
     st = load_state()
     c = st["coordinator"]
-    d = subprocess.run(f"ssh root@{c} 'ls -td {WORK}/*-2* | head -1'", shell=True, text=True, capture_output=True, check=True).stdout.strip()
+    work = st.get("workdir", WORK)
+    d = subprocess.run(f"ssh root@{c} 'ls -td {work}/*-2* | head -1'", shell=True, text=True, capture_output=True, check=True).stdout.strip()
     if not d:
         sys.exit("pull: no run directory on the coordinator")
     (REPO / "runs").mkdir(exist_ok=True)
@@ -306,9 +334,19 @@ def pull():
               f"aggregates (cmd/recollect), not an input to any figure, so the run above is complete "
               f"without them. To fetch them somewhere with room:\n"
               f"  ssh root@{c} 'tar czf - -C {d} traces' > traces.tgz", file=sys.stderr)
-        return
-    sh(f"ssh root@{c} 'tar czf - -C {d} traces' > {local}/traces.tgz")
-    print(f"runs/{local.name}: traces.tgz in ({(local / 'traces.tgz').stat().st_size // 1024**3} GB)")
+        return False
+    tgz = local / "traces.tgz"
+    try:
+        sh(f"ssh root@{c} 'tar czf - -C {d} traces' > {tgz}")
+    except Exception as e:
+        # The aggregates are already in; a broken stream must not stop `run`
+        # from releasing, nor leave a truncated archive that looks whole.
+        tgz.unlink(missing_ok=True)
+        print(f"pull: traces failed ({e}); the aggregates are in. Retry before `down`:\n"
+              f"  ssh root@{c} 'tar czf - -C {d} traces' > {tgz}", file=sys.stderr)
+        return False
+    print(f"runs/{local.name}: traces.tgz in ({tgz.stat().st_size // 1024**3} GB)")
+    return True
 
 
 def down():
