@@ -1,9 +1,11 @@
 # The Grid'5000 run g5k-crawl-25k-6h-realip of 2026-10-06 with the continuous
 # search model instead of the connection model: every node keeps one topic
 # search open for 2 h and takes every result, with no dialing, so recall shows
-# how much of its topic the search reaches. Everything else is as in that run but the search lasts 2 h:
-# 25000 nodes over the 100 largest chains of the 2026-09-18 crawl, crawl node
-# addresses, no churn, 50 machines at 500 nodes each, search floor 4.
+# how much of its topic the search reaches. Everything else is as in that run,
+# but the search lasts 2 h and the search floor is the default, 8: 25000 nodes
+# over the 100 largest chains of the 2026-09-18 crawl, crawl node addresses,
+# no churn, 50 machines at 500 nodes each. The plain-discv5 pair of this run
+# is g5k-crawl-25k-legacy.
 #   deploy/g5k/g5k.py up scenarios/g5k-crawl-25k-2h-continuous.yaml
 name: g5k-crawl-25k-2h-continuous
 scenario:
@@ -28,7 +30,6 @@ scenario:
     search_timeout: 2h
   topic:
     ad_cache_size: 5000
-    search_yield_floor: 4
   search:
     model: continuous
     target_count: 0
