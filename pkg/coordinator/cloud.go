@@ -125,6 +125,9 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 	for i := range as {
 		h := inv.Hosts[hostOf[i]]
 		placement[i] = map[string]any{"idx": i, "host": h.Index, "ip": h.IP, "public_ip": h.Public, "region": h.Region, "node_ip": as[i].IP}
+		if as[i].ExtIP != "" {
+			placement[i]["node_ext_ip"] = as[i].ExtIP
+		}
 	}
 	b, _ = json.Marshal(placement)
 	os.WriteFile(filepath.Join(runDir, "placement.json"), b, 0o644)
