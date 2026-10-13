@@ -175,8 +175,8 @@ func main() {
 		var s svcEntry
 		return n.Load(&s) == nil && s == svc
 	}
-	// Lookup-only models never dial; the connection-driven model records the
-	// providers the dialer's random walk handed out and when slots filled.
+	// Lookup-only models never dial; the connection-driven model dials the
+	// providers its random walk finds and records them and when slots filled.
 	lookupOnly := asg.Search.Model == "continuous" || asg.Search.Model == "scheduled"
 	var (
 		connMu     sync.Mutex
@@ -199,12 +199,11 @@ func main() {
 				connMu.Lock()
 				connStart = time.Now()
 				connMu.Unlock()
-				return srv.DiscoveryV5().RandomNodes()
+				// Dial providers only, as a client filtering candidates by its
+				// ENR entry does; the walk itself is unchanged.
+				return enode.Filter(srv.DiscoveryV5().RandomNodes(), isProvider)
 			},
 			seen: func(n *enode.Node) {
-				if !isProvider(n) {
-					return
-				}
 				connMu.Lock()
 				defer connMu.Unlock()
 				if _, ok := connSeen[n.ID()]; !ok {
