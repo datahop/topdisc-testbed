@@ -222,7 +222,9 @@ def main():
                 for r in runs) or ctx.has("cp_18_dead_results")
     if churn:
         num += 1
-        L += [f"## {num}. Churn\n"] + pf.figure_md(ctx, "cp_18_dead_results")
+        L += [f"## {num}. Churn\n", "Each departure's trace is kept and merged, so the counters cover every session; "
+              "found and target count the providers that were up at the end of the search.\n"]
+        L += pf.churn_table(ctx) + [""] + pf.figure_md(ctx, "cp_18_dead_results")
         L += per_run_tables("Churn", {"Stale results returned by searches", "Churn activity"})
     else:
         missing = [(s, w) for s, w in missing if s != "cp_18_dead_results"]
