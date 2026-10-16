@@ -47,8 +47,8 @@ write_files:
       #!/bin/sh
       /opt/topdisc/save-runs.sh >> /opt/topdisc/scale-down.log 2>&1
       # Hard spending stop, independent of the machine that ran terraform:
-      # every region's fleet to zero, NAT gateways and their addresses gone,
-      # then this coordinator terminates itself. What is left (VPCs, IAM,
+      # every region's fleet to zero (and any NAT gateway an older
+      # deployment left), then this coordinator terminates itself. What is left (VPCs, IAM,
       # an empty bucket) is free; `deploy/aws.sh down` removes it later.
       for r in $(cat /opt/topdisc/regions); do
         aws autoscaling update-auto-scaling-group --region $r --auto-scaling-group-name topdisc-nodes --min-size 0 --desired-capacity 0 || true
@@ -63,8 +63,7 @@ write_files:
         done
       done
       echo "fleet stopped at $(date -u)" >> /opt/topdisc/scale-down.log
-      # The NAT is gone by now, so no API call reaches EC2 from here: halt
-      # instead, and instance_initiated_shutdown_behavior terminates the instance.
+      # Halt: instance_initiated_shutdown_behavior terminates the instance.
       shutdown -h now
   - path: /etc/systemd/system/fleet-scale-down.service
     content: |

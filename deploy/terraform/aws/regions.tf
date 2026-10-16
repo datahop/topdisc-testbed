@@ -15,7 +15,7 @@ module "us_east_1" {
   spot             = var.spot
   public_ips       = var.public_ips
   instance_profile = aws_iam_instance_profile.ssm.name
-  cloud_init       = local.cloud_init
+  cloud_init_vars  = local.cloud_init_vars
 }
 
 provider "aws" {
@@ -33,7 +33,7 @@ module "us_west_2" {
   spot             = var.spot
   public_ips       = var.public_ips
   instance_profile = aws_iam_instance_profile.ssm.name
-  cloud_init       = local.cloud_init
+  cloud_init_vars  = local.cloud_init_vars
 }
 
 provider "aws" {
@@ -51,7 +51,7 @@ module "eu_central_1" {
   spot             = var.spot
   public_ips       = var.public_ips
   instance_profile = aws_iam_instance_profile.ssm.name
-  cloud_init       = local.cloud_init
+  cloud_init_vars  = local.cloud_init_vars
 }
 
 provider "aws" {
@@ -69,7 +69,7 @@ module "ap_southeast_1" {
   spot             = var.spot
   public_ips       = var.public_ips
   instance_profile = aws_iam_instance_profile.ssm.name
-  cloud_init       = local.cloud_init
+  cloud_init_vars  = local.cloud_init_vars
 }
 
 provider "aws" {
@@ -87,12 +87,15 @@ module "sa_east_1" {
   spot             = var.spot
   public_ips       = var.public_ips
   instance_profile = aws_iam_instance_profile.ssm.name
-  cloud_init       = local.cloud_init
+  cloud_init_vars  = local.cloud_init_vars
 }
 
 locals {
   supported = ["us-east-1", "us-west-2", "eu-central-1", "ap-southeast-1", "sa-east-1"]
   modules   = [module.us_east_1, module.us_west_2, module.eu_central_1, module.ap_southeast_1, module.sa_east_1]
+  mirrors   = { "us-east-1" = module.us_east_1.mirror_bucket, "us-west-2" = module.us_west_2.mirror_bucket, "eu-central-1" = module.eu_central_1.mirror_bucket, "ap-southeast-1" = module.ap_southeast_1.mirror_bucket, "sa-east-1" = module.sa_east_1.mirror_bucket }
 }
+# Where the binaries go: the home bucket and a mirror per active region.
+output "binaries_buckets" { value = merge({ for r, b in local.mirrors : r => b if b != null }, { (var.home_region) = aws_s3_bucket.binaries.id }) }
 output "coordinator_id" { value = one([for m in local.modules : m.coordinator_id if m.coordinator_id != null]) }
 output "coordinator_ip" { value = one([for m in local.modules : m.coordinator_ip if m.coordinator_ip != null]) }

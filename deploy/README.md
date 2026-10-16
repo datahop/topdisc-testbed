@@ -59,8 +59,8 @@ Spending cap: `deploy/aws.sh up` refuses a fleet whose on-demand cost over
 budget `topdisc-testbed` with e-mail alerts (set once with `aws budgets
 create-budget`, outside Terraform so a destroy does not remove it); and the
 coordinator scales every region's autoscaling group to zero `max_hours` after
-boot, so a forgotten fleet stops costing on its own. `deploy/aws.sh down` still has to remove the rest (NAT
-gateways, coordinator, bucket).
+boot, so a forgotten fleet stops costing on its own. `deploy/aws.sh down` still has to remove the rest
+(coordinator, VPCs, buckets).
 
 Addressing: by default the instances have private addresses only and the
 nodes talk over the peered VPCs. geth treats those as LAN, so its per-/24
@@ -68,8 +68,12 @@ table limits and the admission IP score do not run. With
 `testbed.cloud.public_ips: true` every node instance gets a public IPv4 (about
 $0.005 an hour each) and the nodes advertise and use those, so the limits run
 as on mainnet; the node ports (30300-30999, UDP and TCP) are then open to the
-internet and the NAT gateways are not created. The coordinator reaches the
-hostagents over the private addresses in both cases.
+internet. The coordinator reaches the hostagents over the private addresses
+in both cases. Private nodes need nothing from the internet: they fetch the
+binaries from S3 through their region's gateway endpoint, which only reaches
+buckets in that region, so every active region away from home gets a mirror
+bucket of the binaries (`binaries_buckets` output; `aws.sh push` fills them
+all). Only the coordinator has a public address, for SSM and the AWS APIs.
 
 Quotas: 10k instances need the account's vCPU (AWS, GCP) or server (Hetzner)
 limit raised first. Spot is for smokes only: AWS reclaimed 13 % of a 540-node fleet

@@ -42,20 +42,21 @@ resource "aws_iam_role_policy" "s3" {
   name = "topdisc-binaries"
   role = aws_iam_role.ssm.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
-    { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject"], Resource = "${aws_s3_bucket.binaries.arn}/*" },
-    { Effect = "Allow", Action = ["s3:ListBucket"], Resource = aws_s3_bucket.binaries.arn },
+    # The home bucket and the per-region mirrors of the binaries (region/main.tf).
+    { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject"], Resource = "arn:aws:s3:::topdisc-testbed-*/*" },
+    { Effect = "Allow", Action = ["s3:ListBucket"], Resource = "arn:aws:s3:::topdisc-testbed-*" },
   ] })
 }
 
+# Rendered per region (region/main.tf adds region and the binaries location).
 locals {
-  cloud_init = templatefile("${path.module}/../../cloud-init.yaml.tftpl", {
+  cloud_init_vars = {
     binaries_url     = ""
     binaries_s3      = "s3://${aws_s3_bucket.binaries.id}/topdisc-linux-arm64.tgz"
-    region           = var.home_region
     regions          = join(" ", sort(keys(var.regions)))
-    max_hours        = var.max_hours
+    max_hours        = tostring(var.max_hours)
     coordinator_type = var.coordinator_type
-  })
+  }
 }
 
 # Spending cap. The account budget (deploy/README.md) alerts; the hard stop
