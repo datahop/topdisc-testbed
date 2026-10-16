@@ -13,16 +13,17 @@ trap 'rm -rf "$ROOT"' EXIT
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o out/topdisc-node ./cmd/node
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o out/hostagent ./cmd/hostagent
 (cd legacy && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ../out/topdisc-node-legacy ./cmd/node-legacy)
+(cd legacy && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -modfile=go.fork.mod -tags fork -o ../out/topdisc-node-plain ./cmd/node-legacy)
 
 debootstrap --variant=minbase --include=systemd,systemd-sysv,iproute2,procps "$REL" "$ROOT" http://deb.debian.org/debian
 install -d "$ROOT/opt/topdisc"
-install -m 755 out/topdisc-node out/topdisc-node-legacy out/hostagent "$ROOT/opt/topdisc/"
+install -m 755 out/topdisc-node out/topdisc-node-legacy out/topdisc-node-plain out/hostagent "$ROOT/opt/topdisc/"
 cat > "$ROOT/etc/systemd/system/hostagent.service" <<'UNIT'
 [Unit]
 Description=topdisc hostagent
 After=network.target
 [Service]
-ExecStart=/opt/topdisc/hostagent -serve :9000 -node-binary /opt/topdisc/topdisc-node -legacy-binary /opt/topdisc/topdisc-node-legacy -workdir /opt/topdisc/run
+ExecStart=/opt/topdisc/hostagent -serve :9000 -node-binary /opt/topdisc/topdisc-node -legacy-binary /opt/topdisc/topdisc-node-legacy -plain-binary /opt/topdisc/topdisc-node-plain -workdir /opt/topdisc/run
 LimitNOFILE=65536
 Restart=always
 [Install]

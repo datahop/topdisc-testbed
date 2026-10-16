@@ -1,0 +1,11 @@
+# 200 plain discv5 nodes, every one plain (bootnode included), legacy_build stock,
+# conn lookup model: local smoke test for the fork-built plain node.
+name: local-200-plain-stock-conn
+scenario:
+  population: {nodes: 200, topics: 5, zipf_s: 1.0, legacy_frac: 1, legacy_bootnode: true, legacy_build: stock, seed: 3}
+  phases: {bootstrap_wait: 20s, start_window: 20s, register_wait: 30s, search_stagger: 10ms, search_timeout: 3m}
+  search: {model: conn}
+  conn_model: {enabled: true}
+
+testbed:
+  backend: local

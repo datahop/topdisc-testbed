@@ -1,0 +1,21 @@
+# AWS smoke, run 4: TopDisc nodes, continuous model. Pairs with
+# aws-plain-smoke-fork-continuous.yaml; see aws-plain-smoke-topdisc.yaml.
+name: aws-plain-smoke-topdisc-continuous
+scenario:
+  population:
+    nodes: 400
+    topics: 10
+    topic_model: models/crawl-2026-09-18.json
+    seed: 1
+  network:
+    regions: {us-east-1: 0.5, eu-central-1: 0.5}
+  phases: {bootstrap_wait: 1m, start_window: 3m, register_wait: 5m, search_stagger: 10ms, search_timeout: 10m}
+  topic:
+    ad_cache_size: 5000
+  search:
+    model: continuous
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json
+    home_region: us-east-1
