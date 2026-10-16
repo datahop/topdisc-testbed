@@ -64,6 +64,16 @@ type searchStats struct {
 	Duplicate int `json:"duplicate"`
 	Filtered  int `json:"filtered"`
 	Yielded   int `json:"yielded"`
+
+	MaxTopicPerReply int           `json:"maxTopicPerReply"`
+	MaxAuxPerReply   int           `json:"maxAuxPerReply"`
+	QueriesByBucket  []int         `json:"queriesByBucket,omitempty"`
+	ActiveTrace      []activePoint `json:"activeTrace,omitempty"`
+}
+
+type activePoint struct {
+	AtMs   int64 `json:"atMs"`
+	Bucket int   `json:"bucket"`
 }
 
 func addStats(dst *searchStats, st *searchStats) *searchStats {
@@ -80,6 +90,18 @@ func addStats(dst *searchStats, st *searchStats) *searchStats {
 	dst.Duplicate += st.Duplicate
 	dst.Filtered += st.Filtered
 	dst.Yielded += st.Yielded
+	dst.MaxTopicPerReply = max(dst.MaxTopicPerReply, st.MaxTopicPerReply)
+	dst.MaxAuxPerReply = max(dst.MaxAuxPerReply, st.MaxAuxPerReply)
+	for i, q := range st.QueriesByBucket {
+		if i == len(dst.QueriesByBucket) {
+			dst.QueriesByBucket = append(dst.QueriesByBucket, 0)
+		}
+		dst.QueriesByBucket[i] += q
+	}
+	// Trace times are relative to each lookup's start, so only one trace is kept.
+	if len(dst.ActiveTrace) == 0 {
+		dst.ActiveTrace = st.ActiveTrace
+	}
 	return dst
 }
 
@@ -376,7 +398,7 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 				target--
 			}
 			r := searchResult{NodeIdx: a.Idx, NodeID: short(t.ID), Topic: topicIds[th], Target: target,
-				SearchStartMs: t.SearchAtMs - epochMs, TimeToFirstNs: 0,
+				SearchStartMs: t.SearchAtMs - epochMs, TimeToFirstNs: -1,
 				NewFoundAtMs: []int64{}, FoundRegistrantIDs: []string{}, UniqueFoundAtMs: []int64{}, UniqueFoundIDs: []string{},
 				LookupLatencyMs: []int64{}, LookupResults: []int{}}
 			seen := map[string]bool{}
@@ -659,9 +681,10 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 	}
 	out := struct {
 		Buckets  int              `json:"buckets"`
+		StartMs  int64            `json:"startMs"` // wall clock of tSec 0, to place the phases
 		Samples  []overheadSample `json:"samples"`
 		WaitTime []waitOut        `json:"waitTime"`
-	}{seriesBuckets, samples, waitList}
+	}{seriesBuckets, t0, samples, waitList}
 	b, _ := json.Marshal(out)
 	return os.WriteFile(filepath.Join(runDir, "series.json"), append(b, '\n'), 0o644)
 }

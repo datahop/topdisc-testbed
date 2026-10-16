@@ -101,7 +101,19 @@ func Collect(trDir, runDir string, as []assign.Assignment) error {
 			tx, rx, txp, rxp = tx+v["txBytes"], rx+v["rxBytes"], txp+v["txMsgs"], rxp+v["rxMsgs"]
 			bt[k] = v
 		}
-		oh = append(oh, map[string]any{"idx": t.Idx, "id": t.ID, "txBytes": tx, "rxBytes": rx, "txPkts": txp, "rxPkts": rxp, "byType": bt, "ops": t.Ops, "topicLoad": t.TopicLoad})
+		// The per-operation peer lists stay in the traces (checks.py reads them
+		// there); at 25k nodes they made oh.json too large to load.
+		ops := make([]map[string]any, 0, len(t.Ops))
+		for _, op := range t.Ops {
+			o := make(map[string]any, len(op))
+			for k, v := range op {
+				if k != "nodeIds" {
+					o[k] = v
+				}
+			}
+			ops = append(ops, o)
+		}
+		oh = append(oh, map[string]any{"idx": t.Idx, "id": t.ID, "txBytes": tx, "rxBytes": rx, "txPkts": txp, "rxPkts": rxp, "byType": bt, "ops": ops, "topicLoad": t.TopicLoad})
 	}
 	full := 0
 	for _, o := range out {
