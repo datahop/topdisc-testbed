@@ -35,6 +35,7 @@ func drive(as []assign.Assignment, ctl hostControl, grace time.Duration) error {
 		return err
 	}
 	searchAt := time.UnixMilli(as[0].Phases.SearchAt)
+	stop := time.UnixMilli(as[0].Phases.StopAt).Add(grace)
 	var mu sync.Mutex
 	departs, rejoins := 0, 0
 	for _, a := range as {
@@ -43,13 +44,22 @@ func drive(as []assign.Assignment, ctl hostControl, grace time.Duration) error {
 		}
 		go func(idx int, events []churn.Event) {
 			for _, ev := range events {
-				time.Sleep(time.Until(searchAt.Add(time.Duration(ev.DownAt * float64(time.Second)))))
+				down, up := searchAt.Add(time.Duration(ev.DownAt*float64(time.Second))), searchAt.Add(time.Duration(ev.UpAt*float64(time.Second)))
+				// Nothing past the stop: a departure then is the end of the
+				// run, and a return would start a node after collection.
+				if !down.Before(stop) {
+					return
+				}
+				time.Sleep(time.Until(down))
 				if ctl.kill(idx) {
 					mu.Lock()
 					departs++
 					mu.Unlock()
 				}
-				time.Sleep(time.Until(searchAt.Add(time.Duration(ev.UpAt * float64(time.Second)))))
+				if !up.Before(stop) {
+					return
+				}
+				time.Sleep(time.Until(up))
 				if ctl.start(idx) == nil {
 					mu.Lock()
 					rejoins++
@@ -58,7 +68,6 @@ func drive(as []assign.Assignment, ctl hostControl, grace time.Duration) error {
 			}
 		}(a.Idx, a.Churn)
 	}
-	stop := time.UnixMilli(as[0].Phases.StopAt).Add(grace)
 	fmt.Printf("nodes started; collecting at %s\n", stop.Format(time.TimeOnly))
 	for time.Now().Before(stop) {
 		time.Sleep(min(30*time.Second, time.Until(stop)+time.Millisecond))

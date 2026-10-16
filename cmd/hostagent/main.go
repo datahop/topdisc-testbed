@@ -108,7 +108,13 @@ func main() {
 		json.NewEncoder(w).Encode(r.Samples())
 	})
 	http.HandleFunc("/trace", func(w http.ResponseWriter, req *http.Request) {
-		http.ServeFile(w, req, filepath.Join(*work, "traces", fmt.Sprintf("node%d.json", idxOf(req))))
+		// Every session of a churned node, merged (host.LoadTrace).
+		b, err := host.LoadTrace(filepath.Join(*work, "traces", fmt.Sprintf("node%d.json", idxOf(req))))
+		if err != nil {
+			http.Error(w, err.Error(), 404)
+			return
+		}
+		w.Write(b)
 	})
 	http.HandleFunc("/log", func(w http.ResponseWriter, req *http.Request) {
 		http.ServeFile(w, req, filepath.Join(*work, "logs", fmt.Sprintf("node%d.log", idxOf(req))))

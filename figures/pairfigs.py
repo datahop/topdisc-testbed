@@ -12,6 +12,7 @@ Plain nodes report counters only when built on the fork (legacy_build: fork).
 """
 import collections
 import json
+import glob
 import os
 import re
 
@@ -137,12 +138,25 @@ class Run:
                    else f"traffic counters cover {len(counted)} of {nodes} nodes")
             self.notes.append(f"load left out: {why}")
         self.topic_of = {r["nodeIdx"]: r["topic"] for r in self.results}
+        # Churn: found and target count the providers up at the end of the search.
+        self.churned = any(x.get("uniqueFoundOnline") is not None for x in self.results)
+        if self.churned:
+            self.notes.append("churn: found and target count the providers that were up at the end of the search")
         self.size_of = {t["topic"]: t.get("target", 0) + 1 for t in self.m.get("perTopic") or []}
 
     # ---------------------------------------------------------------- search
 
     def found_at(self, r):
-        return np.sort(np.asarray(r.get("uniqueFoundAtMs") or [], dtype=float)) / 1000.0
+        at = r.get("uniqueFoundAtMs") or []
+        on = r.get("uniqueFoundOnline")
+        if on is not None:
+            at = [t for t, up in zip(at, on) if up]
+        return np.sort(np.asarray(at, dtype=float)) / 1000.0
+
+    def tgt(self, r):
+        """Providers a searcher is scored against: all of its topic, or under
+        churn those up at the end of the search."""
+        return r["targetOnline"] if "targetOnline" in r and self.churned else r["target"]
 
     def first_found(self, rs=None):
         """Seconds to each searcher's first provider; a provider found at 0 ms
@@ -158,7 +172,7 @@ class Run:
     def time_to(self, r, f):
         """Seconds into the search when the searcher had found share f of its topic, or None."""
         t = self.found_at(r)
-        k = max(int(np.ceil(f * r["target"] - 1e-9)), 1)
+        k = max(int(np.ceil(f * self.tgt(r) - 1e-9)), 1)
         return float(t[k - 1]) if len(t) >= k else None
 
     def search_s(self):
@@ -365,7 +379,7 @@ def found_over_time(ctx):
             rs = ctx.in_group(r, ts)
             if not rs:
                 continue
-            curves = np.vstack([np.searchsorted(r.found_at(x), grid, side="right") / x["target"] for x in rs])
+            curves = np.vstack([np.searchsorted(r.found_at(x), grid, side="right") / r.tgt(x) for x in rs])
             xs = (np.maximum(grid, 0.01) if LOG_TIME else grid) / div
             ax.plot(xs, np.median(curves, axis=0), ls=r.style, c=r.color, lw=1.8, label=r.label)
             ax.fill_between(xs, np.percentile(curves, 25, axis=0), np.percentile(curves, 75, axis=0), color=r.color, alpha=0.12)
@@ -397,7 +411,7 @@ def final_share(ctx):
     fig, axes = ctx.group_axes(3.6)
     for ax, (name, ts) in zip(axes[0], ctx.groups):
         for r in ctx.runs:
-            v = [len(x.get("uniqueFoundAtMs") or []) / x["target"] for x in ctx.in_group(r, ts)]
+            v = [len(r.found_at(x)) / r.tgt(x) for x in ctx.in_group(r, ts)]
             cdf(ax, r, v, f"{r.label} ({100 * pct(v, 50):.0f} %)")
         ax.set_title(name, fontsize=9)
         ax.set_xlabel("share found by the end")
@@ -858,7 +872,7 @@ def search_table(ctx):
             f"{100 * r.table_hits():.0f} %" if r.plain else "–" for r in ctx.runs]))
     for name, ts in ctx.groups:
         L.append(row([f"**{name}**: share found at the end, median"] + [
-            f"{100 * pct([len(x.get('uniqueFoundAtMs') or []) / x['target'] for x in ctx.in_group(r, ts)], 50):.1f} %" if ctx.in_group(r, ts) else "–" for r in ctx.runs]))
+            f"{100 * pct([len(r.found_at(x)) / r.tgt(x) for x in ctx.in_group(r, ts)], 50):.1f} %" if ctx.in_group(r, ts) else "–" for r in ctx.runs]))
         for f in FRACTIONS:
             cells = []
             for r in ctx.runs:
@@ -889,7 +903,7 @@ def per_topic_table(ctx):
             if not rs:
                 cells.append("–")
                 continue
-            share = pct([len(x.get("uniqueFoundAtMs") or []) / x["target"] for x in rs], 50)
+            share = pct([len(r.found_at(x)) / r.tgt(x) for x in rs], 50)
             t90 = [r.time_to(x, 0.9) for x in rs]
             got = [v for v in t90 if v is not None]
             to90 = fmt_s(float(np.median([v if v is not None else np.inf for v in t90]))) if len(got) * 2 >= len(rs) else "–"
@@ -950,6 +964,21 @@ def peer_table(ctx):
     L.append(row(["outbound peers at the end, p50 / p5"] + [" / ".join(f"{pct([x.get('outboundConns', 0) for x in r.results], q):.0f}" for q in (50, 5)) for r in ctx.runs]))
     L.append(row(["slots filled, share of searchers"] + [f"{100 * sum(1 for x in r.results if x.get('slotsFilledAtMs', 0) > 0) / max(len(r.results), 1):.0f} %" for r in ctx.runs]))
     L.append(row(["time to fill the slots, p50"] + [fmt_s(pct([x['slotsFilledAtMs'] / 1000 for x in r.results if x.get('slotsFilledAtMs', 0) > 0], 50)) for r in ctx.runs]))
+    return L
+
+
+def churn_table(ctx):
+    """What churn did to each run: sessions kept, and the providers that were up at the end."""
+    L = head(ctx)
+    for name, f in [
+        ("departures with a kept trace", lambda r: f"{len(glob.glob(os.path.join(r.dir, 'traces', '*.s*.json'))):,}"),
+        ("nodes that left at least once", lambda r: f"{len({os.path.basename(p).split('.')[0] for p in glob.glob(os.path.join(r.dir, 'traces', '*.s*.json'))}):,}"),
+        ("searchers with a provider down at the end", lambda r: f"{sum(1 for x in r.results if x.get('targetOnline', x['target']) < x['target']):,} of {len(r.results):,}"),
+        ("providers up at the end, share of the topic, median / min", lambda r: " / ".join(
+            f"{100 * pct([x.get('targetOnline', x['target']) / x['target'] for x in r.results], q):.0f} %" for q in (50, 0))),
+        ("found at the end, share of the providers up, median", lambda r: f"{100 * pct([len(r.found_at(x)) / r.tgt(x) for x in r.results], 50):.0f} %"),
+    ]:
+        L.append(row([name] + [f(r) for r in ctx.runs]))
     return L
 
 

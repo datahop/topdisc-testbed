@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/datahop/topdisc-testbed/pkg/assign"
@@ -56,12 +57,13 @@ type Runner struct {
 	procs  map[int]*exec.Cmd
 	delay  map[int]time.Duration
 	legacy map[int]string // node index -> binary, for legacy nodes
+	trace  map[int]string // node index -> trace path, parked between sessions
 	mon    *monitor
 }
 
 func (r *Runner) init() {
 	if r.procs == nil {
-		r.procs, r.delay, r.legacy = map[int]*exec.Cmd{}, map[int]time.Duration{}, map[int]string{}
+		r.procs, r.delay, r.legacy, r.trace = map[int]*exec.Cmd{}, map[int]time.Duration{}, map[int]string{}, map[int]string{}
 	}
 }
 
@@ -79,6 +81,7 @@ func (r *Runner) Prepare(as []assign.Assignment, peers map[int]string) error {
 		return err
 	}
 	for _, a := range as {
+		r.trace[a.Idx] = a.TraceFile
 		if a.Legacy {
 			bin, what := r.LegacyBinary, "legacy"
 			if a.LegacyFork {
@@ -173,6 +176,9 @@ func (r *Runner) Start(idx int) error {
 	// open for the life of the agent, which caps vnodes_per_machine at the
 	// agent's own file limit.
 	defer logf.Close()
+	if err := rotateTrace(r.trace[idx]); err != nil {
+		return fmt.Errorf("node %d: %w", idx, err)
+	}
 	bin := r.NodeBinary
 	if lb, ok := r.legacy[idx]; ok {
 		bin = lb
@@ -200,8 +206,17 @@ func (r *Runner) Kill(idx int) bool {
 	if c == nil || c.Process == nil {
 		return false
 	}
-	c.Process.Kill()
-	c.Wait()
+	// SIGTERM first, so the node writes its session's trace before it goes;
+	// its socket closes with the process either way.
+	c.Process.Signal(syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() { c.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		c.Process.Kill()
+		<-done
+	}
 	return true
 }
 
