@@ -1,9 +1,11 @@
 # One region of the fleet: a VPC and an autoscaling group of one-node
 # instances. With public_ips every instance has a public IPv4, the subnets
 # route through the internet gateway, and the nodes talk on the public
-# addresses. Without it the instances are private, a NAT gateway serves the
-# binaries download and SSM, and the nodes talk over the peered VPCs. The
-# coordinator always drives the hostagents over the private addresses. The
+# addresses. Without it the nodes are private: they reach S3 (binaries,
+# results) through the gateway endpoint, need nothing else outside, and talk
+# over the peered VPCs; only the coordinator has a public address, for SSM
+# and the AWS APIs. The coordinator always drives the hostagents over the
+# private addresses. The
 # home region also hosts the coordinator. Created in every supported region;
 # a region with no nodes and no coordinator costs nothing.
 terraform {
@@ -55,11 +57,6 @@ resource "aws_subnet" "nodes" {
   availability_zone       = data.aws_availability_zones.az.names[count.index]
   map_public_ip_on_launch = var.public_ips
 }
-resource "aws_subnet" "public" {
-  vpc_id            = aws_vpc.tb.id
-  cidr_block        = cidrsubnet(var.cidr, 8, 255)
-  availability_zone = data.aws_availability_zones.az.names[0]
-}
 resource "aws_security_group" "intra" {
   vpc_id = aws_vpc.tb.id
   ingress {
@@ -91,37 +88,13 @@ resource "aws_internet_gateway" "igw" {
   count  = local.active ? 1 : 0
   vpc_id = aws_vpc.tb.id
 }
-resource "aws_eip" "nat" {
-  count  = local.active && !var.public_ips ? 1 : 0
-  domain = "vpc"
-  tags   = { Name = "topdisc-testbed" }
-}
-resource "aws_nat_gateway" "nat" {
-  count         = local.active && !var.public_ips ? 1 : 0
-  allocation_id = aws_eip.nat[0].id
-  subnet_id     = aws_subnet.public.id
-  depends_on    = [aws_internet_gateway.igw]
-  tags          = { Name = "topdisc-testbed" }
-}
-resource "aws_route_table" "public" {
-  count  = local.active ? 1 : 0
-  vpc_id = aws_vpc.tb.id
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.igw[0].id
-  }
-}
-resource "aws_route_table_association" "public" {
-  count          = local.active ? 1 : 0
-  subnet_id      = aws_subnet.public.id
-  route_table_id = aws_route_table.public[0].id
-}
-resource "aws_route" "private_default" {
+# The default route goes to the internet gateway in both layouts: only
+# instances with a public address can use it, so private nodes stay offline.
+resource "aws_route" "default" {
   count                  = local.active ? 1 : 0
   route_table_id         = aws_vpc.tb.main_route_table_id
   destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id         = var.public_ips ? null : aws_nat_gateway.nat[0].id
-  gateway_id             = var.public_ips ? aws_internet_gateway.igw[0].id : null
+  gateway_id             = aws_internet_gateway.igw[0].id
 }
 resource "aws_vpc_endpoint" "s3" {
   vpc_id          = aws_vpc.tb.id
@@ -131,13 +104,13 @@ resource "aws_vpc_endpoint" "s3" {
 
 resource "aws_instance" "coordinator" {
   # scale-down.sh ends with `shutdown -h now`: with this the halt terminates the
-  # instance without an API call, which it can no longer make once its NAT is gone
+  # instance without an API call
   instance_initiated_shutdown_behavior = "terminate"
   count                                = var.coordinator ? 1 : 0
   ami                                  = data.aws_ami.al2023_arm.id
   instance_type                        = var.coordinator_type
   subnet_id                            = aws_subnet.nodes[0].id
-  associate_public_ip_address          = var.public_ips
+  associate_public_ip_address          = true # SSM and the AWS APIs, with no NAT
   vpc_security_group_ids               = [aws_security_group.intra.id]
   iam_instance_profile                 = var.instance_profile
   user_data                            = var.cloud_init
