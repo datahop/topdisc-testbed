@@ -99,7 +99,7 @@ for fr in fracs:
         data = json.load(fh)
     results = data.get("results", [])
     stable = [r for r in results if r.get("nodeIdx", 0) < INITIAL_N]
-    ttf[fr] = sorted(r["timeToFirstNs"]/1e9 for r in stable if r.get("timeToFirstNs", 0) > 0)
+    ttf[fr] = sorted(r["timeToFirstNs"]/1e9 for r in stable if r.get("timeToFirstNs", -1) >= 0 and r.get("uniqueFoundAtMs"))
     tpoints = list(range(0, SEARCH_T+1, 10)); sums = [0.0]*len(tpoints); n = 0
     for r in stable:
         tgt = r.get("target", 0)

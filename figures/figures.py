@@ -312,7 +312,7 @@ def plot_time_to_first_cdf(results, ax, label, groups, churn=None):
     by_topic = {}
     corrected = 0
     for r in results:
-        if r.get("timeToFirstNs", 0) > 0:
+        if r.get("timeToFirstNs", -1) >= 0 and r.get("uniqueFoundAtMs"):
             t = r["timeToFirstNs"] / 1e9
             if churn and r.get("nodeIdx") in churn[1]:
                 away = absence_before(churn[1][r["nodeIdx"]], t)

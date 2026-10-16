@@ -92,7 +92,8 @@ class Run:
             self.id_idx[t["id"]] = i
         for r in (self.metrics or {}).get("results", []):
             self.id_idx.setdefault(r["nodeId"], r["nodeIdx"])
-            if self.simnet and "topic" in r:
+            # simnet traces and plain-node traces carry no topic hash
+            if "topic" in r and (self.simnet or "topic" not in self.traces.get(r["nodeIdx"], {})):
                 self.topic_of.setdefault(r["nodeIdx"], self.topic_hash(r["topic"]))
         for n in self.oh:
             if n.get("id"):
@@ -503,11 +504,11 @@ def lookup_results(run):
         for i, t in run.traces.items():
             for lk in t.get("lookups") or []:
                 for r in lk.get("found") or []:
-                    out.append((i, t["topic"], r["id"], lk["start_ms"] + r["at_ms"]))
+                    out.append((i, run.topic_of.get(i), r["id"], lk["start_ms"] + r["at_ms"]))
             conn = t.get("conn") or {}
             for r in conn.get("found") or []:
                 if isinstance(r, dict):
-                    out.append((i, t["topic"], r["id"], conn["start_ms"] + r["at_ms"]))
+                    out.append((i, run.topic_of.get(i), r["id"], conn["start_ms"] + r["at_ms"]))
     return out
 
 
@@ -536,7 +537,11 @@ def l2_capable_results(run, tol):
         return verdict("not-exercised", "no legacy nodes in the run")
     if not run.traces:
         return verdict("needs-data", "simnet has no legacy nodes")
-    bad = [(i, run.id_idx[rid]) for i, _, rid, _ in lookup_results(run) if run.legacy.get(run.id_idx.get(rid, -1), False)]
+    if all(run.legacy.values()):
+        return verdict("not-exercised", "no TopDisc searchers in the run")
+    # a plain searcher filters on the service entry, so its results are legacy nodes by design
+    bad = [(i, run.id_idx[rid]) for i, _, rid, _ in lookup_results(run)
+           if not run.legacy.get(i) and run.legacy.get(run.id_idx.get(rid, -1), False)]
     return pf(bad, "no legacy node among results", f"{len(bad)} results are legacy nodes", offenders=bad[:10])
 
 
@@ -633,7 +638,8 @@ def i2_base_discovery(run, tol):
         return verdict("not-exercised", "no legacy nodes in the run")
     if not run.traces:
         return verdict("needs-data", "legacy lookups only on real backends")
-    found = {i: sum(lk.get("results", 0) for lk in run.traces[i].get("lookups") or []) for i in leg if i in run.traces}
+    found = {i: sum(lk.get("results", 0) for lk in run.traces[i].get("lookups") or [])
+             + len((run.traces[i].get("conn") or {}).get("found") or []) for i in leg if i in run.traces}
     if not found:
         return verdict("needs-data", "no traces from legacy nodes")
     none = [i for i, n in found.items() if n == 0]
@@ -791,6 +797,10 @@ CHECKS = [
 ]
 
 
+# Checks that need TopDisc nodes: registration, topic replies and topic traffic.
+TOPDISC_ONLY = {c for g, cs in CHECKS if g == "registration" for c, _, _ in cs} | {"L5", "I1", "A1", "A3"}
+
+
 def markdown(results, run):
     L = ["| check | assertion | status | evidence |", "|---|---|---|---|"]
     for group, checks in results.items():
@@ -821,12 +831,16 @@ def main():
     tol = ap.parse_args()
     rd = os.path.abspath(tol.run_dir)
     run = Run(rd)
+    plain_only = bool(run.legacy) and all(run.legacy.values())
     results = {}
     for group, checks in CHECKS:
         results[group] = []
         for code_, desc, fn in checks:
             try:
-                v = fn(run, tol)
+                if plain_only and code_ in TOPDISC_ONLY:
+                    v = verdict("not-exercised", "every node runs plain discv5")
+                else:
+                    v = fn(run, tol)
             except Exception as e:  # a check must never take the report down
                 v = verdict("error", f"{type(e).__name__}: {e}")
             results[group].append((code_, desc, v))

@@ -56,7 +56,7 @@ Per-searcher record in `results[]`:
 | `uniqueRegistrant`, `foundRegistrantIds[]` | distinct registrants found (the set) |
 | `uniqueFoundAtMs[]`, `uniqueFoundIds[]` | index-aligned: when each distinct registrant was first seen, and which |
 | `searchStartMs` | this searcher's offset from the run's common epoch (registration start) |
-| `timeToFirstNs`, `timeToCompletionNs`, `hitTimeout` | latency and outcome |
+| `timeToFirstNs`, `timeToCompletionNs`, `hitTimeout` | latency and outcome; `timeToFirstNs` is -1 when the searcher found nothing and 0 when its first provider was already in the routing table (older metrics write 0 for both; `uniqueFoundAtMs` tells them apart) |
 | `connectedAtStart`, `alreadyConnectedReg`, `newRegistrant`, `newFoundAtMs[]` | how much was already in the routing table |
 
 `uniqueFoundAtMs` is relative to *that searcher's* start, which is not
@@ -69,6 +69,7 @@ Sampled every `-overhead-series-period`. Small; a few MB.
 
 | Field | Contents | Figures |
 |---|---|---|
+| `startMs` | wall clock (Unix ms) of `tSec` 0, so the phase times in `assignments/` place on the series (real backends) | |
 | `samples[].tSec` | seconds since spawn | 1, 17, 19 |
 | `samples[].txBytes/rxBytes/txMsgs/rxMsgs` | cumulative totals per ID-space bucket (50 buckets) | 17 |
 | `samples[].byType{}` | the same, split by discv5 message type | 19 |

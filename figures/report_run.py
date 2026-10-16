@@ -99,6 +99,14 @@ SECTIONS = [
 # Figures drawn only for some runs: absent is not missing.
 OPTIONAL = {"11_discovery_rate", "10_dead_results"}
 
+# Figures and tables of TopDisc registration and topic search: left out of a
+# run where every node is plain discv5, where they would be empty.
+TOPDISC_ONLY = {"06_fanout_both_views", "04_id_space_registrants", "04b_id_space_registrars",
+                "07_registration_latency_bar", "07_placement_time_idspace", "oh_05_wait_time_cdf",
+                "oh_08_cache_utilisation", "12_search_bucket", "oh_06_idspace_found_time",
+                "oh_10_reg_vs_lookup", "oh_07_load_vs_topic_distance", "oh_09_cost_per_lookup", "oh_11_topic_load",
+                "table: Registration coverage after the register-wait phase", "table: Registration latency", "table: Load summary"}
+
 # Figures the scripts draw that the report leaves out on purpose.
 EXCLUDED = {"01_topic_distribution"}  # the topic assignment is a scenario input, shown as a table
 
@@ -379,7 +387,13 @@ def main():
             os.remove(p)
 
     backend = {"cloud": "cloud", "local": "local"}.get(params.get("testbed.backend"), "simnet")
-    L = [f"# TopDisc {backend} run — `{name}`\n"]
+    plain = params.get("scenario.population.legacy_frac") in ("1", "1.0")
+    if plain:
+        for stem in TOPDISC_ONLY:
+            for ext in (".png", ".pdf"):
+                if os.path.exists(os.path.join(figdir, stem + ext)):
+                    os.remove(os.path.join(figdir, stem + ext))
+    L = [f"# {'Plain discv5' if plain else 'TopDisc'} {backend} run — `{name}`\n"]
 
     # Scenario: what was run.
     L.append("## Scenario\n")
@@ -431,6 +445,8 @@ def main():
         found = [(h, table_for(tables, t), req) for h, t, req in sec["tables"]]
         if sec.get("optional") and not any(body for _, body, _ in found):
             continue
+        if plain and sec["name"] == "Registration and cache":
+            continue
         num += 1
         L.append(f"## {num}. {sec['name']}\n")
         for heading, body, required in found:
@@ -460,6 +476,8 @@ def main():
                 L.append(f"### {stem}\n")
                 L.append(f"![{stem}](figures/{stem}.png)\n")
                 L.append(f"*{caption}*\n")
+            elif stem == "09_lookup_contacts_cdf" and params.get("scenario.search.model") == "conn":
+                pass  # the conn model feeds the dialer; it records no separate lookups
             elif stem not in OPTIONAL:
                 missing.append((stem, f"not produced by {script} (see gen.log)"))
         if sec.get("summary"):
@@ -487,6 +505,10 @@ def main():
     if backend == "simnet":
         L.append(f"Abort on packet drop: `{params.get('testbed.safety.abort_on_drop', '?')}`.\n")
 
+    if plain:
+        missing = [(item, why) for item, why in missing if item not in TOPDISC_ONLY]
+        L.append("Every node runs plain discv5, so the TopDisc registration and topic-search figures are left out. "
+                 "`compare_protocols.py` puts this run next to its TopDisc pair.\n")
     L.append("## Not in this report\n")
     if missing:
         L.append("| item | reason |\n|---|---|")
