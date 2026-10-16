@@ -133,6 +133,7 @@ func (l *lazyIter) Close() {
 }
 
 func main() {
+	started := time.Now()
 	assignmentPath := flag.String("assignment", "", "assignment JSON from the coordinator")
 	verbosity := flag.Int("v", 2, "log verbosity")
 	flag.Parse()
@@ -366,6 +367,7 @@ func main() {
 			// time it derived for a legacy searcher came out as an absolute
 			// epoch value instead of ms into the search.
 			"register_at_ms": asg.Phases.RegisterAt, "search_at_ms": asg.Phases.SearchAt,
+			"session": map[string]any{"start_ms": started.UnixMilli(), "end_ms": time.Now().UnixMilli()},
 		}, "", " ")
 		os.WriteFile(asg.TraceFile, b, 0o644)
 	}
@@ -376,6 +378,7 @@ func main() {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
+	writeTrace() // a churn departure: this session's trace, parked by the runner before the restart
 	srv.Stop()
 }
 

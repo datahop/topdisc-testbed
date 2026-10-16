@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/datahop/topdisc-testbed/pkg/assign"
+	"github.com/datahop/topdisc-testbed/pkg/host"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
@@ -142,6 +143,8 @@ type searchResult struct {
 	NodeID              string   `json:"nodeId"`
 	Topic               int      `json:"topic"`
 	Target              int      `json:"target"`
+	TargetOnline        int      `json:"targetOnline"`                // of Target, up at the end of the search
+	UniqueFoundOnline   []bool   `json:"uniqueFoundOnline,omitempty"` // index-aligned with UniqueFoundAtMs; churn runs only
 	Found               int      `json:"found"`
 	FoundRegistrant     int      `json:"foundRegistrant"`
 	UniqueRegistrant    int      `json:"uniqueRegistrant"`
@@ -277,6 +280,14 @@ type leanTrace struct {
 	Samples []struct {
 		AtMs int64 `json:"at_ms"`
 	} `json:"samples"`
+	Session  *traceSession  `json:"session"`  // one process
+	Sessions []traceSession `json:"sessions"` // merged across churn restarts
+}
+
+// traceSession is when one process of the node ran.
+type traceSession struct {
+	StartMs int64 `json:"start_ms"`
+	EndMs   int64 `json:"end_ms"`
 }
 
 // writeMetrics writes metrics.json and series.json into runDir from the raw traces.
@@ -304,6 +315,7 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 	// legacy or not. Scoring a legacy search against registrants credits it
 	// with nothing -- which is what silently voided the all-legacy baseline.
 	providers := map[string]map[string]bool{} // topic hex -> 64-hex id
+	sessions := map[string][][2]int64{}       // 64-hex id -> when its processes ran
 	topicIds := map[string]int{}
 	idOf := map[int]string{}
 	present := map[int]bool{}
@@ -313,7 +325,7 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 		topicOf[a.Idx] = name
 		th := topicHex(name)
 		topicIds[th] = topicIndex(name)
-		b, err := os.ReadFile(tracePath(a.Idx))
+		b, err := host.LoadTrace(tracePath(a.Idx))
 		if err != nil {
 			continue
 		}
@@ -327,6 +339,12 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 			providers[th] = map[string]bool{}
 		}
 		providers[th][lt.ID] = true
+		for _, s := range lt.Sessions {
+			sessions[lt.ID] = append(sessions[lt.ID], [2]int64{s.StartMs, s.EndMs})
+		}
+		if len(lt.Sessions) == 0 && lt.Session != nil {
+			sessions[lt.ID] = [][2]int64{{lt.Session.StartMs, lt.Session.EndMs}}
+		}
 		if !a.Legacy {
 			if registrants[th] == nil {
 				registrants[th] = map[string]bool{}
@@ -339,6 +357,26 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 	}
 	if len(present) == 0 {
 		return fmt.Errorf("no traces")
+	}
+	// Under churn a provider counts toward a searcher's target only while
+	// it is up: online says whether one of its sessions covers a moment.
+	// Traces without session data (older runs) count as always up.
+	stopMs := as[0].Phases.StopAt
+	churned := false
+	for _, a := range as {
+		churned = churned || len(a.Churn) > 0
+	}
+	online := func(id string, atMs int64) bool {
+		ss, ok := sessions[id]
+		if !ok || stopMs == 0 {
+			return true
+		}
+		for _, s := range ss {
+			if s[0] <= atMs && atMs <= s[1] {
+				return true
+			}
+		}
+		return false
 	}
 	epochMs := as[0].Phases.RegisterBase
 	if epochMs == 0 {
@@ -375,7 +413,7 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 		if !present[a.Idx] {
 			continue
 		}
-		b, err := os.ReadFile(tracePath(a.Idx))
+		b, err := host.LoadTrace(tracePath(a.Idx))
 		if err != nil {
 			continue
 		}
@@ -402,6 +440,11 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 				NewFoundAtMs: []int64{}, FoundRegistrantIDs: []string{}, UniqueFoundAtMs: []int64{}, UniqueFoundIDs: []string{},
 				LookupLatencyMs: []int64{}, LookupResults: []int{}}
 			seen := map[string]bool{}
+			for id := range prov {
+				if id != t.ID && online(id, stopMs) {
+					r.TargetOnline++
+				}
+			}
 			var first, last int64 = -1, 0
 			for _, l := range t.Lookups {
 				r.Lookups++
@@ -436,6 +479,9 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 					seen[f.ID] = true
 					r.UniqueFoundIDs = append(r.UniqueFoundIDs, short(f.ID))
 					r.UniqueFoundAtMs = append(r.UniqueFoundAtMs, at)
+					if churned {
+						r.UniqueFoundOnline = append(r.UniqueFoundOnline, online(f.ID, stopMs))
+					}
 					r.NewFoundAtMs = append(r.NewFoundAtMs, at)
 				}
 			}
@@ -460,6 +506,9 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 					seen[f.ID] = true
 					r.UniqueFoundIDs = append(r.UniqueFoundIDs, short(f.ID))
 					r.UniqueFoundAtMs = append(r.UniqueFoundAtMs, at)
+					if churned {
+						r.UniqueFoundOnline = append(r.UniqueFoundOnline, online(f.ID, stopMs))
+					}
 					r.NewFoundAtMs = append(r.NewFoundAtMs, at)
 				}
 				r.OutboundConns = t.Outbound
@@ -529,11 +578,15 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 			}
 		}
 
-		// series.json: align every node's samples on the sample period.
+		// series.json: align every node's samples on the sample period. Each
+		// sample is carried over the slots up to the node's next one (or the
+		// end of the run), so a node away under churn, or whose sampler
+		// lagged, keeps its total in the network's cumulative series instead
+		// of dropping out of it and back in.
 		if doSeries {
 			bkt := idBucket(t.ID)
-			for _, smp := range t.Samples {
-				slot := int((smp.AtMs - t0 + period/2) / period)
+			slotOf := func(atMs int64) int { return int((atMs - t0 + period/2) / period) }
+			fold := func(slot int, smp rawSample) {
 				s := slots[slot]
 				if s == nil {
 					s = newSample(slot)
@@ -559,6 +612,17 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 					bt.RxBytes[bkt] += c["rxBytes"]
 					bt.TxMsgs[bkt] += c["txMsgs"]
 					bt.RxMsgs[bkt] += c["rxMsgs"]
+				}
+			}
+			for i, smp := range t.Samples {
+				slot, until := slotOf(smp.AtMs), slotOf(smp.AtMs)
+				if i+1 < len(t.Samples) {
+					until = slotOf(t.Samples[i+1].AtMs) - 1
+				} else if stopMs > 0 && slotOf(stopMs) > slot {
+					until = slotOf(stopMs)
+				}
+				for k := slot; k <= until; k++ {
+					fold(k, smp)
 				}
 			}
 		}

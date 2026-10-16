@@ -54,6 +54,7 @@ func (l *lazyIter) Close() {
 }
 
 func main() {
+	procStart := time.Now()
 	port := flag.Int("port", 30303, "TCP+UDP listen port")
 	statusPort := flag.Int("status", 0, "status HTTP port (0 = port+10000)")
 	boot := flag.String("bootnodes", "", "comma-separated enode URLs")
@@ -423,9 +424,10 @@ func main() {
 			"ads_held": len(srv.DiscoveryV5().LocalTopicNodes(topic)), "wire": wire,
 			"topic": topic.String(), "topics": asg.Topics, "register_at_ms": asg.Phases.RegisterAt, "search_at_ms": asg.Phases.SearchAt,
 			"ads_first_seen_ms": first, "ads_final": last, "ads_final_expiry_ms": expiry, "ads_snapshot_ms": snapAt, "stale_ad_max_ms": stale, "wait": wait, "samples": smp,
-			"admissions": discover.AdmissionEvents(srv.Self().ID()),
+			"admissions":         discover.AdmissionEvents(srv.Self().ID()),
 			"reg_bucket_full_ms": bFull, "reg_complete_ms": rComplete, "reg_buckets_final": bLast,
 			"ops": ops, "topic_load": topicLoad, "conn": conn,
+			"session": map[string]any{"start_ms": procStart.UnixMilli(), "end_ms": time.Now().UnixMilli()},
 		}, "", " ")
 		os.WriteFile(asg.TraceFile, b, 0o644)
 	}
@@ -463,6 +465,7 @@ func main() {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
+	writeTrace() // a churn departure: this session's trace, parked by the runner before the restart
 	srv.Stop()
 }
 
