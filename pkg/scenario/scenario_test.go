@@ -38,3 +38,25 @@ func TestLoadSearchModes(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadLegacyBuild(t *testing.T) {
+	all := "    legacy_frac: 1\n    legacy_bootnode: true\n"
+	for _, tc := range []struct {
+		body    string
+		wantErr string
+	}{
+		{"scenario:\n  population:\n" + all + "    legacy_build: fork\n", ""},
+		{"scenario:\n  population:\n    legacy_frac: 0.5\n    legacy_build: stock\n", ""},
+		{"scenario:\n  population:\n    legacy_frac: 1\n    legacy_build: fork\n", "every node legacy"},
+		{"scenario:\n  population:\n    legacy_frac: 0.5\n    legacy_bootnode: true\n    legacy_build: fork\n", "every node legacy"},
+		{"scenario:\n  population:\n" + all + "    legacy_build: upstream\n", "want stock or fork"},
+	} {
+		err := loadYAML(t, tc.body)
+		switch {
+		case tc.wantErr == "" && err != nil:
+			t.Errorf("%q: unexpected error %v", tc.body, err)
+		case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+			t.Errorf("%q: error %v, want %q", tc.body, err, tc.wantErr)
+		}
+	}
+}

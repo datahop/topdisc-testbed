@@ -1,5 +1,7 @@
 // node-legacy is the legacy half of the TopDisc-vs-discv5 comparison: a stock
-// upstream geth p2p.Server with discv5 and no topic discovery at all. It
+// upstream geth p2p.Server with discv5 and no topic discovery at all. Built
+// with -tags fork -modfile=go.fork.mod it runs on the TopDisc fork instead,
+// with the fork's per-message counters (wire_fork.go). It
 // publishes its service in the ENR and finds providers by random-walk
 // discovery, which is all a topic-unaware client can do. Same assignment file
 // and trace record as cmd/node, so the figures compare directly.
@@ -53,6 +55,7 @@ type assignment struct {
 		InitialResults   int     `json:"initial_results"`
 		ResultIntervalMs int64   `json:"result_interval_ms"`
 	} `json:"search"`
+	SampleMs  int64  `json:"sample_ms"`
 	TraceFile string `json:"trace_file"`
 }
 
@@ -68,9 +71,10 @@ type lookup struct {
 	// through. The count alone also hides whether a walk was still making
 	// progress when the phase ended.
 	Found []found `json:"found"`
-	// Random-target lookups the walk ran: the cost cmd/node reports as
-	// TOPICQUERY requests, so the two compare. Stock geth's Lookup does not
-	// expose how many nodes it asked, so Contacted stays "not reported".
+	// The walk's cost: FINDNODE requests the node sent while it ran (fork
+	// build, so it compares with cmd/node's TOPICQUERY count), or the
+	// random-target lookups it started (stock build, which counts no
+	// requests). Contacted stays "not reported" in both.
 	Queries   int `json:"queries"`
 	Contacted int `json:"contacted"`
 }
@@ -216,6 +220,7 @@ func main() {
 		// The node only consumes its own walks: no dialer, so no second walk.
 		proto.DialCandidates = enode.IterNodes(nil)
 	}
+	enableWireStats()
 	srv = &p2p.Server{Config: p2p.Config{
 		PrivateKey: key, Name: "topdisc-node-legacy", MaxPeers: asg.MaxPeers, DialRatio: asg.DialRatio, NoDial: lookupOnly,
 		ListenAddr: fmt.Sprintf("%s:%d", asg.IP, asg.Port), DiscoveryV4: false, DiscoveryV5: true,
@@ -268,7 +273,9 @@ func main() {
 					}
 					connMu.Unlock()
 				}
-				if firstCapableMs < 0 {
+				// Every node of a fork build carries "ng", so the first
+				// capable peer means nothing there.
+				if firstCapableMs < 0 && !forkBuild {
 					for _, p := range srv.Peers() {
 						var c capableEntry
 						if p.ID() == ev.Peer && p.Node().Load(&c) == nil {
@@ -280,6 +287,23 @@ func main() {
 			mu.Unlock()
 		}
 	}()
+	// Counter samples for series.json, as cmd/node takes them; the stock
+	// build has no counters to sample.
+	type sample struct {
+		AtMs int64 `json:"at_ms"`
+		Wire any   `json:"wire"`
+	}
+	samples := []sample{}
+	if asg.SampleMs > 0 && forkBuild {
+		go func() {
+			for range time.Tick(time.Duration(asg.SampleMs) * time.Millisecond) {
+				smp := sample{AtMs: time.Now().UnixMilli(), Wire: wireStats(srv)}
+				mu.Lock()
+				samples = append(samples, smp)
+				mu.Unlock()
+			}
+		}()
+	}
 	// A legacy node has nothing to register: its ENR carries the service.
 	wait(asg.Phases.SearchAt)
 	close(ready)
@@ -291,6 +315,7 @@ func main() {
 		timeout := time.Duration(asg.Search.RequestTimeout) * time.Millisecond
 		rec := func(l lookup) { mu.Lock(); lookups = append(lookups, l); mu.Unlock() }
 		disc := srv.DiscoveryV5()
+		cost := findnodesSent(srv)
 		go func() {
 			if asg.Search.Model == "scheduled" {
 				for _, ms := range asg.Search.LookupAtMs {
@@ -299,13 +324,13 @@ func main() {
 						return
 					}
 					time.Sleep(time.Until(t))
-					rec(randomWalk(disc, isProvider, asg.Search.TargetCount, timeout, deadline, nil, 0, 0))
+					rec(randomWalk(disc, cost, isProvider, asg.Search.TargetCount, timeout, deadline, nil, 0, 0))
 				}
 				return
 			}
 			// continuous: one walk for the whole phase, reported as a single lookup.
 			set := func(l lookup) { mu.Lock(); lookups = []lookup{l}; mu.Unlock() }
-			set(randomWalk(disc, isProvider, 0, 0, deadline, set, asg.Search.InitialResults, time.Duration(asg.Search.ResultIntervalMs)*time.Millisecond))
+			set(randomWalk(disc, cost, isProvider, 0, 0, deadline, set, asg.Search.InitialResults, time.Duration(asg.Search.ResultIntervalMs)*time.Millisecond))
 		}()
 	}
 	writeTrace := func() {
@@ -335,7 +360,7 @@ func main() {
 			"conn": conn,
 			"idx":  asg.Idx, "id": srv.Self().ID().String(), "legacy": true, "outbound": out, "inbound": in,
 			"peer_drops": drops, "refill_ms": refills, "lookups": lookups, "first_capable_ms": firstCapableMs,
-			"ads_held": 0, "wire": map[string]any{},
+			"ads_held": 0, "wire": wireStats(srv), "samples": samples,
 			// The phase clock, as cmd/node records it. Leaving it out left the
 			// aggregator subtracting a zero search start, so every discovery
 			// time it derived for a legacy searcher came out as an absolute
@@ -358,10 +383,11 @@ func main() {
 // the nodes it already knows, then run random-target Kademlia lookups (each
 // costs real FINDNODE traffic) until target providers are seen, the timeout
 // or the deadline. progress, if set, gets the lookup so far after each round.
+// cost, if set, reads the node's FINDNODE requests sent so far.
 func randomWalk(disc interface {
 	AllNodes() []*enode.Node
 	Lookup(enode.ID) []*enode.Node
-}, isProvider func(*enode.Node) bool, target int, timeout time.Duration, deadline time.Time, progress func(lookup), initial int, interval time.Duration) lookup {
+}, cost func() int64, isProvider func(*enode.Node) bool, target int, timeout time.Duration, deadline time.Time, progress func(lookup), initial int, interval time.Duration) lookup {
 	start := time.Now()
 	stop := deadline
 	if timeout > 0 && start.Add(timeout).Before(stop) {
@@ -372,6 +398,10 @@ func randomWalk(disc interface {
 	seen := map[enode.ID]struct{}{}
 	var order []found
 	rounds := 0
+	var sent0 int64
+	if cost != nil {
+		sent0 = cost()
+	}
 	var paceStart time.Time
 	add := func(nodes []*enode.Node) bool {
 		for _, n := range nodes {
@@ -390,7 +420,11 @@ func randomWalk(disc interface {
 		// Capacity-capped so the walk's later appends never land in a snapshot
 		// a progress callback already holds.
 		f := order[:len(order):len(order)]
-		return lookup{StartMs: start.UnixMilli(), LatencyMs: time.Since(start).Milliseconds(), Results: len(seen), HitTarget: hit, Found: f, Queries: rounds, Contacted: -1}
+		q := rounds
+		if cost != nil {
+			q = int(cost() - sent0)
+		}
+		return lookup{StartMs: start.UnixMilli(), LatencyMs: time.Since(start).Milliseconds(), Results: len(seen), HitTarget: hit, Found: f, Queries: q, Contacted: -1}
 	}
 	if add(disc.AllNodes()) {
 		return done(true)

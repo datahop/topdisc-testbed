@@ -17,6 +17,7 @@ __pycache__/
 /testbed
 /topdisc-node
 /topdisc-node-legacy
+/topdisc-node-plain
 figs/
 scratch-*
 /legacy/node-legacy

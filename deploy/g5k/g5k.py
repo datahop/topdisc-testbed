@@ -92,7 +92,7 @@ def build():
     # they are all there rather than letting `up` discover a missing one after
     # the machines are already deployed.
     if SKIP_BUILD:
-        missing = [b for b in ("testbed", "hostagent", "topdisc-node", "topdisc-node-legacy")
+        missing = [b for b in ("testbed", "hostagent", "topdisc-node", "topdisc-node-legacy", "topdisc-node-plain")
                    if not (REPO / "out" / b).exists()]
         if missing or not (REPO / "testbed").exists():
             sys.exit(f"SKIP_BUILD=1 but these are not built: {missing + ([] if (REPO / 'testbed').exists() else ['./testbed'])}")
@@ -102,6 +102,7 @@ def build():
     for bin, pkg in [("testbed", "./cmd/testbed"), ("hostagent", "./cmd/hostagent"), ("topdisc-node", "./cmd/node")]:
         sh(f"cd {REPO} && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o out/{bin} {pkg}")
     sh(f"cd {REPO}/legacy && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ../out/topdisc-node-legacy ./cmd/node-legacy")
+    sh(f"cd {REPO}/legacy && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -modfile=go.fork.mod -tags fork -o ../out/topdisc-node-plain ./cmd/node-legacy")
 
 
 class Unrunnable(Exception):
@@ -204,14 +205,14 @@ def up(path):
             # this run has. Dropping it here lets the healthy count below decide
             # whether enough are left, instead of aborting on the first bad one.
             try:
-                sh(f"scp -q {REPO}/out/hostagent {REPO}/out/topdisc-node {REPO}/out/topdisc-node-legacy root@{h}:/root/")
+                sh(f"scp -q {REPO}/out/hostagent {REPO}/out/topdisc-node {REPO}/out/topdisc-node-legacy {REPO}/out/topdisc-node-plain root@{h}:/root/")
                 # ulimit: one agent supervises vnodes_per_machine node processes,
                 # each with its own netns, veth and log; the login default of 1024
                 # is the first thing to bind as that number grows.
-                sh(f"ssh root@{h} 'chmod +x /root/hostagent /root/topdisc-node /root/topdisc-node-legacy; "
+                sh(f"ssh root@{h} 'chmod +x /root/hostagent /root/topdisc-node /root/topdisc-node-legacy /root/topdisc-node-plain; "
                    f"ulimit -n 65536; "
                    f"nohup /root/hostagent -serve :{AGENT_PORT} -node-binary /root/topdisc-node "
-                   f"-legacy-binary /root/topdisc-node-legacy -workdir {WORK}/run "
+                   f"-legacy-binary /root/topdisc-node-legacy -plain-binary /root/topdisc-node-plain -workdir {WORK}/run "
                    f">/root/hostagent.log 2>&1 </dev/null &'")
             except subprocess.CalledProcessError as e:
                 print(f"{h}: cannot stage the binaries, dropping it ({e})", file=sys.stderr)

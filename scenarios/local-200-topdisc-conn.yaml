@@ -1,0 +1,11 @@
+# 200 TopDisc nodes, the pair of local-200-plain-fork-conn.yaml:
+# same population and phases, so the report and compare scripts pair them.
+name: local-200-topdisc-conn
+scenario:
+  population: {nodes: 200, topics: 5, zipf_s: 1.0, seed: 3}
+  phases: {bootstrap_wait: 20s, start_window: 20s, register_wait: 30s, search_stagger: 10ms, search_timeout: 3m}
+  search: {model: conn}
+  conn_model: {enabled: true}
+
+testbed:
+  backend: local
