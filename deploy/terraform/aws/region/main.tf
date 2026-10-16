@@ -24,11 +24,16 @@ variable "instance_types" { type = list(string) }
 variable "coordinator_type" { type = string }
 variable "spot" { type = bool }
 variable "instance_profile" { type = string }
-variable "cloud_init" { type = string }
+variable "cloud_init_vars" { type = map(string) } # cloud-init template inputs; the module adds region and binaries_s3
 variable "public_ips" { type = bool }
 
 locals {
   active = var.nodes > 0 || var.coordinator
+  # Private nodes reach S3 through the gateway endpoint, which serves this
+  # region's buckets only, so every region away from home gets a mirror of
+  # the binaries; the home region's nodes read the bucket the coordinator uses.
+  binaries_s3 = var.coordinator ? var.cloud_init_vars.binaries_s3 : (local.active ? "s3://${aws_s3_bucket.mirror[0].id}/topdisc-linux-arm64.tgz" : "")
+  cloud_init  = templatefile("${path.module}/../../../cloud-init.yaml.tftpl", merge(var.cloud_init_vars, { region = data.aws_region.r.name, binaries_s3 = local.binaries_s3 }))
 }
 
 data "aws_availability_zones" "az" {
@@ -96,6 +101,11 @@ resource "aws_route" "default" {
   destination_cidr_block = "0.0.0.0/0"
   gateway_id             = aws_internet_gateway.igw[0].id
 }
+resource "aws_s3_bucket" "mirror" {
+  count         = local.active && !var.coordinator ? 1 : 0
+  bucket_prefix = "topdisc-testbed-"
+  force_destroy = true
+}
 resource "aws_vpc_endpoint" "s3" {
   vpc_id          = aws_vpc.tb.id
   service_name    = "com.amazonaws.${data.aws_region.r.name}.s3"
@@ -113,7 +123,7 @@ resource "aws_instance" "coordinator" {
   associate_public_ip_address          = true # SSM and the AWS APIs, with no NAT
   vpc_security_group_ids               = [aws_security_group.intra.id]
   iam_instance_profile                 = var.instance_profile
-  user_data                            = var.cloud_init
+  user_data                            = local.cloud_init
   # A restarted instance does not re-run cloud-init; replace it instead.
   user_data_replace_on_change = true
   root_block_device {
@@ -127,7 +137,7 @@ resource "aws_launch_template" "node" {
   count       = var.nodes > 0 ? 1 : 0
   name_prefix = "topdisc-node-"
   image_id    = data.aws_ami.al2023_arm.id
-  user_data   = base64encode(var.cloud_init)
+  user_data   = base64encode(local.cloud_init)
   iam_instance_profile { name = var.instance_profile }
   network_interfaces {
     associate_public_ip_address = var.public_ips
@@ -178,3 +188,4 @@ output "cidr" { value = var.cidr }
 output "active" { value = local.active }
 output "coordinator_id" { value = one(aws_instance.coordinator[*].id) }
 output "coordinator_ip" { value = one(aws_instance.coordinator[*].private_ip) }
+output "mirror_bucket" { value = one(aws_s3_bucket.mirror[*].id) }

@@ -23,20 +23,24 @@ build_push() {
   (cd legacy && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o ../out/topdisc-node-legacy ./cmd/node-legacy)
   cp deploy/inventory-aws.sh out/
   tar czf out/topdisc-linux-arm64.tgz -C out topdisc-node topdisc-node-legacy hostagent testbed inventory-aws.sh
-  aws s3 cp out/topdisc-linux-arm64.tgz "s3://$(tfout binaries_bucket)/topdisc-linux-arm64.tgz"
+  # The home bucket and a mirror per active region: a private node's S3
+  # endpoint only reaches its own region.
+  for b in $(terraform -chdir=$TF output -json binaries_buckets | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin).values()))'); do
+    aws s3 cp out/topdisc-linux-arm64.tgz "s3://$b/topdisc-linux-arm64.tgz"
+  done
 }
 
 MAX_SPEND=${MAX_SPEND:-200}
 MAX_HOURS=${MAX_HOURS:-6}
 # On-demand us-east-1 prices, $/h: nodes on t4g.nano, coordinator m7g.large,
-# a NAT gateway per active region with private addresses, a public IPv4 per
-# instance with public_ips. Spot is cheaper, so this is conservative.
+# a public IPv4 per instance with public_ips. Spot is cheaper, so this is
+# conservative.
 cost_guard() {
   est=$(echo "$1" | python3 -c '
 import json,sys
 f=json.load(sys.stdin); n=sum(f.values()); active=sum(1 for v in f.values() if v>0)
 pub=sys.argv[1]=="true"
-print(round(n*0.0042 + 0.0816 + ((n+1)*0.005 if pub else active*0.045), 2))' "$2")
+print(round(n*0.0042 + 0.0816 + ((n+1)*0.005 if pub else 0), 2))' "$2")
   total=$(python3 -c "print(round($est*$MAX_HOURS,2))")
   echo "estimated: \$$est/h on-demand, \$$total over MAX_HOURS=$MAX_HOURS (cap \$$MAX_SPEND); the coordinator scales the fleet to zero after $MAX_HOURS h"
   python3 -c "import sys; sys.exit(0 if $total <= $MAX_SPEND else 1)" || { echo "refusing: over MAX_SPEND; lower MAX_HOURS or the fleet"; exit 1; }
