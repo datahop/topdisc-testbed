@@ -30,7 +30,7 @@ func TestRandomWalkCountsRounds(t *testing.T) {
 	var snaps []lookup
 	progress := func(l lookup) { snaps = append(snaps, l) }
 
-	l := randomWalk(disc, isProvider, 3, time.Minute, time.Now().Add(time.Minute), progress, 0, 0)
+	l := randomWalk(disc, nil, isProvider, 3, time.Minute, time.Now().Add(time.Minute), progress, 0, 0)
 
 	if !l.HitTarget || l.Results != 3 || len(l.Found) != 3 {
 		t.Fatalf("walk: hit=%v results=%d found=%d, want 3 providers", l.HitTarget, l.Results, len(l.Found))
@@ -50,5 +50,19 @@ func TestRandomWalkCountsRounds(t *testing.T) {
 		if s.Queries != i+1 || len(s.Found) != i+1 || s.Found[i].ID != l.Found[i].ID {
 			t.Fatalf("snapshot %d: queries=%d found=%d", i, s.Queries, len(s.Found))
 		}
+	}
+}
+
+func TestRandomWalkCountsRequests(t *testing.T) {
+	disc := &fakeDisc{providers: map[enode.ID]bool{}}
+	isProvider := func(n *enode.Node) bool { return disc.providers[n.ID()] }
+	// A counter that already holds traffic from before the walk, and grows
+	// by 12 FINDNODE requests per lookup.
+	cost := func() int64 { return 100 + 12*int64(disc.rounds) }
+
+	l := randomWalk(disc, cost, isProvider, 3, time.Minute, time.Now().Add(time.Minute), nil, 0, 0)
+
+	if l.Queries != 36 {
+		t.Fatalf("queries=%d, want 36 requests sent by the walk's 3 lookups", l.Queries)
 	}
 }

@@ -39,6 +39,7 @@ type Route struct {
 type Runner struct {
 	NodeBinary   string
 	LegacyBinary string // for assignments with Legacy set
+	PlainBinary  string // for assignments with LegacyFork set
 	Verbosity    int
 	AsgDir       string // node<idx>.json per node
 	LogDir       string
@@ -54,13 +55,13 @@ type Runner struct {
 	mu     sync.Mutex
 	procs  map[int]*exec.Cmd
 	delay  map[int]time.Duration
-	legacy map[int]bool
+	legacy map[int]string // node index -> binary, for legacy nodes
 	mon    *monitor
 }
 
 func (r *Runner) init() {
 	if r.procs == nil {
-		r.procs, r.delay, r.legacy = map[int]*exec.Cmd{}, map[int]time.Duration{}, map[int]bool{}
+		r.procs, r.delay, r.legacy = map[int]*exec.Cmd{}, map[int]time.Duration{}, map[int]string{}
 	}
 }
 
@@ -79,10 +80,14 @@ func (r *Runner) Prepare(as []assign.Assignment, peers map[int]string) error {
 	}
 	for _, a := range as {
 		if a.Legacy {
-			if r.LegacyBinary == "" {
-				return fmt.Errorf("node %d is legacy but no legacy binary is configured", a.Idx)
+			bin, what := r.LegacyBinary, "legacy"
+			if a.LegacyFork {
+				bin, what = r.PlainBinary, "plain (legacy on the fork)"
 			}
-			r.legacy[a.Idx] = true
+			if bin == "" {
+				return fmt.Errorf("node %d is legacy but no %s binary is configured", a.Idx, what)
+			}
+			r.legacy[a.Idx] = bin
 		}
 	}
 	if r.Wan == nil {
@@ -169,8 +174,8 @@ func (r *Runner) Start(idx int) error {
 	// agent's own file limit.
 	defer logf.Close()
 	bin := r.NodeBinary
-	if r.legacy[idx] {
-		bin = r.LegacyBinary
+	if lb, ok := r.legacy[idx]; ok {
+		bin = lb
 	}
 	args := []string{bin, "-assignment", filepath.Join(r.AsgDir, fmt.Sprintf("node%d.json", idx)), "-v", strconv.Itoa(r.Verbosity)}
 	if r.Wan != nil {

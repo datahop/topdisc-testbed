@@ -97,6 +97,7 @@ type PopulationConfig struct {
 	Seed           int64   `yaml:"seed"`
 	LegacyFrac     float64 `yaml:"legacy_frac"`
 	LegacyBootnode bool    `yaml:"legacy_bootnode"`
+	LegacyBuild    string  `yaml:"legacy_build"`
 	VanillaFrac    float64 `yaml:"vanilla_frac"`
 }
 
@@ -219,6 +220,7 @@ type G5kConfig struct {
 type LocalConfig struct {
 	NodeBinary   string        `yaml:"node_binary"`
 	LegacyBinary string        `yaml:"legacy_binary"`
+	PlainBinary  string        `yaml:"plain_binary"`
 	BasePort     int           `yaml:"base_port"`
 	Grace        time.Duration `yaml:"grace"`
 	Verbosity    int           `yaml:"verbosity"`
@@ -263,6 +265,7 @@ var paramDocs = []paramDoc{
 	{"testbed.backend", "simnet: in-process on this host; local: one node process per node on this host; cloud: Terraform fleet"},
 	{"testbed.local.node_binary", "local backend: path to the node binary"},
 	{"testbed.local.legacy_binary", "local backend: stock-geth node binary for population.legacy_frac nodes (legacy/cmd/node-legacy)"},
+	{"testbed.local.plain_binary", "local backend: the same program built on the fork, for population.legacy_build fork (go build -modfile=go.fork.mod -tags fork in legacy/)"},
 	{"testbed.local.base_port", "local backend: node i listens on base_port+i, status on +10000"},
 	{"testbed.local.grace", "local backend: wait after the last StopAt before collecting"},
 	{"testbed.local.verbosity", "node log level: 2 warn, 3 info, 4 debug (disconnect reasons)"},
@@ -294,6 +297,7 @@ var paramDocs = []paramDoc{
 	{"scenario.population.seed", "RNG seed for every random draw; 0 = time"},
 	{"scenario.population.legacy_frac", "fraction of nodes that are legacy discv5: they never register and find the providers of their service by DHT random walks (simnet drops the topic-discovery ENR flag; real backends run stock upstream geth, legacy_binary); real backends draw the same fraction within every service"},
 	{"scenario.population.legacy_bootnode", "let node 0 (the bootnode) be drawn legacy too; default keeps it TopDisc-capable, since a fresh stock bootnode serves no nodes until it has revalidated its table (~20 nodes/min)"},
+	{"scenario.population.legacy_build", "real backends: what the legacy nodes run. stock (default): upstream geth, legacy_binary. fork: the same program built on the TopDisc fork (plain_binary), so it runs the fork's discv5 code and records per-message wire counters like a TopDisc node; it never registers or searches a topic, but its ENR carries the fork's ng entry, so fork needs every node legacy (legacy_frac 1, legacy_bootnode true)"},
 	{"scenario.population.vanilla_frac", "fraction running stock upstream geth (needs -tags vanilla)"},
 	{"scenario.network.latency_ms", "simnet: per-pair one-way latency, ms (cloud: given by regions)"},
 	{"scenario.network.bandwidth_mibps", "simnet: per-direction link bandwidth (cloud: given by the instance type)"},
@@ -371,6 +375,7 @@ func Default() Config {
 	c.Testbed.Local.Grace = mustDur("10s")
 	c.Testbed.Local.Verbosity = 2
 	c.Testbed.Local.LegacyBinary = "./topdisc-node-legacy"
+	c.Testbed.Local.PlainBinary = "./topdisc-node-plain"
 	c.Testbed.Cloud.Inventory, c.Testbed.Cloud.HomeRegion, c.Testbed.Cloud.AgentPort, c.Testbed.Cloud.Verbosity, c.Testbed.Cloud.Grace = "inventory.json", "us-east-1", 9000, 2, mustDur("30s")
 	c.Testbed.G5k = G5kConfig{Site: "nancy", Walltime: "02:00:00", Queue: "default", Env: "debian11-x64-base", VnodesPerMachine: 250, Image: "file:///home/USER/topdisc-vnode.tar.gz"}
 	c.Testbed.Wan.DelayMinMs, c.Testbed.Wan.DelayMaxMs, c.Testbed.Wan.JitterMs, c.Testbed.Wan.RateKbps = 4, 45, 3, 160
@@ -437,6 +442,17 @@ func Load(path string) (Config, error) {
 		}
 	default:
 		return c, fmt.Errorf("%s: population.addresses %q: want index or crawl", path, c.Scenario.Population.Addresses)
+	}
+	switch p := c.Scenario.Population; p.LegacyBuild {
+	case "", "stock":
+	case "fork":
+		// A TopDisc node would take the fork build's ng entry for the real
+		// thing and send it registrations and queries.
+		if p.LegacyFrac != 1 || !p.LegacyBootnode {
+			return c, fmt.Errorf("%s: population.legacy_build fork needs every node legacy: legacy_frac 1 and legacy_bootnode true", path)
+		}
+	default:
+		return c, fmt.Errorf("%s: population.legacy_build %q: want stock or fork", path, p.LegacyBuild)
 	}
 	if c.Scenario.Search.Model != "conn" && c.Scenario.ConnModel.Enabled {
 		return c, fmt.Errorf("%s: search.model %s is lookup-only and never dials; remove conn_model or use search.model conn", path, c.Scenario.Search.Model)

@@ -35,6 +35,7 @@ func main() {
 	addr := flag.String("serve", ":9000", "listen address")
 	bin := flag.String("node-binary", "/opt/topdisc/topdisc-node", "node binary")
 	legacyBin := flag.String("legacy-binary", "/opt/topdisc/topdisc-node-legacy", "stock-geth node binary for legacy assignments")
+	plainBin := flag.String("plain-binary", "/opt/topdisc/topdisc-node-plain", "legacy node built on the fork, for legacy_fork assignments")
 	work := flag.String("workdir", "/opt/topdisc/run", "assignments, logs and traces")
 	flag.Parse()
 	var mu sync.Mutex
@@ -55,7 +56,7 @@ func main() {
 			r.StopAll()
 		}
 		os.RemoveAll(*work)
-		r = &host.Runner{NodeBinary: *bin, LegacyBinary: *legacyBin, Verbosity: p.Verbosity, AsgDir: filepath.Join(*work, "assignments"),
+		r = &host.Runner{NodeBinary: *bin, LegacyBinary: *legacyBin, PlainBinary: *plainBin, Verbosity: p.Verbosity, AsgDir: filepath.Join(*work, "assignments"),
 			LogDir: filepath.Join(*work, "logs"), Wan: p.Wan, Host: p.Host, Seed: p.Seed,
 			Routes: p.Routes, RealAddrs: p.RealAddrs}
 		os.MkdirAll(filepath.Join(*work, "traces"), 0o755)

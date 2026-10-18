@@ -21,8 +21,9 @@ build_push() {
     GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o out/$( [ $c = node ] && echo topdisc-node || echo $c ) ./cmd/$c
   done
   (cd legacy && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o ../out/topdisc-node-legacy ./cmd/node-legacy)
+  (cd legacy && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -modfile=go.fork.mod -tags fork -o ../out/topdisc-node-plain ./cmd/node-legacy)
   cp deploy/inventory-aws.sh out/
-  tar czf out/topdisc-linux-arm64.tgz -C out topdisc-node topdisc-node-legacy hostagent testbed inventory-aws.sh
+  tar czf out/topdisc-linux-arm64.tgz -C out topdisc-node topdisc-node-legacy topdisc-node-plain hostagent testbed inventory-aws.sh
   aws s3 cp out/topdisc-linux-arm64.tgz "s3://$(tfout binaries_bucket)/topdisc-linux-arm64.tgz"
 }
 
