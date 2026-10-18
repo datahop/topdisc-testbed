@@ -4,7 +4,7 @@ Every plot the Phase 3 plan asks for, the figure that answers it, where it
 stands per backend, and how the implementation differs from the plan. Each
 section ends with a **Differences and gaps** subsection.
 
-Figures come from three scripts, all reading the files a run directory holds
+Figures come from five scripts, all reading the files a run directory holds
 (`metrics.json`, `series.json`, `oh.json`, `run.log`; `docs/TRACES.md`):
 
 - `figures/report_run.py <run-dir>` builds the **per-run report**
@@ -13,6 +13,23 @@ Figures come from three scripts, all reading the files a run directory holds
   `metrics.json` on real backends) and lists anything it could not produce.
 - `figures/compare_runs.py --out DIR a=RUN b=RUN` overlays **runs of the same
   scenario** (e.g. simnet vs AWS) with a summary table.
+- `figures/compare_protocols.py --out DIR topdisc=RUN discv5=RUN` compares
+  **protocols on the same scenario** (TopDisc against plain discv5, same lookup
+  model): share found over time and time to 50/90/99/100 % per topic-size
+  class, time to the first provider, traffic over time by message category,
+  search-phase cost per provider found, serving load per node, peer slots and
+  run health. Topics are always pooled by size, so a smoke run and a 25k run
+  give the same report. The plain side needs `legacy_build: fork` for its
+  traffic counters. On a plain-only run `report_run.py` leaves out the TopDisc
+  registration and topic-search figures.
+- `figures/report_pair.py --out DIR topdisc=RUN discv5=RUN` builds the
+  **per-run report layout for a TopDisc / plain discv5 pair**: every section
+  shows both protocols (checks side by side, per-topic table, overlaid
+  discovery and load figures, peer slots, churn, run health), except
+  Registration and cache, which only TopDisc has. It runs `report_run.py` on
+  each run into `DIR/runs/` and reuses the TopDisc-only figures from there.
+  The paired figures live in `figures/pairfigs.py`, which
+  `compare_protocols.py` also uses.
 - `figures/report_plots.py` draws the older **cross-run churn plots** from
   simnet sweep logs.
 

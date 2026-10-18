@@ -132,7 +132,7 @@ def main():
     scheduled = any(x.get("lookups") for r in runs for x in r.results)
     fig, ax = plt.subplots(figsize=(8, 4.6), constrained_layout=True)
     for i, r in enumerate([] if scheduled else runs):
-        ttf = [x["timeToFirstNs"] / 1e9 for x in r.results if x.get("timeToFirstNs", 0) > 0]
+        ttf = [x["timeToFirstNs"] / 1e9 for x in r.results if x.get("timeToFirstNs", -1) >= 0 and x.get("uniqueFoundAtMs")]
         cdf(ax, ttf, ls=STYLES[i % 4], lw=1.8, label=f"{r.label} (median {pct(ttf, 50):.2f}s)")
     ax.set_xlabel("time to first result (s)")
     ax.set_ylabel("CDF over searchers")
@@ -430,7 +430,7 @@ def main():
     row("nodes contacted per lookup p50 / p95", lambda v: f"{v[0]:.0f} / {v[1]:.0f}", [(pct(l[1], 50), pct(l[1], 95)) for l in lk])
     row("TOPICQUERY per lookup p50 (plain discv5: DHT lookups)", lambda v: f"{v:.0f}", [pct(l[2], 50) for l in lk])
     if not scheduled:
-        row("time to first result p50 (s)", lambda v: f"{v:.2f}", [pct([x["timeToFirstNs"] / 1e9 for x in r.results if x.get("timeToFirstNs", 0) > 0], 50) for r in runs])
+        row("time to first result p50 (s)", lambda v: f"{v:.2f}", [pct([x["timeToFirstNs"] / 1e9 for x in r.results if x.get("timeToFirstNs", -1) >= 0 and x.get("uniqueFoundAtMs")], 50) for r in runs])
     def first_adm(r):
         start = r.m.get("registrationStartNs") or {}
         v = [(ns - start.get(rid, 0)) / 1e9 for regs in (r.m.get("registrationTimingNs") or {}).values() for rid, ns in regs.items()]
