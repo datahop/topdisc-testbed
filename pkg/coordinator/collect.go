@@ -50,7 +50,13 @@ func Collect(trDir, runDir string, as []assign.Assignment) error {
 	if len(traces) == 0 {
 		return fmt.Errorf("no node traces collected")
 	}
-	pct := func(v []int, p int) int { sort.Ints(v); return v[(p*(len(v)-1))/100] }
+	pct := func(v []int, p int) int {
+		if len(v) == 0 {
+			return 0
+		}
+		sort.Ints(v)
+		return v[(p*(len(v)-1))/100]
+	}
 	var out, in, ads, drops []int
 	var refills []int
 	var lookups, hits int
@@ -71,13 +77,18 @@ func Collect(trDir, runDir string, as []assign.Assignment) error {
 			if t.FirstCapableMs >= 0 {
 				capable = append(capable, int(t.FirstCapableMs))
 			}
-			continue
 		}
+		// Peers and wire counters count for every node: leaving the legacy
+		// ones out left an all-legacy run with peer stats and oh.json for
+		// the bootnode alone.
 		out, in, ads, drops = append(out, t.Outbound), append(in, t.Inbound), append(ads, t.AdsHeld), append(drops, t.PeerDrops)
 		for _, r := range t.RefillMs {
 			refills = append(refills, int(r))
 		}
 		for _, l := range t.Lookups {
+			if t.Legacy {
+				break
+			}
 			lookups++
 			lat = append(lat, int(l.LatencyMs))
 			if l.HitTarget {
@@ -90,7 +101,19 @@ func Collect(trDir, runDir string, as []assign.Assignment) error {
 			tx, rx, txp, rxp = tx+v["txBytes"], rx+v["rxBytes"], txp+v["txMsgs"], rxp+v["rxMsgs"]
 			bt[k] = v
 		}
-		oh = append(oh, map[string]any{"idx": t.Idx, "id": t.ID, "txBytes": tx, "rxBytes": rx, "txPkts": txp, "rxPkts": rxp, "byType": bt, "ops": t.Ops, "topicLoad": t.TopicLoad})
+		// The per-operation peer lists stay in the traces (checks.py reads them
+		// there); at 25k nodes they made oh.json too large to load.
+		ops := make([]map[string]any, 0, len(t.Ops))
+		for _, op := range t.Ops {
+			o := make(map[string]any, len(op))
+			for k, v := range op {
+				if k != "nodeIds" {
+					o[k] = v
+				}
+			}
+			ops = append(ops, o)
+		}
+		oh = append(oh, map[string]any{"idx": t.Idx, "id": t.ID, "txBytes": tx, "rxBytes": rx, "txPkts": txp, "rxPkts": rxp, "byType": bt, "ops": ops, "topicLoad": t.TopicLoad})
 	}
 	full := 0
 	for _, o := range out {
@@ -174,7 +197,13 @@ func hostSummary(hosts [][]host.Sample) {
 		fmt.Println("hostmetrics: no samples")
 		return
 	}
-	pct := func(v []int, p int) int { sort.Ints(v); return v[(p*(len(v)-1))/100] }
+	pct := func(v []int, p int) int {
+		if len(v) == 0 {
+			return 0
+		}
+		sort.Ints(v)
+		return v[(p*(len(v)-1))/100]
+	}
 	fmt.Printf("hostmetrics: %d samples over %d hosts; node cpu%% p50=%d p95=%d max=%d; rss MB p50=%d p95=%d max=%d; ",
 		samples, len(hosts), pct(cpu, 50), pct(cpu, 95), pct(cpu, 100), pct(rss, 50), pct(rss, 95), pct(rss, 100))
 	if drops > 0 {

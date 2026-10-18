@@ -1,0 +1,67 @@
+# The Grid'5000 run g5k-crawl-25k-6h-realip of 2026-10-06 with the continuous
+# search model instead of the connection model: every node keeps one topic
+# search open and takes every result, with no dialing, so recall shows how much
+# of its topic the search reaches. 25000 nodes over the 100 largest chains of
+# the 2026-09-18 crawl, crawl node addresses, no churn, 50 machines at 500 nodes
+# each, and the search floor at the default, 8.
+# The 6 h variant of g5k-crawl-25k-2h-continuous, for the pair at the length
+# every other 25k Grid'5000 run uses.
+# There are two continuous pairs and they are not the same length. The 2 h one
+# is matched in the repo: g5k-crawl-25k-2h-continuous against
+# g5k-crawl-25k-legacy, both shortened to 2 h together. The 6 h one is matched
+# to data rather than to a file: the plain-discv5 run of 2026-10-12 searched for
+# 6 h, before that scenario was shortened, and this run pairs with it. Use this
+# when the comparison has to sit alongside the 6 h conn pair and the rest of the
+# 25k series; use the 2 h pair when only recall is wanted and the cluster time
+# matters, since TopDisc saturates in seconds and hours 2-6 show steady state
+# rather than recall.
+#   deploy/g5k/g5k.py up scenarios/g5k-crawl-25k-continuous.yaml
+name: g5k-crawl-25k-continuous
+scenario:
+  population:
+    nodes: 25000
+    topics: 100
+    zipf_s: 1.07
+    topic_model: models/crawl-2026-09-18.json
+    addresses: crawl
+    seed: 1
+  network:
+    latency_ms: 30
+    bandwidth_mibps: 100
+    model: regions
+    regions: {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}
+    rtt_table: models/region-rtt.json
+  phases:
+    bootstrap_wait: 180s
+    start_window: 15m
+    register_wait: 22m30s
+    search_stagger: 10ms
+    search_timeout: 6h
+  topic:
+    ad_cache_size: 5000
+  search:
+    model: continuous
+    target_count: 0
+  conn_model:
+    enabled: false
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json
+    home_region: us-east-1
+    verbosity: 2
+    grace: 30s
+  g5k:
+    site: nancy
+    cluster: gros
+    env: debian11-x64-base
+    vnodes_per_machine: 500
+    walltime: "10:00:00"
+  wan:
+    enabled: true
+    delay_min_ms: 4
+    delay_max_ms: 45
+    jitter_ms: 3
+    rate_kbps: 1000
+  traces:
+    host_sample_period: 30s

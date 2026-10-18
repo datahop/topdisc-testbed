@@ -21,8 +21,9 @@ build_push() {
     GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o out/$( [ $c = node ] && echo topdisc-node || echo $c ) ./cmd/$c
   done
   (cd legacy && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o ../out/topdisc-node-legacy ./cmd/node-legacy)
+  (cd legacy && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -modfile=go.fork.mod -tags fork -o ../out/topdisc-node-plain ./cmd/node-legacy)
   cp deploy/inventory-aws.sh out/
-  tar czf out/topdisc-linux-arm64.tgz -C out topdisc-node topdisc-node-legacy hostagent testbed inventory-aws.sh
+  tar czf out/topdisc-linux-arm64.tgz -C out topdisc-node topdisc-node-legacy topdisc-node-plain hostagent testbed inventory-aws.sh
   # The home bucket and a mirror per active region: a private node's S3
   # endpoint only reaches its own region.
   for b in $(terraform -chdir=$TF output -json binaries_buckets | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin).values()))'); do

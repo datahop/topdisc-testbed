@@ -93,3 +93,25 @@ func TestBootnodeNeverChurns(t *testing.T) {
 		}
 	}
 }
+
+// legacy_build fork marks every legacy node, the bootnode included, for the
+// fork-built binary; the stock build marks none.
+func TestLegacyFork(t *testing.T) {
+	cfg := scenario.Default()
+	cfg.Scenario.Population.Nodes = 50
+	cfg.Scenario.Population.LegacyFrac = 1
+	cfg.Scenario.Population.LegacyBootnode = true
+	hosts := func(int) Host { return Host{IP: "10.0.0.1", BasePort: 30300} }
+	for _, build := range []string{"stock", "fork"} {
+		cfg.Scenario.Population.LegacyBuild = build
+		as, err := Generate(cfg, hosts, 0, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range as {
+			if !a.Legacy || a.LegacyFork != (build == "fork") {
+				t.Fatalf("%s: node %d legacy=%v legacy_fork=%v", build, a.Idx, a.Legacy, a.LegacyFork)
+			}
+		}
+	}
+}

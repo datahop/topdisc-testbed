@@ -67,10 +67,11 @@ type Assignment struct {
 	Phases     Phases        `json:"phases"`
 	Search     Search        `json:"search"`
 	Topic      Topic         `json:"topic"`
-	Legacy     bool          `json:"legacy"`     // stock upstream geth, no topic discovery
-	SampleMs   int64         `json:"sample_ms"`  // period of the node's counter/cache samples (series.json); 0 = off
-	Churn      []churn.Event `json:"churn"`      // seconds from search start
-	TraceFile  string        `json:"trace_file"` // where the node writes its trace at StopAt
+	Legacy     bool          `json:"legacy"`                // stock upstream geth, no topic discovery
+	LegacyFork bool          `json:"legacy_fork,omitempty"` // legacy node built on the fork (population.legacy_build fork)
+	SampleMs   int64         `json:"sample_ms"`             // period of the node's counter/cache samples (series.json); 0 = off
+	Churn      []churn.Event `json:"churn"`                 // seconds from search start
+	TraceFile  string        `json:"trace_file"`            // where the node writes its trace at StopAt
 }
 
 // Host describes where a node runs; the backend supplies one per node.
@@ -163,6 +164,7 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 		}
 		if legacy[i] {
 			a.Legacy = true
+			a.LegacyFork = sc.Population.LegacyBuild == "fork"
 		}
 		a.SampleMs = cfg.Testbed.Traces.OverheadSeriesPeriod.Milliseconds()
 		a.Topic = Topic{AdLifetimeMs: sc.Topic.AdLifetime.Milliseconds(), AdCacheSize: sc.Topic.AdCacheSize,

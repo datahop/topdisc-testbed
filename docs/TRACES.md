@@ -56,7 +56,7 @@ Per-searcher record in `results[]`:
 | `uniqueRegistrant`, `foundRegistrantIds[]` | distinct registrants found (the set) |
 | `uniqueFoundAtMs[]`, `uniqueFoundIds[]` | index-aligned: when each distinct registrant was first seen, and which |
 | `searchStartMs` | this searcher's offset from the run's common epoch (registration start) |
-| `timeToFirstNs`, `timeToCompletionNs`, `hitTimeout` | latency and outcome |
+| `timeToFirstNs`, `timeToCompletionNs`, `hitTimeout` | latency and outcome; `timeToFirstNs` is -1 when the searcher found nothing and 0 when its first provider was already in the routing table (older metrics write 0 for both; `uniqueFoundAtMs` tells them apart) |
 | `connectedAtStart`, `alreadyConnectedReg`, `newRegistrant`, `newFoundAtMs[]` | how much was already in the routing table |
 
 `uniqueFoundAtMs` is relative to *that searcher's* start, which is not
@@ -69,6 +69,7 @@ Sampled every `-overhead-series-period`. Small; a few MB.
 
 | Field | Contents | Figures |
 |---|---|---|
+| `startMs` | wall clock (Unix ms) of `tSec` 0, so the phase times in `assignments/` place on the series (real backends) | |
 | `samples[].tSec` | seconds since spawn | 1, 17, 19 |
 | `samples[].txBytes/rxBytes/txMsgs/rxMsgs` | cumulative totals per ID-space bucket (50 buckets) | 17 |
 | `samples[].byType{}` | the same, split by discv5 message type | 19 |
@@ -186,7 +187,7 @@ Real backends add to `metrics.json`:
 
 | Field | Contents |
 |---|---|
-| `results[].lookupQueries`, `results[].lookupContacted` | TOPICQUERY requests sent and distinct nodes queried, per lookup. For a plain-discv5 node `lookupQueries` counts DHT lookups, each 10 to 30 FINDNODE requests, and `lookupContacted` is absent |
+| `results[].lookupQueries`, `results[].lookupContacted` | TOPICQUERY requests sent and distinct nodes queried, per lookup. For a plain-discv5 node built on the fork (`population.legacy_build: fork`) `lookupQueries` is the FINDNODE requests the node sent during the walk, its table refresh included; on the stock build it counts DHT lookups, each 10 to 30 FINDNODE requests. `lookupContacted` is absent for plain nodes |
 | `registrationBucketFullNs{}` | topic hex → registrant → per registration bucket (far to close), ns since registration start when the bucket first held its target number of ads; -1 = never |
 | `registrationCompleteNs{}` | topic hex → registrant → ns when every bucket was full or out of candidates |
 
