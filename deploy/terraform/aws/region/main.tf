@@ -5,9 +5,9 @@
 # results) through the gateway endpoint, need nothing else outside, and talk
 # over the peered VPCs; only the coordinator has a public address, for SSM
 # and the AWS APIs. The coordinator always drives the hostagents over the
-# private addresses. The
-# home region also hosts the coordinator. Created in every supported region;
-# a region with no nodes and no coordinator costs nothing.
+# private addresses. The home region also hosts the coordinator. Created in
+# every supported region; a region with no nodes and no coordinator costs
+# nothing.
 terraform {
   required_providers {
     aws = {
@@ -100,6 +100,10 @@ resource "aws_route" "default" {
   route_table_id         = aws_vpc.tb.main_route_table_id
   destination_cidr_block = "0.0.0.0/0"
   gateway_id             = aws_internet_gateway.igw[0].id
+}
+moved {
+  from = aws_route.private_default
+  to   = aws_route.default
 }
 resource "aws_s3_bucket" "mirror" {
   count         = local.active && !var.coordinator ? 1 : 0
