@@ -42,20 +42,22 @@ resource "aws_iam_role_policy" "s3" {
   name = "topdisc-binaries"
   role = aws_iam_role.ssm.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
-    { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject"], Resource = "${aws_s3_bucket.binaries.arn}/*" },
-    { Effect = "Allow", Action = ["s3:ListBucket"], Resource = aws_s3_bucket.binaries.arn },
+    { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject"], Resource = [for b in local.binaries_arns : "${b}/*"] },
+    { Effect = "Allow", Action = ["s3:ListBucket"], Resource = local.binaries_arns },
   ] })
 }
 
+# Rendered per region (region/main.tf adds region and the binaries location).
 locals {
-  cloud_init = templatefile("${path.module}/../../cloud-init.yaml.tftpl", {
+  # The home bucket and the per-region mirrors of the binaries.
+  binaries_arns = concat([aws_s3_bucket.binaries.arn], [for b in values(local.mirrors) : "arn:aws:s3:::${b}" if b != null])
+  cloud_init_vars = {
     binaries_url     = ""
     binaries_s3      = "s3://${aws_s3_bucket.binaries.id}/topdisc-linux-arm64.tgz"
-    region           = var.home_region
     regions          = join(" ", sort(keys(var.regions)))
-    max_hours        = var.max_hours
+    max_hours        = tostring(var.max_hours)
     coordinator_type = var.coordinator_type
-  })
+  }
 }
 
 # Spending cap. The account budget (deploy/README.md) alerts; the hard stop
@@ -66,7 +68,7 @@ resource "aws_iam_role_policy" "scale_down" {
   name = "topdisc-scale-down"
   role = aws_iam_role.ssm.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
-    { Effect = "Allow", Action = ["autoscaling:UpdateAutoScalingGroup", "autoscaling:SetDesiredCapacity", "autoscaling:DescribeAutoScalingGroups", "ec2:DeleteNatGateway", "ec2:ReleaseAddress", "ec2:DescribeNatGateways", "ec2:DescribeAddresses"], Resource = "*" },
+    { Effect = "Allow", Action = ["autoscaling:UpdateAutoScalingGroup", "autoscaling:SetDesiredCapacity", "autoscaling:DescribeAutoScalingGroups"], Resource = "*" },
     { Effect = "Allow", Action = ["ec2:TerminateInstances"], Resource = "*", Condition = { StringEquals = { "ec2:ResourceTag/role" = "coordinator" } } },
   ] })
 }

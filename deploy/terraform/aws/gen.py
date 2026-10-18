@@ -22,14 +22,18 @@ module "{al(r)}" {{
   spot             = var.spot
   public_ips       = var.public_ips
   instance_profile = aws_iam_instance_profile.ssm.name
-  cloud_init       = local.cloud_init
+  cloud_init_vars  = local.cloud_init_vars
 }}
 ''')
 mods = ", ".join(f"module.{al(r)}" for r in REGIONS)
+mirrors = ", ".join(f'"{r}" = module.{al(r)}.mirror_bucket' for r in REGIONS)
 out.append(f'''locals {{
   supported = {REGIONS!r}
   modules   = [{mods}]
+  mirrors   = {{ {mirrors} }}
 }}
+# Where the binaries go: the home bucket and a mirror per active region.
+output "binaries_buckets" {{ value = merge({{ for r, b in local.mirrors : r => b if b != null }}, {{ (var.home_region) = aws_s3_bucket.binaries.id }}) }}
 output "coordinator_id" {{ value = one([for m in local.modules : m.coordinator_id if m.coordinator_id != null]) }}
 output "coordinator_ip" {{ value = one([for m in local.modules : m.coordinator_ip if m.coordinator_ip != null]) }}
 '''.replace("'", '"'))
