@@ -38,7 +38,7 @@ func Collect(trDir, runDir string, as []assign.Assignment) error {
 	n := len(as)
 	var traces []NodeTrace
 	for i := 0; i < n; i++ {
-		b, err := os.ReadFile(filepath.Join(trDir, fmt.Sprintf("node%d.json", i)))
+		b, err := host.LoadTrace(filepath.Join(trDir, fmt.Sprintf("node%d.json", i)))
 		if err != nil {
 			continue
 		}

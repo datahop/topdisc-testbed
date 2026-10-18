@@ -488,6 +488,11 @@ def e3_renewal_accounting(run, tol):
     tx, rx = totals(run, "REGTOPIC(renewal)/v5")
     if tx == 0:
         return verdict("not-exercised", "no renewals sent")
+    if run.has_churn():
+        # A restarted advertiser sends a fresh REGTOPIC, which a registrar
+        # still holding its ad counts as a renewal; the two sides' counts
+        # cannot match. A1 checks the REGTOPIC totals.
+        return verdict("not-exercised", f"churn: a restarted advertiser's fresh REGTOPIC arrives as a renewal where its ad is still held ({tx} renewals sent, {rx} received); A1 checks the totals")
     loss = (tx - rx) / tx
     limit = tol.loss_churn if run.has_churn() else tol.loss
     note = "; renewals reuse the session, so none are lost to setup" + ("; churn: renewals to departed registrars are lost by design" if run.has_churn() else "")

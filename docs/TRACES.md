@@ -58,6 +58,7 @@ Per-searcher record in `results[]`:
 | `searchStartMs` | this searcher's offset from the run's common epoch (registration start) |
 | `timeToFirstNs`, `timeToCompletionNs`, `hitTimeout` | latency and outcome; `timeToFirstNs` is -1 when the searcher found nothing and 0 when its first provider was already in the routing table (older metrics write 0 for both; `uniqueFoundAtMs` tells them apart) |
 | `connectedAtStart`, `alreadyConnectedReg`, `newRegistrant`, `newFoundAtMs[]` | how much was already in the routing table |
+| `targetOnline`, `uniqueFoundOnline[]` | of `target`, the providers up at the end of the search (equal to `target` without churn); and, index-aligned with `uniqueFoundAtMs`, whether each found provider was up then. Only churn runs write `uniqueFoundOnline`; the paired report scores churn runs against these |
 
 `uniqueFoundAtMs` is relative to *that searcher's* start, which is not
 comparable across searchers; add `searchStartMs` to put it on the same clock as
@@ -219,3 +220,18 @@ From fork tag `v1.17.2-testbed.10` on, for the correctness checks (`figures/chec
 | node trace | `ops[].nodeIds[]` | the distinct nodes an operation asked (up to 4096) |
 | node trace | `lookups[].search.maxTopicPerReply`, `maxAuxPerReply` | the largest TOPICNODES and NODES reply one search received |
 | simnet | `ads.json`, `buckets.json`, `admissions.json` | the same registrar and advertiser state for every in-process node at the end of the run; `admissions.json` only up to 1000 nodes |
+
+## Sessions under churn
+
+Each node trace carries `session: {start_ms, end_ms}`, when that process ran.
+A churn departure sends the node SIGTERM; it writes its trace and exits, and
+the runner parks that file as `node<idx>.s<k>.json` before it restarts the
+node, so no session is lost. The hostagent and the collectors read a churned
+node through one merge (`host.LoadTrace`): counters summed, `lookups`, `ops`
+and `refill_ms` joined, the sample counters of later sessions carried on from
+the earlier totals so the series stays cumulative, the dialer's finds of every
+session kept, and `sessions[]` listing every process. A node that never
+returned has only parked files; they merge the same way. In `series.json`
+each node's last sample is carried over the slots up to its next one or the
+end of the run, so a node that is away keeps its total in the cumulative
+network series and the node count per slot stays the population.
