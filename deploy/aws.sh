@@ -56,6 +56,18 @@ cost_guard() {
   ceiling=$(echo "$out" | sed -n 's/^CEILING //p')
   python3 -c "import sys; sys.exit(0 if $ceiling <= $MAX_SPEND else 1)" || { echo "refusing: the ceiling is over MAX_SPEND; lower MAX_HOURS or the fleet, or raise MAX_SPEND knowingly"; exit 1; }
 }
+# An instance can sit in "pending" for good while the group counts it as
+# capacity; once terminated, the group launches a replacement within minutes.
+stuck_hosts() {
+  cut=$(python3 -c 'import datetime; print((datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S"))')
+  for r in $(echo "$1" | python3 -c 'import json,sys; print(" ".join(r for r,n in json.load(sys.stdin).items() if n>0))'); do
+    ids=$(aws ec2 describe-instances --region "$r" --filters Name=tag:aws:autoscaling:groupName,Values=topdisc-nodes Name=instance-state-name,Values=pending \
+      --query 'Reservations[].Instances[].[InstanceId,LaunchTime]' --output text | awk -v c="$cut" '$2 < c {print $1}')
+    [ -n "$ids" ] || continue
+    echo "$r: terminating $(echo $ids | wc -w) instance(s) stuck in pending for over 5 min, the group replaces them: $(echo $ids | tr '\n' ' ')"
+    aws ec2 terminate-instances --region "$r" --instance-ids $ids > /dev/null || true
+  done
+}
 # Prices the fleet as launched (types per region from EC2) against the
 # expected cost. Returns 2 when short or over FLEET_TOLERANCE; the caller
 # decides whether that stops the run.
@@ -166,6 +178,7 @@ case "$1" in
       have=$(ssm_run "cd /opt/topdisc && python3 -c 'import json; print(len(json.load(open(\"inventory.json\"))[\"hosts\"]))'" 2>/dev/null)
       [ "${have:-0}" -ge "$want" ] && break
       echo "fleet: ${have:-0} of $want hosts running; waiting"; sleep 30
+      [ $i -ge 10 ] && stuck_hosts "$regions"
     done
     # The group fills from whatever pools have capacity, so price what came up
     # before the nodes start; the operator chooses whether a dear fleet runs.
