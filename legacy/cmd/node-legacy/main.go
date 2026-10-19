@@ -325,13 +325,13 @@ func main() {
 						return
 					}
 					time.Sleep(time.Until(t))
-					rec(randomWalk(disc, cost, isProvider, asg.Search.TargetCount, timeout, deadline, nil, 0, 0))
+					rec(randomWalk(disc, cost, isProvider, asg.Search.TargetCount, timeout, deadline))
 				}
 				return
 			}
 			// continuous: one walk for the whole phase, reported as a single lookup.
 			set := func(l lookup) { mu.Lock(); lookups = []lookup{l}; mu.Unlock() }
-			set(randomWalk(disc, cost, isProvider, 0, 0, deadline, set, asg.Search.InitialResults, time.Duration(asg.Search.ResultIntervalMs)*time.Millisecond))
+			set(walkIterator(disc, cost, isProvider, deadline, set, asg.Search.InitialResults, time.Duration(asg.Search.ResultIntervalMs)*time.Millisecond))
 		}()
 	}
 	writeTrace := func() {
@@ -382,15 +382,15 @@ func main() {
 	srv.Stop()
 }
 
-// randomWalk is what a topic-unaware client can do to find providers: check
-// the nodes it already knows, then run random-target Kademlia lookups (each
+// randomWalk is one scheduled probe of a topic-unaware client: check the
+// nodes it already knows, then run random-target Kademlia lookups (each
 // costs real FINDNODE traffic) until target providers are seen, the timeout
-// or the deadline. progress, if set, gets the lookup so far after each round.
-// cost, if set, reads the node's FINDNODE requests sent so far.
+// or the deadline. cost, if set, reads the node's FINDNODE requests sent so
+// far.
 func randomWalk(disc interface {
 	AllNodes() []*enode.Node
 	Lookup(enode.ID) []*enode.Node
-}, cost func() int64, isProvider func(*enode.Node) bool, target int, timeout time.Duration, deadline time.Time, progress func(lookup), initial int, interval time.Duration) lookup {
+}, cost func() int64, isProvider func(*enode.Node) bool, target int, timeout time.Duration, deadline time.Time) lookup {
 	start := time.Now()
 	stop := deadline
 	if timeout > 0 && start.Add(timeout).Before(stop) {
@@ -405,7 +405,6 @@ func randomWalk(disc interface {
 	if cost != nil {
 		sent0 = cost()
 	}
-	var paceStart time.Time
 	add := func(nodes []*enode.Node) bool {
 		for _, n := range nodes {
 			if !isProvider(n) {
@@ -420,8 +419,6 @@ func randomWalk(disc interface {
 		return target > 0 && len(seen) >= target
 	}
 	done := func(hit bool) lookup {
-		// Capacity-capped so the walk's later appends never land in a snapshot
-		// a progress callback already holds.
 		f := order[:len(order):len(order)]
 		q := rounds
 		if cost != nil {
@@ -445,24 +442,83 @@ func randomWalk(disc interface {
 			if add(nodes) {
 				return done(true)
 			}
-			if progress != nil {
-				progress(done(false))
-			}
-			if over := len(seen) - initial; interval > 0 && over > 0 {
-				if paceStart.IsZero() {
-					paceStart = time.Now()
-				}
-				select {
-				case <-time.After(time.Until(paceStart.Add(time.Duration(over) * interval))):
-				case <-time.After(time.Until(stop)):
-					return done(false)
-				}
-			}
 		case <-time.After(time.Until(stop)):
 			return done(false)
 		}
 	}
 	return done(false)
+}
+
+// walkIterator is the continuous search of a topic-unaware client: check the
+// nodes it already knows, then read the discovery random walk the way a
+// dialer does, checking every record the walk yields, until the deadline. A
+// finished lookup only returns the nodes closest to its target; the walk
+// iterator yields every new node each reply carried, so it sees far more of
+// the network per request. progress, if set, gets the lookup so far whenever
+// a provider is added. cost, if set, reads the node's FINDNODE requests sent
+// so far; without it the request count is not reported. After initial
+// providers, the walk is paced to one new provider per interval.
+func walkIterator(disc interface {
+	AllNodes() []*enode.Node
+	RandomNodes() enode.Iterator
+}, cost func() int64, isProvider func(*enode.Node) bool, deadline time.Time, progress func(lookup), initial int, interval time.Duration) lookup {
+	start := time.Now()
+	seen := map[enode.ID]struct{}{}
+	var order []found
+	var sent0 int64
+	if cost != nil {
+		sent0 = cost()
+	}
+	add := func(n *enode.Node) bool {
+		if n == nil || !isProvider(n) {
+			return false
+		}
+		if _, dup := seen[n.ID()]; dup {
+			return false
+		}
+		seen[n.ID()] = struct{}{}
+		order = append(order, found{ID: n.ID().String(), AtMs: time.Since(start).Milliseconds()})
+		return true
+	}
+	snap := func() lookup {
+		// Capacity-capped so later appends never land in a snapshot a
+		// progress callback already holds.
+		f := order[:len(order):len(order)]
+		q := -1
+		if cost != nil {
+			q = int(cost() - sent0)
+		}
+		return lookup{StartMs: start.UnixMilli(), LatencyMs: time.Since(start).Milliseconds(), Results: len(seen), Found: f, Queries: q, Contacted: -1}
+	}
+	for _, n := range disc.AllNodes() {
+		add(n)
+	}
+	if progress != nil && len(order) > 0 {
+		progress(snap())
+	}
+	it := disc.RandomNodes()
+	stop := time.AfterFunc(time.Until(deadline), it.Close)
+	defer stop.Stop()
+	var paceStart time.Time
+	for it.Next() {
+		if !add(it.Node()) {
+			continue
+		}
+		if progress != nil {
+			progress(snap())
+		}
+		if over := len(seen) - initial; interval > 0 && over > 0 {
+			if paceStart.IsZero() {
+				paceStart = time.Now()
+			}
+			select {
+			case <-time.After(time.Until(paceStart.Add(time.Duration(over) * interval))):
+			case <-time.After(time.Until(deadline)):
+				it.Close()
+			}
+		}
+	}
+	return snap()
 }
 
 var _ enr.Entry = svcEntry(0)
