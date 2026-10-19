@@ -80,11 +80,18 @@ ssm_wait() {
   for i in $(seq 1 60); do
     st=$(aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$(tfout coordinator_id)" \
          --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null)
-    [ "$st" = Online ] && return 0
+    [ "$st" = Online ] && break
     [ $i -eq 1 ] && echo "waiting for the coordinator to register with SSM"
     sleep 10
   done
-  echo "coordinator never registered with SSM"; return 1
+  [ "$st" = Online ] || { echo "coordinator never registered with SSM"; return 1; }
+  # SSM answers before cloud-init has fetched the binaries: wait for those too.
+  for i in $(seq 1 60); do
+    ssm_run "cloud-init status --wait >/dev/null 2>&1; test -x /opt/topdisc/inventory-aws.sh" >/dev/null 2>&1 && return 0
+    [ $i -eq 1 ] && echo "waiting for the coordinator's cloud-init to finish"
+    sleep 10
+  done
+  echo "coordinator never finished cloud-init"; return 1
 }
 # One t4g node is 2 vCPUs; a fleet above the region's vCPU quota comes up
 # short and the coordinator then refuses the inventory. Check first.
@@ -155,7 +162,8 @@ case "$1" in
     home=$(echo "$fleet" | python3 -c 'import json,sys; print(json.load(sys.stdin)["home_region"])')
     want=$(echo "$regions" | python3 -c 'import json,sys; print(sum(json.load(sys.stdin).values()))')
     for i in $(seq 1 50); do
-      ssm_run "cd /opt/topdisc && aws s3 cp s3://$(tfout binaries_bucket)/scenario.yaml scenario.yaml && aws s3 cp --recursive --only-show-errors s3://$(tfout binaries_bucket)/models models && ./inventory-aws.sh && rm -f run.out"
+      ssm_run "cd /opt/topdisc && aws s3 cp s3://$(tfout binaries_bucket)/scenario.yaml scenario.yaml && aws s3 cp --recursive --only-show-errors s3://$(tfout binaries_bucket)/models models && ./inventory-aws.sh && rm -f run.out" \
+        || { echo "inventory failed on the coordinator; retrying"; sleep 30; continue; }
       have=$(ssm_run "cd /opt/topdisc && python3 -c 'import json; print(len(json.load(open(\"inventory.json\"))[\"hosts\"]))'" 2>/dev/null)
       [ "${have:-0}" -ge "$want" ] && break
       echo "fleet: ${have:-0} of $want hosts running; waiting"; sleep 30

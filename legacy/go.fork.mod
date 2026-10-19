@@ -30,4 +30,4 @@ require (
 	golang.org/x/sys v0.41.0 // indirect
 )
 
-replace github.com/ethereum/go-ethereum => github.com/datahop/go-ethereum v1.17.2-testbed.15
+replace github.com/ethereum/go-ethereum => github.com/datahop/go-ethereum v1.17.2-testbed.16
