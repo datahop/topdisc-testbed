@@ -1,11 +1,16 @@
 #!/bin/sh
 # AWS driver: build the binaries, provision, push, run, collect, tear down.
 #   deploy/aws.sh up <scenario> [tf args]  terraform apply sized from the scenario + build + push to S3 (e.g. -var spot=true)
-#                                          refuses if nodes x on-demand price x MAX_HOURS (6) > MAX_SPEND ($200)
+#                                          refuses if the fleet's cost ceiling over MAX_HOURS (6) > MAX_SPEND ($200);
+#                                          the ceiling prices every node on the dearest instance type the
+#                                          autoscaling group may fall back to, plus volumes and a traffic allowance
 #   deploy/aws.sh push                  rebuild and re-push the binaries only
 #   deploy/aws.sh run scenarios/x.yaml  run it on the coordinator, wait, pull the results, then destroy everything
 #                                       up and run destroy on any failure or interrupt too (a failed run is pulled first);
-#                                       only a failed pull keeps the deployment; KEEP=1 keeps it always
+#                                       only a failed pull keeps the deployment; KEEP=1 keeps it always.
+#                                       Once the fleet is up it is priced as launched: a fleet short or more than
+#                                       FLEET_TOLERANCE (10 %) over the expected cost prints a warning and goes
+#                                       on; FLEET_STRICT=1 destroys it instead
 #   deploy/aws.sh check                 list what is still running in every region (instances, NAT gateways, elastic IPs)
 #   deploy/aws.sh pull                  fetch the latest run directory into runs/ (the coordinator saves every run to the bucket)
 #   deploy/aws.sh ssh                   shell on the coordinator (SSM)
@@ -33,18 +38,39 @@ build_push() {
 
 MAX_SPEND=${MAX_SPEND:-200}
 MAX_HOURS=${MAX_HOURS:-6}
-# On-demand us-east-1 prices, $/h: nodes on t4g.nano, coordinator m7g.large,
-# a public IPv4 per instance with public_ips. Spot is cheaper, so this is
-# conservative.
+# The node instance types the autoscaling group may launch, cheapest first:
+# an instance_types override in the terraform args, else the variable's default.
+instance_types() {
+  for a in "$@"; do case "$a" in *instance_types=*) echo "$a" | sed 's/.*instance_types=//' | tr -d '[]" '; return;; esac; done
+  python3 -c 'import re,sys; print(",".join(re.findall(r"\"([^\"]+)\"", re.search(r"variable \"instance_types\".*?default\s*=\s*\[(.*?)\]", open(sys.argv[1]).read(), re.S).group(1))))' $TF/variables.tf
+}
+# On-demand prices per region (deploy/aws-cost.py): the expected cost puts
+# every node on the first type, the ceiling on the dearest one the group can
+# fall back to when a pool runs dry, both with volumes, the coordinator and a
+# cross-region traffic allowance. The ceiling is what MAX_SPEND caps. Spot is
+# cheaper, so on-demand is conservative.
 cost_guard() {
-  est=$(echo "$1" | python3 -c '
+  out=$(python3 deploy/aws-cost.py estimate "$1" "$2" "$3" "$(instance_types "$4")" "$MAX_HOURS") || exit 1
+  echo "$out" | grep -v '^CEILING'
+  echo "cap: MAX_SPEND=\$$MAX_SPEND over MAX_HOURS=$MAX_HOURS h; the coordinator scales the fleet to zero after $MAX_HOURS h"
+  ceiling=$(echo "$out" | sed -n 's/^CEILING //p')
+  python3 -c "import sys; sys.exit(0 if $ceiling <= $MAX_SPEND else 1)" || { echo "refusing: the ceiling is over MAX_SPEND; lower MAX_HOURS or the fleet, or raise MAX_SPEND knowingly"; exit 1; }
+}
+# Prices the fleet as launched (types per region from EC2) against the
+# expected cost. Returns 2 when short or over FLEET_TOLERANCE; the caller
+# decides whether that stops the run.
+fleet_guard() {
+  mix=$(for r in $(echo "$1" | python3 -c 'import json,sys; print(" ".join(r for r,n in json.load(sys.stdin).items() if n>0))'); do
+    aws ec2 describe-instances --region "$r" --filters Name=tag:aws:autoscaling:groupName,Values=topdisc-nodes Name=instance-state-name,Values=running \
+      --query 'Reservations[].Instances[].InstanceType' --output text | tr '\t' '\n' | sed "s/^/$r /"
+  done | python3 -c '
 import json,sys
-f=json.load(sys.stdin); n=sum(f.values()); active=sum(1 for v in f.values() if v>0)
-pub=sys.argv[1]=="true"
-print(round(n*0.0042 + 0.0816 + ((n+1)*0.005 if pub else 0), 2))' "$2")
-  total=$(python3 -c "print(round($est*$MAX_HOURS,2))")
-  echo "estimated: \$$est/h on-demand, \$$total over MAX_HOURS=$MAX_HOURS (cap \$$MAX_SPEND); the coordinator scales the fleet to zero after $MAX_HOURS h"
-  python3 -c "import sys; sys.exit(0 if $total <= $MAX_SPEND else 1)" || { echo "refusing: over MAX_SPEND; lower MAX_HOURS or the fleet"; exit 1; }
+m={}
+for ln in sys.stdin:
+    p=ln.split()
+    if len(p)==2: m.setdefault(p[0],{}); m[p[0]][p[1]]=m[p[0]].get(p[1],0)+1
+print(json.dumps(m))')
+  python3 deploy/aws-cost.py fleet "$1" "$2" "$(instance_types)" "$mix"
 }
 
 # Runs a command on the coordinator through SSM and prints its output.
@@ -106,7 +132,7 @@ case "$1" in
     home=$(echo "$fleet" | python3 -c 'import json,sys; print(json.load(sys.stdin)["home_region"])')
     pub=$(echo "$fleet" | python3 -c 'import json,sys; print(str(json.load(sys.stdin).get("public_ips", False)).lower())')
     echo "fleet: $regions, home $home, public IPs $pub"
-    cost_guard "$regions" "$pub"
+    cost_guard "$regions" "$home" "$pub" "$*"
     quota_guard "$regions" "$home" "$@"
     terraform -chdir=$TF init -input=false >/dev/null
     terraform -chdir=$TF apply -auto-approve -input=false -var "regions=$regions" -var "home_region=$home" \
@@ -124,13 +150,22 @@ case "$1" in
     ssm_wait
     # Autoscaling groups fill over several minutes: list the fleet until it holds
     # every node of the scenario (25 min at most), so the run does not start short.
-    want=$(go run ./cmd/testbed fleet "$2" | python3 -c 'import json,sys; print(sum(json.load(sys.stdin)["regions"].values()))')
+    fleet=$(go run ./cmd/testbed fleet "$2")
+    regions=$(echo "$fleet" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["regions"]))')
+    home=$(echo "$fleet" | python3 -c 'import json,sys; print(json.load(sys.stdin)["home_region"])')
+    want=$(echo "$regions" | python3 -c 'import json,sys; print(sum(json.load(sys.stdin).values()))')
     for i in $(seq 1 50); do
       ssm_run "cd /opt/topdisc && aws s3 cp s3://$(tfout binaries_bucket)/scenario.yaml scenario.yaml && aws s3 cp --recursive --only-show-errors s3://$(tfout binaries_bucket)/models models && ./inventory-aws.sh && rm -f run.out"
       have=$(ssm_run "cd /opt/topdisc && python3 -c 'import json; print(len(json.load(open(\"inventory.json\"))[\"hosts\"]))'" 2>/dev/null)
       [ "${have:-0}" -ge "$want" ] && break
       echo "fleet: ${have:-0} of $want hosts running; waiting"; sleep 30
     done
+    # The group fills from whatever pools have capacity, so price what came up
+    # before the nodes start; the operator chooses whether a dear fleet runs.
+    fleet_guard "$regions" "$home" || {
+      if [ -n "$FLEET_STRICT" ]; then echo "stopping: FLEET_STRICT is set; destroying"; exit 1; fi
+      echo "continuing with the fleet as launched (FLEET_STRICT=1 stops here instead)"
+    }
     # The coordinator saves the run to the bucket itself, so a laptop that is
     # away at the end loses nothing; pull then only downloads.
     ssm_send "cd /opt/topdisc && setsid sh -c './testbed scenario.yaml > run.out 2>&1; rc=\$?; ./save-runs.sh >> run.out 2>&1; echo RUN-EXIT \$rc >> run.out' > /dev/null 2>&1 < /dev/null &"
