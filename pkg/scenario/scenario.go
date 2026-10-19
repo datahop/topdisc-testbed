@@ -98,7 +98,13 @@ type PopulationConfig struct {
 	LegacyFrac     float64 `yaml:"legacy_frac"`
 	LegacyBootnode bool    `yaml:"legacy_bootnode"`
 	LegacyBuild    string  `yaml:"legacy_build"`
-	VanillaFrac    float64 `yaml:"vanilla_frac"`
+	// BootstrapSample gives every node, besides the bootnode, this many
+	// bootstrap records drawn from nodes that started earlier, as a client
+	// joining a live network seeds its table from long-lived peers. With 0
+	// every node bootstraps from node 0 alone, and the first nodes up end
+	// in every routing table.
+	BootstrapSample int     `yaml:"bootstrap_sample"`
+	VanillaFrac     float64 `yaml:"vanilla_frac"`
 }
 
 // NetworkConfig: the emulated WAN conditions.

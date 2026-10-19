@@ -138,13 +138,18 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 	}
 	searchAt := registerAt + regSpan + ph.RegisterWait.Milliseconds()
 	stopAt := searchAt + ph.SearchTimeout.Milliseconds()
-	// Node 0 is the bootnode for everyone.
-	h0 := hosts(0)
-	bootIP := h0.IP
-	if h0.ExtIP != "" {
-		bootIP = h0.ExtIP
+	// Node 0 is the bootnode for everyone; bootstrap_sample adds earlier
+	// starters to it.
+	nodeURL := func(i int) string {
+		h := hosts(i)
+		ip := h.IP
+		if h.ExtIP != "" {
+			ip = h.ExtIP
+		}
+		return fmt.Sprintf("enode://%s@%s:%d", hex.EncodeToString(crypto.FromECDSAPub(&keys[i].PublicKey)[1:]), ip, h.BasePort)
 	}
-	boot := fmt.Sprintf("enode://%s@%s:%d", hex.EncodeToString(crypto.FromECDSAPub(&keys[0].PublicKey)[1:]), bootIP, h0.BasePort)
+	boot := nodeURL(0)
+	bootRng := rand.New(rand.NewSource(sc.Population.Seed + 104729))
 	legacy := legacySet(rng, topics, sc.Population.LegacyFrac)
 	if !sc.Population.LegacyBootnode {
 		legacy[0] = false
@@ -160,7 +165,7 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 				InitialResults: sc.Search.InitialResults, ResultIntervalMs: sc.Search.ResultInterval.Milliseconds()},
 		}
 		if i != 0 {
-			a.Bootnodes = []string{boot}
+			a.Bootnodes = append([]string{boot}, bootstrapSample(bootRng, startOff, i, sc.Population.BootstrapSample, nodeURL)...)
 		}
 		if legacy[i] {
 			a.Legacy = true
@@ -351,6 +356,29 @@ func (z *Zipf) Draw(rng *rand.Rand) int {
 // the run's start), ascending by node index so the bootnode (node 0) starts
 // first. A node registers bootstrap_wait after its start, so the same offsets
 // spread registrations and ad expiries. A zero window starts everyone at once.
+// bootstrapSettle is how long a node must have been up before it serves as
+// a bootstrap record for a later one: enough to have answered the bootnode
+// and hold a table of its own.
+const bootstrapSettle = 30 * time.Second
+
+// bootstrapSample draws up to k distinct nodes that started at least
+// bootstrapSettle before node i. Start offsets ascend with the index, so the
+// candidates are a prefix of the indices below i, without the bootnode.
+func bootstrapSample(rng *rand.Rand, startOff []int64, i, k int, url func(int) string) []string {
+	if k <= 0 {
+		return nil
+	}
+	cut := sort.Search(i, func(j int) bool { return startOff[j]+bootstrapSettle.Milliseconds() > startOff[i] })
+	if cut <= 1 {
+		return nil
+	}
+	var out []string
+	for _, j := range rng.Perm(cut - 1)[:min(k, cut-1)] {
+		out = append(out, url(j+1))
+	}
+	return out
+}
+
 func StartOffsets(seed int64, n int, window time.Duration) []int64 {
 	o := sortedUniform(seed+7919, n, window)
 	if n > 0 {

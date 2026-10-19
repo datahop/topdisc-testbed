@@ -41,7 +41,7 @@ MAX_HOURS=${MAX_HOURS:-6}
 # The node instance types the autoscaling group may launch, cheapest first:
 # an instance_types override in the terraform args, else the variable's default.
 instance_types() {
-  for a in "$@"; do case "$a" in *instance_types=*) echo "$a" | sed 's/.*instance_types=//' | tr -d '[]" '; return;; esac; done
+  for a in "$@"; do case "$a" in *instance_types=*) echo "$a" | sed 's/.*instance_types=//; s/ .*//' | tr -d '[]"'; return;; esac; done
   python3 -c 'import re,sys; print(",".join(re.findall(r"\"([^\"]+)\"", re.search(r"variable \"instance_types\".*?default\s*=\s*\[(.*?)\]", open(sys.argv[1]).read(), re.S).group(1))))' $TF/variables.tf
 }
 # On-demand prices per region (deploy/aws-cost.py): the expected cost puts
@@ -50,7 +50,7 @@ instance_types() {
 # cross-region traffic allowance. The ceiling is what MAX_SPEND caps. Spot is
 # cheaper, so on-demand is conservative.
 cost_guard() {
-  out=$(python3 deploy/aws-cost.py estimate "$1" "$2" "$3" "$(instance_types "$4")" "$MAX_HOURS") || exit 1
+  out=$(python3 deploy/aws-cost.py estimate "$1" "$2" "$3" "$(instance_types "$4")" "$MAX_HOURS" $4) || exit 1
   echo "$out" | grep -v '^CEILING'
   echo "cap: MAX_SPEND=\$$MAX_SPEND over MAX_HOURS=$MAX_HOURS h; the coordinator scales the fleet to zero after $MAX_HOURS h"
   ceiling=$(echo "$out" | sed -n 's/^CEILING //p')
@@ -132,6 +132,13 @@ case "$1" in
     home=$(echo "$fleet" | python3 -c 'import json,sys; print(json.load(sys.stdin)["home_region"])')
     pub=$(echo "$fleet" | python3 -c 'import json,sys; print(str(json.load(sys.stdin).get("public_ips", False)).lower())')
     echo "fleet: $regions, home $home, public IPs $pub"
+    # The coordinator holds every trace while it aggregates: 7,500 nodes
+    # overflowed 8 GB. Size it by the fleet unless the args say otherwise.
+    case "$*" in *coordinator_type=*) ;; *)
+      n=$(echo "$regions" | python3 -c 'import json,sys; print(sum(json.load(sys.stdin).values()))')
+      ct=m7g.large; [ "$n" -ge 4000 ] && ct=m7g.xlarge; [ "$n" -ge 8000 ] && ct=m7g.2xlarge
+      set -- "$@" -var "coordinator_type=$ct"; echo "coordinator: $ct for $n nodes" ;;
+    esac
     cost_guard "$regions" "$home" "$pub" "$*"
     quota_guard "$regions" "$home" "$@"
     terraform -chdir=$TF init -input=false >/dev/null

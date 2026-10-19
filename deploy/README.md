@@ -65,7 +65,13 @@ node-hour at $0.02/GB. Once the fleet is up, `deploy/aws.sh run` prices it as
 launched: a fleet that is short or more than `FLEET_TOLERANCE` (10 %) over the
 expected cost prints a warning and goes on, or is destroyed with
 `FLEET_STRICT=1`. A nano-only `instance_types` keeps the ceiling equal to the
-expectation at the price of a short fleet when nano runs out. The account has a $200 monthly
+expectation at the price of a short fleet when nano runs out. The coordinator
+holds every trace while it aggregates, and 7,500 nodes overflowed the 8 GB of
+an m7g.large, so `up` picks m7g.xlarge from 4,000 nodes and m7g.2xlarge from
+8,000 unless the args name a `coordinator_type`; traces that fail to fetch at
+the end get a slower second pass before the run gives them up. Hosts set
+`net.core.rmem_default` to 4 MB so a busy registrar's UDP socket does not
+drop under the default 208 kB buffer, which 15 hosts hit on 2026-10-18. The account has a $200 monthly
 budget `topdisc-testbed` with e-mail alerts (set once with `aws budgets
 create-budget`, outside Terraform so a destroy does not remove it); and the
 coordinator scales every region's autoscaling group to zero `max_hours` after

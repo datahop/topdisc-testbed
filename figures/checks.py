@@ -643,12 +643,18 @@ def i2_base_discovery(run, tol):
         return verdict("not-exercised", "no legacy nodes in the run")
     if not run.traces:
         return verdict("needs-data", "legacy lookups only on real backends")
+    members = {}
+    for i, t in run.topic_of.items():
+        members[t] = members.get(t, 0) + 1
+    # a node alone in its topic has no provider to find
+    alone = [i for i in leg if members.get(run.topic_of.get(i), 0) <= 1]
     found = {i: sum(lk.get("results", 0) for lk in run.traces[i].get("lookups") or [])
-             + len((run.traces[i].get("conn") or {}).get("found") or []) for i in leg if i in run.traces}
+             + len((run.traces[i].get("conn") or {}).get("found") or []) for i in leg if i in run.traces and i not in alone}
     if not found:
         return verdict("needs-data", "no traces from legacy nodes")
     none = [i for i, n in found.items() if n == 0]
-    return pf(none, f"every legacy node found providers ({len(found)} nodes)", f"{len(none)} of {len(found)} legacy nodes found nothing", offenders=none[:10])
+    skipped = f", {len(alone)} alone in their topic skipped" if alone else ""
+    return pf(none, f"every legacy node found providers ({len(found)} nodes{skipped})", f"{len(none)} of {len(found)} legacy nodes found nothing{skipped}", offenders=none[:10])
 
 
 # ----------------------------------------------------------- load and validity
@@ -748,8 +754,8 @@ def h2_complete_collection(run, tol):
 def h3_hosts_under_load(run, tol):
     if not run.host:
         return verdict("needs-data", "no host metrics")
-    cpu = [ns["cpu_pct"] for h in run.host for s in h for ns in s.get("nodes", [])]
-    rss = [ns["rss_mb"] for h in run.host for s in h for ns in s.get("nodes", [])]
+    cpu = [ns["cpu_pct"] for h in run.host for s in h for ns in s.get("nodes") or []]
+    rss = [ns["rss_mb"] for h in run.host for s in h for ns in s.get("nodes") or []]
     lowmem = min((s["mem_avail_mb"] for h in run.host for s in h if s.get("mem_avail_mb")), default=None)
     if not cpu:
         return verdict("needs-data", "no node samples in host metrics")
