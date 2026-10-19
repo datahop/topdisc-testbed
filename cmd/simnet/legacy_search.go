@@ -1,18 +1,20 @@
 package main
 
 import (
-	crand "crypto/rand"
 	"time"
 
+	"github.com/ethereum/go-ethereum/p2p/discover"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 )
 
 // runLegacyWalker is the search of a node without TopDisc, as in
 // legacy/cmd/node-legacy on the real backends: check the nodes it already
-// knows, then run random-target Kademlia lookups until the deadline, keeping
-// every node that provides the topic. A provider is any node of the topic,
-// TopDisc or not; on the real backends this is the node's "svc" record entry.
-// TargetCount, if set, ends the walk early.
+// knows, then read the discovery random walk the way a dialer does until the
+// deadline, keeping every node that provides the topic. The walk iterator
+// yields every new record each reply carries; a finished lookup would only
+// return the nodes closest to its target. A provider is any node of the
+// topic, TopDisc or not; on the real backends this is the node's "svc" record
+// entry. TargetCount, if set, ends the walk early.
 func runLegacyWalker(n nodeRec, topicIdx int, deadlineAt time.Time, pacing searchPacing,
 	providers map[enode.ID]struct{}, stats *liveStats) searchResult {
 	self := n.ln.ID()
@@ -67,7 +69,7 @@ func runLegacyWalker(n nodeRec, topicIdx int, deadlineAt time.Time, pacing searc
 	done := func() bool { return pacing.TargetCount > 0 && len(seen) >= pacing.TargetCount }
 
 	add(disc.AllNodes())
-	rounds := 0
+	var queries int64 // FINDNODE requests sent while the walk ran
 	for !done() && time.Now().Before(deadlineAt) {
 		select {
 		case <-stopSearches:
@@ -80,16 +82,7 @@ func runLegacyWalker(n nodeRec, topicIdx int, deadlineAt time.Time, pacing searc
 			time.Sleep(time.Second)
 			continue
 		}
-		var tgt enode.ID
-		crand.Read(tgt[:])
-		rounds++ // counted when sent, so a lookup cut off by the deadline still counts
-		out := make(chan []*enode.Node, 1)
-		go func() { out <- d.Lookup(tgt) }()
-		select {
-		case nodes := <-out:
-			add(nodes)
-		case <-time.After(time.Until(deadlineAt)):
-		}
+		queries += readWalk(d, n.idx, deadlineAt, add, done)
 	}
 	res.UniqueRegistrant = len(seen)
 	res.Found = res.FoundRegistrant
@@ -101,7 +94,40 @@ func runLegacyWalker(n nodeRec, topicIdx int, deadlineAt time.Time, pacing searc
 	}
 	res.LookupLatencyMs = []int64{res.TimeToCompletion.Milliseconds()}
 	res.LookupResults = []int{len(seen)}
-	res.LookupQueries = []int{rounds}
-	res.SearchQueries = rounds
+	res.LookupQueries = []int{int(queries)}
+	res.SearchQueries = int(queries)
 	return res
+}
+
+// readWalk reads d's random walk until the deadline, a stop, done, or the
+// node's live discovery changing under churn, and returns the FINDNODE
+// requests d sent meanwhile.
+func readWalk(d *discover.UDPv5, idx int, deadline time.Time, add func([]*enode.Node), done func() bool) int64 {
+	sent0 := d.WireStats()["FINDNODE/v5"].TxMsgs
+	it := d.RandomNodes()
+	over := make(chan struct{})
+	defer close(over)
+	go func() {
+		t := time.NewTicker(time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-over:
+				return
+			case <-stopSearches:
+			case <-time.After(time.Until(deadline)):
+			case <-t.C:
+				if currentDisc(idx) == d {
+					continue
+				}
+			}
+			it.Close()
+			return
+		}
+	}()
+	for !done() && it.Next() {
+		add([]*enode.Node{it.Node()})
+	}
+	it.Close()
+	return d.WireStats()["FINDNODE/v5"].TxMsgs - sent0
 }
