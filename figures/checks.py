@@ -493,11 +493,19 @@ def e3_renewal_accounting(run, tol):
         # still holding its ad counts as a renewal; the two sides' counts
         # cannot match. A1 checks the REGTOPIC totals.
         return verdict("not-exercised", f"churn: a restarted advertiser's fresh REGTOPIC arrives as a renewal where its ad is still held ({tx} renewals sent, {rx} received); A1 checks the totals")
-    loss = (tx - rx) / tx
-    limit = tol.loss_churn if run.has_churn() else tol.loss
-    note = "; renewals reuse the session, so none are lost to setup" + ("; churn: renewals to departed registrars are lost by design" if run.has_churn() else "")
-    return pf(abs(loss) > limit, f"renewals: {tx} sent, {rx} received ({loss:+.2%}{note})",
-              f"renewals: {tx} sent, {rx} received ({loss:+.2%}, tolerance {limit:.0%}{note})", sent=tx, received=rx, loss=loss)
+    # A renewal to a registrar whose session was evicted since the last
+    # registration goes out as an undecryptable packet first and is repeated
+    # after WHOAREYOU: the sender counts two, the receiver one. At 7,500
+    # nodes a third of the renewals paid that; allow the run's own share of
+    # requests that set up a session, plus the tolerance.
+    setups = totals(run, "SESSION-SETUP(undecryptable)")[1]
+    all_tx = sum(totals(run, t)[0] for t in REQUESTS)
+    rate = setups / all_tx if all_tx else 0
+    gap = (tx - rx) / tx
+    limit = rate + tol.loss
+    note = f"; {rate:.0%} of all requests paid a session setup, which the sender counts twice"
+    return pf(gap > limit or -gap > tol.loss, f"renewals: {tx} sent, {rx} received ({gap:+.2%}, within the session-setup share{note})",
+              f"renewals: {tx} sent, {rx} received ({gap:+.2%}, above the session-setup share plus tolerance {limit:.0%}{note})", sent=tx, received=rx, session_setups=setups, limit=limit)
 
 
 # ----------------------------------------------------------------------- search
@@ -643,12 +651,18 @@ def i2_base_discovery(run, tol):
         return verdict("not-exercised", "no legacy nodes in the run")
     if not run.traces:
         return verdict("needs-data", "legacy lookups only on real backends")
+    members = {}
+    for i, t in run.topic_of.items():
+        members[t] = members.get(t, 0) + 1
+    # a node alone in its topic has no provider to find
+    alone = [i for i in leg if members.get(run.topic_of.get(i), 0) <= 1]
     found = {i: sum(lk.get("results", 0) for lk in run.traces[i].get("lookups") or [])
-             + len((run.traces[i].get("conn") or {}).get("found") or []) for i in leg if i in run.traces}
+             + len((run.traces[i].get("conn") or {}).get("found") or []) for i in leg if i in run.traces and i not in alone}
     if not found:
         return verdict("needs-data", "no traces from legacy nodes")
     none = [i for i, n in found.items() if n == 0]
-    return pf(none, f"every legacy node found providers ({len(found)} nodes)", f"{len(none)} of {len(found)} legacy nodes found nothing", offenders=none[:10])
+    skipped = f", {len(alone)} alone in their topic skipped" if alone else ""
+    return pf(none, f"every legacy node found providers ({len(found)} nodes{skipped})", f"{len(none)} of {len(found)} legacy nodes found nothing{skipped}", offenders=none[:10])
 
 
 # ----------------------------------------------------------- load and validity
@@ -748,8 +762,8 @@ def h2_complete_collection(run, tol):
 def h3_hosts_under_load(run, tol):
     if not run.host:
         return verdict("needs-data", "no host metrics")
-    cpu = [ns["cpu_pct"] for h in run.host for s in h for ns in s.get("nodes", [])]
-    rss = [ns["rss_mb"] for h in run.host for s in h for ns in s.get("nodes", [])]
+    cpu = [ns["cpu_pct"] for h in run.host for s in h for ns in s.get("nodes") or []]
+    rss = [ns["rss_mb"] for h in run.host for s in h for ns in s.get("nodes") or []]
     lowmem = min((s["mem_avail_mb"] for h in run.host for s in h if s.get("mem_avail_mb")), default=None)
     if not cpu:
         return verdict("needs-data", "no node samples in host metrics")
@@ -770,7 +784,7 @@ CHECKS = [
         ("K1", "departed nodes leave caches within an ad lifetime", k1_departed_leave),
         ("E1", "lifetime: expired ads are swept promptly and no ad expires beyond a lifetime", e1_lifetime),
         ("E2", "renewal keeps fan-out: final fan-out against the post-register level", e2_renewal_keeps_fanout),
-        ("E3", "renewal accounting: renewals sent equal renewals received", e3_renewal_accounting),
+        ("E3", "renewal accounting: renewals received match renewals sent beyond session setups", e3_renewal_accounting),
         ("W1", "bounded wait: no admission after the attempt timeout", w1_bounded_wait),
         ("W2", "no early admission: admitted only after the required wait", w2_no_early_admission),
         ("W3", "lower bound: a repeated quote never undercuts the previous one by more than the time elapsed", w3_lower_bound),

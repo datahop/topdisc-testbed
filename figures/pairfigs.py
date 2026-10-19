@@ -298,7 +298,7 @@ class Run:
         for f in files:
             h = load(f, []) or []
             for s in h:
-                for ns in s.get("nodes", []):
+                for ns in s.get("nodes") or []:  # the first sample precedes the nodes
                     cpu.append(ns.get("cpu_pct", 0))
                     rss.append(ns.get("rss_mb", 0))
             if h:  # host counters are cumulative since boot
@@ -853,10 +853,16 @@ def notes(ctx, extra=()):
     for r in ctx.runs:
         hits = r.table_hits()
         if r.plain and hits >= 0.1:
+            sizes = sorted(r.size_of.values(), reverse=True)
+            top, share = 0, 0
+            while top < len(sizes) and share < 0.5 * r.nodes:
+                share += sizes[top]
+                top += 1
             out.append(f"{r.label}: {100 * hits:.0f} % of searchers had a provider in their routing table when the "
-                       f"search started and found it at 0 ms. In {r.nodes:,} nodes the table holds a large share of "
-                       "the network, so time to first provider favours plain discv5 more than in a large network; "
-                       "see the per-topic table.")
+                       f"search started and found it at 0 ms. The {top} largest topic{'s' if top > 1 else ''} hold "
+                       f"{100 * share / r.nodes:.0f} % of the {r.nodes:,} nodes, so a routing table of a few hundred "
+                       "entries nearly always holds one of their providers; the small topics show the walk itself. "
+                       "See the per-topic table.")
     return out + sorted({f"{r.label}: {n}" for r in ctx.runs for n in r.notes})
 
 

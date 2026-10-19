@@ -1,7 +1,9 @@
 package assign
 
 import (
+	"fmt"
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,5 +115,64 @@ func TestLegacyFork(t *testing.T) {
 				t.Fatalf("%s: node %d legacy=%v legacy_fork=%v", build, a.Idx, a.Legacy, a.LegacyFork)
 			}
 		}
+	}
+}
+
+// bootstrap_sample adds earlier starters to the bootnode: never node 0's
+// own list, never a node that started less than bootstrapSettle before, the
+// bootnode always first, and the same draw for the same seed.
+func TestBootstrapSample(t *testing.T) {
+	cfg := scenario.Default()
+	cfg.Scenario.Population.Nodes = 400
+	cfg.Scenario.Population.BootstrapSample = 5
+	cfg.Scenario.Phases.StartWindow = 10 * time.Minute
+	hosts := func(i int) Host { return Host{IP: "10.0.0.1", BasePort: 30300 + i} }
+	as, err := Generate(cfg, hosts, 0, "../../scenarios/models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, _ := Generate(cfg, hosts, 0, "../../scenarios/models")
+	port := func(u string) int {
+		var p int
+		fmt.Sscanf(u[strings.LastIndex(u, ":")+1:], "%d", &p)
+		return p - 30300
+	}
+	full := 0
+	if len(as[0].Bootnodes) != 0 {
+		t.Fatalf("bootnode has bootnodes: %v", as[0].Bootnodes)
+	}
+	for i, a := range as[1:] {
+		i++
+		if len(a.Bootnodes) == 0 || port(a.Bootnodes[0]) != 0 {
+			t.Fatalf("node %d: bootnode not first: %v", i, a.Bootnodes)
+		}
+		if len(a.Bootnodes) > 6 {
+			t.Fatalf("node %d: %d bootstrap records, want at most 6", i, len(a.Bootnodes))
+		}
+		if len(a.Bootnodes) == 6 {
+			full++
+		}
+		seen := map[int]bool{}
+		for _, u := range a.Bootnodes[1:] {
+			j := port(u)
+			if j <= 0 || j >= i || seen[j] {
+				t.Fatalf("node %d: bad or repeated sample %d in %v", i, j, a.Bootnodes)
+			}
+			seen[j] = true
+			if as[j].Phases.StartAt+bootstrapSettle.Milliseconds() > a.Phases.StartAt {
+				t.Fatalf("node %d: sampled node %d started only %d ms earlier", i, j, a.Phases.StartAt-as[j].Phases.StartAt)
+			}
+		}
+		if strings.Join(a.Bootnodes, ",") != strings.Join(again[i].Bootnodes, ",") {
+			t.Fatalf("node %d: samples differ between two generations of the same seed", i)
+		}
+	}
+	if full < 300 {
+		t.Fatalf("%d of 399 nodes got the full 5 samples, want most of them", full)
+	}
+	cfg.Scenario.Population.BootstrapSample = 0
+	off, _ := Generate(cfg, hosts, 0, "../../scenarios/models")
+	if len(off[200].Bootnodes) != 1 {
+		t.Fatalf("with bootstrap_sample 0 node 200 has %d bootnodes, want the bootnode alone", len(off[200].Bootnodes))
 	}
 }

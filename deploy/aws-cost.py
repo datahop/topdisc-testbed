@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Prices a fleet before and after it exists, for deploy/aws.sh.
 
-  aws-cost.py estimate <regions-json> <home-region> <public_ips> <types-csv> <max_hours>
+  aws-cost.py estimate <regions-json> <home-region> <public_ips> <types-csv> <max_hours> [tf args]
       Prints the expected hourly cost (every node on the first, cheapest
       type) and the ceiling (every node on the most expensive type the
       autoscaling group may fall back to), each with volumes, the
@@ -31,7 +31,10 @@ PRICES = {  # region: {type: $/h}; gp3 is $/GB-month
     "ap-southeast-1": {"t4g.nano": 0.0053, "t4g.micro": 0.0106, "t4g.small": 0.0212, "t4g.medium": 0.0424, "m7g.large": 0.1020, "gp3": 0.096},
     "sa-east-1": {"t4g.nano": 0.0067, "t4g.micro": 0.0134, "t4g.small": 0.0268, "t4g.medium": 0.0536, "m7g.large": 0.1301, "gp3": 0.152},
 }
-NODE_GB, COORD_GB, COORD_TYPE = 8, 20, "m7g.large"
+NODE_GB, COORD_GB = 8, 20
+COORD_TYPE = "m7g.large"
+for _r in PRICES.values():  # m7g pricing is linear in size
+    _r["m7g.xlarge"], _r["m7g.2xlarge"] = round(_r["m7g.large"] * 2, 4), round(_r["m7g.large"] * 4, 4)
 HOURS_PER_MONTH = 730
 TRANSFER_PER_GB = 0.02
 TRANSFER_GB_NODE_H = float(os.environ.get("TRANSFER_GB_NODE_H", "0.1"))
@@ -49,7 +52,7 @@ def price(region, what):
     return p[what]
 
 
-def hourly(regions, home, types, pub, per_region_type=None):
+def hourly(regions, home, types, pub, per_region_type=None, coord_type=COORD_TYPE):
     """$/h for the fleet, every node on types[region] (or the given mix)."""
     nodes = coord = volumes = transfer = 0.0
     for r, n in regions.items():
@@ -63,13 +66,21 @@ def hourly(regions, home, types, pub, per_region_type=None):
         transfer += cnt * TRANSFER_GB_NODE_H * TRANSFER_PER_GB
         if pub:
             nodes += cnt * PUBLIC_IP
-    coord = price(home, COORD_TYPE) + COORD_GB * price(home, "gp3") / HOURS_PER_MONTH + (PUBLIC_IP if pub else 0)
+    coord = price(home, coord_type) + COORD_GB * price(home, "gp3") / HOURS_PER_MONTH + (PUBLIC_IP if pub else 0)
     return {"nodes": nodes, "coordinator": coord, "volumes": volumes, "transfer": transfer, "total": nodes + coord + volumes + transfer}
 
 
 def show(label, h):
     print("%s: $%.2f/h (nodes $%.2f, volumes $%.2f, coordinator $%.2f, traffic allowance $%.2f)"
           % (label, h["total"], h["nodes"], h["volumes"], h["coordinator"], h["transfer"]))
+
+
+def coord_type(args):
+    """The coordinator_type in terraform args, else the default."""
+    for a in args:
+        if "coordinator_type=" in a:
+            return a.split("coordinator_type=")[1].strip('"] ')
+    return COORD_TYPE
 
 
 def main():
@@ -80,10 +91,11 @@ def main():
         pub = sys.argv[4] == "true"
         types = sys.argv[5].split(",")
         hours = float(sys.argv[6])
+        ct = coord_type(sys.argv[7:])
         cheap = {r: types[0] for r in regions}
         dear = {r: max(types, key=lambda t: price(r, t)) for r in regions}
-        exp = hourly(regions, home, cheap, pub)
-        ceil = hourly(regions, home, dear, pub)
+        exp = hourly(regions, home, cheap, pub, coord_type=ct)
+        ceil = hourly(regions, home, dear, pub, coord_type=ct)
         show("expected (all nodes on %s)" % types[0], exp)
         if len(types) > 1:
             show("ceiling (all nodes on %s)" % dear[home], ceil)

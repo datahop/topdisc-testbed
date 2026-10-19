@@ -190,6 +190,30 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 		failMu.Unlock()
 		return nil
 	})
+	// A host that was busy writing its nodes' traces, or briefly unreachable,
+	// still has them on disk: give the stragglers a slower second pass.
+	if len(failed) > 0 {
+		fmt.Printf("fetched %d/%d traces; retrying %d\n", got.Load(), len(as), len(failed))
+		var idx []int
+		for i := range failed {
+			idx = append(idx, i)
+		}
+		time.Sleep(30 * time.Second)
+		each(len(idx), func(k int) error {
+			i := idx[k]
+			for attempt := 0; attempt < 3; attempt++ {
+				if err := agents[hostOf[i]].fetch("trace", i, filepath.Join(trDir, fmt.Sprintf("node%d.json", i))); err == nil {
+					got.Add(1)
+					failMu.Lock()
+					delete(failed, i)
+					failMu.Unlock()
+					return nil
+				}
+				time.Sleep(20 * time.Second)
+			}
+			return nil
+		})
+	}
 	fmt.Printf("fetched %d/%d traces\n", got.Load(), len(as))
 	if len(failed) > 0 {
 		byHost := map[string]int{}
