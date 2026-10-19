@@ -500,12 +500,21 @@ func walkIterator(disc interface {
 	stop := time.AfterFunc(time.Until(deadline), it.Close)
 	defer stop.Stop()
 	var paceStart time.Time
+	// The trace is written at the deadline, which is also when the walk
+	// ends, so the last snapshot it holds is what gets recorded: refresh it
+	// as the request count grows, not only when a provider turns up.
+	lastSnap := time.Now()
 	for it.Next() {
 		if !add(it.Node()) {
+			if progress != nil && time.Since(lastSnap) > 10*time.Second {
+				progress(snap())
+				lastSnap = time.Now()
+			}
 			continue
 		}
 		if progress != nil {
 			progress(snap())
+			lastSnap = time.Now()
 		}
 		if over := len(seen) - initial; interval > 0 && over > 0 {
 			if paceStart.IsZero() {
