@@ -54,8 +54,18 @@ missing ones by region. `run` starts the coordinator without waiting on the
 SSM command (a long run would outlive the command's timeout) and polls the
 run log; a run that fails is pulled for its logs and destroyed.
 
-Spending cap: `deploy/aws.sh up` refuses a fleet whose on-demand cost over
-`MAX_HOURS` (6) exceeds `MAX_SPEND` ($200); the account has a $200 monthly
+Spending cap: `deploy/aws.sh up` prices the fleet with `deploy/aws-cost.py`
+and refuses one whose ceiling over `MAX_HOURS` (6) exceeds `MAX_SPEND` ($200).
+The expected cost puts every node on the first instance type; the ceiling puts
+them on the dearest type in `instance_types`, which the autoscaling group falls
+back to when a pool runs dry (two thirds of a 7,500-node fleet on 2026-10-18
+came up on t4g.micro and t4g.small). Both include the 8 GB root volume per
+node and a cross-region traffic allowance of `TRANSFER_GB_NODE_H` (0.1) GB per
+node-hour at $0.02/GB. Once the fleet is up, `deploy/aws.sh run` prices it as
+launched: a fleet that is short or more than `FLEET_TOLERANCE` (10 %) over the
+expected cost prints a warning and goes on, or is destroyed with
+`FLEET_STRICT=1`. A nano-only `instance_types` keeps the ceiling equal to the
+expectation at the price of a short fleet when nano runs out. The account has a $200 monthly
 budget `topdisc-testbed` with e-mail alerts (set once with `aws budgets
 create-budget`, outside Terraform so a destroy does not remove it); and the
 coordinator scales every region's autoscaling group to zero `max_hours` after
