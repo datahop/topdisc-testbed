@@ -113,6 +113,12 @@ func (r *Runner) Prepare(as []assign.Assignment, peers map[int]string) error {
 		"sysctl -q -w net.ipv4.neigh.default.gc_thresh1=8192",
 		"sysctl -q -w net.ipv4.neigh.default.gc_thresh2=32768",
 		"sysctl -q -w net.ipv4.neigh.default.gc_thresh3=65536",
+		// discv5 keeps the kernel's default UDP socket buffer, 208 kB, which
+		// the busiest registrars overflowed at 7,500 nodes.
+		"sysctl -q -w net.core.rmem_max=8388608",
+		"sysctl -q -w net.core.wmem_max=8388608",
+		"sysctl -q -w net.core.rmem_default=4194304",
+		"sysctl -q -w net.core.wmem_default=4194304",
 		fmt.Sprintf("ip link add %s type bridge", Bridge),
 		fmt.Sprintf("ip addr add %s/16 dev %s", BridgeAddr(r.Host), Bridge),
 		fmt.Sprintf("ip link set %s up", Bridge),
