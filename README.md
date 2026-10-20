@@ -68,8 +68,11 @@ needs.
 
 `local` and `cloud` accept `testbed.wan` (Linux only): each node gets its own
 network namespace with a netem qdisc, so pairs see WAN-like RTTs and a
-per-node rate cap instead of loopback. `scenarios/local-100*.yaml` and
-`scenarios/aws-*.yaml` are the reference scenarios for those backends;
+per-node rate cap instead of loopback. The evaluation matrix in `scenarios/`,
+written by `tools/scenario_matrix.py`, holds the reference scenarios: four
+backends (`g5k-25k`, `aws-7k5`, `simnet-7k5`, `local-200`) by two protocols
+(`topdisc`, `discv5`) by two lookup models (`cont`, `conn`), each with and
+without session churn, so any two differ in one thing;
 `pkg/host` is the per-host runner both share, `cmd/hostagent` exposes it
 over HTTP for the cloud coordinator.
 
