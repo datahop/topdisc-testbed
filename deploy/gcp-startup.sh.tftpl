@@ -62,7 +62,7 @@ cat > /opt/topdisc/scale-down.sh <<'DOWN'
 # disk) costs little; `deploy/gcp.sh down` removes it.
 /opt/topdisc/save-runs.sh >> /opt/topdisc/scale-down.log 2>&1
 zone=$(cat /opt/topdisc/zone)
-hosts=$(gcloud compute instances list --zones "$zone" --filter='labels.role=host' --format='value(name)')
+hosts=$(gcloud compute instances list --zones "$zone" --filter='labels.topdisc=host AND name~^topdisc-host-[0-9]+$' --format='value(name)')
 [ -z "$hosts" ] || gcloud compute instances delete --zone "$zone" --quiet $hosts >> /opt/topdisc/scale-down.log 2>&1 || true
 echo "fleet stopped at $(date -u)" >> /opt/topdisc/scale-down.log
 shutdown -h now

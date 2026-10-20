@@ -304,7 +304,7 @@ var paramDocs = []paramDoc{
 	{"testbed.gcp.zone", "zone of every VM"},
 	{"testbed.gcp.machine_type", "VM type of the hosts; 8 vCPUs carry 200 nodes"},
 	{"testbed.gcp.coordinator_type", "VM type of the coordinator; it holds every trace while it aggregates"},
-	{"testbed.gcp.vnodes_per_machine", "node processes (netns'd, see testbed.wan) per host VM; sizes the fleet"},
+	{"testbed.gcp.vnodes_per_machine", "node processes (netns'd, see testbed.wan) per host VM; sizes the fleet; 0 = not a GCP scenario"},
 	{"testbed.g5k.image", "unused; left over from a dropped Distem-vnode design"},
 	{"testbed.wan.enabled", "give each node its own netns shaped by netem (Linux, root)"},
 	{"testbed.wan.delay_min_ms", "star model: min one-way delay per node; plan RTT 8ms -> 4"},
@@ -401,7 +401,7 @@ func Default() Config {
 	c.Testbed.Local.PlainBinary = "./topdisc-node-plain"
 	c.Testbed.Cloud.Inventory, c.Testbed.Cloud.HomeRegion, c.Testbed.Cloud.AgentPort, c.Testbed.Cloud.Verbosity, c.Testbed.Cloud.Grace = "inventory.json", "us-east-1", 9000, 2, mustDur("30s")
 	c.Testbed.G5k = G5kConfig{Site: "nancy", Walltime: "02:00:00", Queue: "default", Env: "debian11-x64-base", VnodesPerMachine: 250, Image: "file:///home/USER/topdisc-vnode.tar.gz"}
-	c.Testbed.Gcp = GcpConfig{Region: "us-central1", Zone: "us-central1-a", MachineType: "n2-standard-8", CoordinatorType: "e2-standard-4", VnodesPerMachine: 200}
+	c.Testbed.Gcp = GcpConfig{Region: "us-central1", Zone: "us-central1-a", MachineType: "n2-standard-8", CoordinatorType: "e2-standard-4"}
 	c.Testbed.Wan.DelayMinMs, c.Testbed.Wan.DelayMaxMs, c.Testbed.Wan.JitterMs, c.Testbed.Wan.RateKbps = 4, 45, 3, 160
 	c.Scenario.Population.Nodes = 5
 	c.Scenario.Population.Topics = 1

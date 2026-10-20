@@ -36,9 +36,9 @@ tar czf topdisc-linux-arm64.tgz -C out .        # upload anywhere the instances 
 
 cd deploy/terraform/hetzner && terraform init && terraform apply -var nodes=1000 -var binaries_url=https://…/topdisc-linux-arm64.tgz
 
-# on the coordinator
-cd /opt/topdisc && terraform output -json inventory > inventory.json
-./testbed aws-7k5-topdisc-cont.yaml                          # scenario copied next to inventory.json
+terraform -chdir=deploy/terraform/hetzner output -json inventory > inventory.json   # state lives where apply ran
+# copy inventory.json and the scenario to /opt/topdisc on the coordinator, then there:
+cd /opt/topdisc && ./testbed aws-7k5-topdisc-cont.yaml
 
 terraform destroy
 ```
@@ -103,8 +103,9 @@ churn in the traces.
 Grid'5000 layout rather than the AWS one: a VM per
 `testbed.gcp.vnodes_per_machine` nodes (200 on an `n2-standard-8`), each
 node in its own netns on the host's bridge (`pkg/host`, so `testbed.wan`
-must be enabled and the scenario emulates its geography), plus a coordinator
-VM, all in one zone with private addresses.
+must be enabled; its star model gives each node its delay, there is no
+per-region RTT on this backend), plus a coordinator VM, all in one zone with
+private addresses.
 
 ```
 gcloud auth login && gcloud auth application-default login && gcloud config set project <project>
@@ -118,10 +119,14 @@ Host i is the VM `topdisc-host-i` and owns the node subnet
 `10.(100+i).0.0/16`: a VPC route per host sends that /16 to it and the hosts
 carry IP forwarding, so packets to a node reach its VM and the kernel
 forwards them to the namespace. `inventory-gcp.sh` therefore lists the hosts
-by VM index and refuses a gap. The hosts add no route to each other's /16s
-here: a VM holds a /32 with every peer behind the gateway (the virtual
-network answers ARP for the gateway only), so `pkg/host` skips the route
-for a peer that is not on-link and the VPC routes carry the node traffic.
+by VM index and refuses a gap, and writes `routes: network` so the hosts
+install no route via each other: a VM holds a /32 with every peer behind
+the gateway (the virtual network answers ARP for the gateway only), and the
+VPC routes carry the node traffic. Only the synthetic addressing works this
+way; `population.addresses: crawl` needs hosts on one L2 that route each
+other's /24s (Grid'5000) and is refused on this inventory. On any inventory
+without `routes: network`, `prepare` refuses a peer that is not on-link
+before creating anything.
 Everything lives in `deploy/terraform/gcp` (network, bucket, two service
 accounts, hosts, routes, coordinator) and `deploy/gcp-startup.sh.tftpl`
 (sysctls, binaries from the bucket, hostagent unit on the hosts, save-runs
@@ -133,8 +138,13 @@ family's CPUs (`N2_CPUS`, …) and the project's `CPUS_ALL_REGIONS` against
 the fleet, and the coordinator deletes the hosts and halts `max_hours`
 after boot. `down` copies the bucket's run archives to `runs/archives`
 before destroying. A fresh project has `CPUS_ALL_REGIONS` 24 and E2 24 per
-region: 3 `n2-standard-8` hosts once raised to 96 (2026-10-20), 15,000
-nodes need 600.
+region: 3 `n2-standard-8` hosts once raised to 96 (2026-10-20). The
+`gcp-15k` scenarios need 608 vCPUs and cost about $30/h, so they pass the
+guards only with the quota raised and `MAX_HOURS=3` (or a higher
+`MAX_SPEND`). Zones run out of a machine type at times; `-var
+zone=… -var machine_type=…` after the scenario overrides it for one
+deployment. Validated densities on an 8-vCPU host: 200 (smoke) and 500
+(`gcp-density.yaml`).
 
 ## Grid'5000
 

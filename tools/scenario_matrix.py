@@ -41,7 +41,8 @@ BACKENDS = {
                          "coordinator_type": "e2-standard-8", "vnodes_per_machine": 200},
                  "wan": {"enabled": True, "delay_min_ms": 4, "delay_max_ms": 45, "jitter_ms": 3, "rate_kbps": 1000},
                  "traces": {"host_sample_period": "30s"}},
-        addresses="crawl"),
+        # synthetic addresses: the VPC routes one /16 per host, not crawl /24s
+        addresses=None),
     "simnet-7k5": dict(
         nodes=7500, topics=100,
         network={"latency_ms": 30, "bandwidth_mibps": 1000},
@@ -60,7 +61,7 @@ BACKENDS = {
 DESC = {
     "g5k-25k": "Grid'5000, 25,000 nodes on 50 gros machines with region RTTs",
     "aws-7k5": "AWS, 7,500 nodes in three regions, private addresses",
-    "gcp-15k": "Google Cloud, 15,000 nodes on 75 packed VMs with region RTTs",
+    "gcp-15k": "Google Cloud, 15,000 nodes on 75 packed VMs with star-model WAN delays",
     "simnet-7k5": "simnet, 7,500 in-process nodes",
     "local-200": "local backend, 200 nodes on one machine",
 }

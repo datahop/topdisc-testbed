@@ -1,4 +1,4 @@
-# Google Cloud, 15,000 nodes on 75 packed VMs with region RTTs: TopDisc, the connection model (searches feed the dialer, stop at full slots), no churn.
+# Google Cloud, 15,000 nodes on 75 packed VMs with star-model WAN delays: TopDisc, the connection model (searches feed the dialer, stop at full slots), no churn.
 # One of the matrix scenarios written by tools/scenario_matrix.py.
 name: gcp-15k-topdisc-conn
 scenario:
@@ -9,7 +9,6 @@ scenario:
     bootstrap_sample: 5
     zipf_s: 1.07
     topic_model: models/crawl-2026-09-18.json
-    addresses: crawl
   network:
     latency_ms: 30
     bandwidth_mibps: 100

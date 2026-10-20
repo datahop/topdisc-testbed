@@ -39,6 +39,14 @@ func TestLoadSearchModes(t *testing.T) {
 	}
 }
 
+func TestGcpOffByDefault(t *testing.T) {
+	// testbed fleet sizes the GCP fleet from this; a scenario without a
+	// testbed.gcp section must size no hosts.
+	if per := Default().Testbed.Gcp.VnodesPerMachine; per != 0 {
+		t.Fatalf("default vnodes_per_machine = %d, want 0", per)
+	}
+}
+
 func TestLoadLegacyBuild(t *testing.T) {
 	all := "    legacy_frac: 1\n    legacy_bootnode: true\n"
 	for _, tc := range []struct {

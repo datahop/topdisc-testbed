@@ -67,12 +67,21 @@ resource "google_storage_bucket_iam_member" "coordinator" {
   role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.coordinator.email}"
 }
-# The coordinator lists the hosts for the inventory and deletes them at the
-# spending cap.
+# The coordinator lists the hosts for the inventory and deletes them, and
+# only them, at the spending cap.
+resource "google_project_iam_member" "coordinator_viewer" {
+  project = var.project
+  role    = "roles/compute.viewer"
+  member  = "serviceAccount:${google_service_account.coordinator.email}"
+}
 resource "google_project_iam_member" "coordinator" {
   project = var.project
   role    = "roles/compute.instanceAdmin.v1"
   member  = "serviceAccount:${google_service_account.coordinator.email}"
+  condition {
+    title      = "topdisc hosts only"
+    expression = "resource.name.startsWith(\"projects/${var.project}/zones/${var.zone}/instances/topdisc-host-\")"
+  }
 }
 
 locals {
@@ -101,7 +110,7 @@ resource "google_compute_instance" "host" {
     email  = google_service_account.host.email
     scopes = ["cloud-platform"]
   }
-  labels     = { role = "host" }
+  labels     = { topdisc = "host" }
   depends_on = [google_storage_bucket_iam_member.host]
 }
 resource "google_compute_route" "host" {
@@ -131,6 +140,6 @@ resource "google_compute_instance" "coordinator" {
     email  = google_service_account.coordinator.email
     scopes = ["cloud-platform"]
   }
-  labels     = { role = "coordinator" }
-  depends_on = [google_storage_bucket_iam_member.coordinator, google_project_iam_member.coordinator]
+  labels     = { topdisc = "coordinator" }
+  depends_on = [google_storage_bucket_iam_member.coordinator, google_project_iam_member.coordinator, google_project_iam_member.coordinator_viewer]
 }

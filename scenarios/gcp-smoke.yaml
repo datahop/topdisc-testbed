@@ -1,5 +1,5 @@
-# Google Cloud driver check: 600 nodes on 3 hosts (200 netns'd nodes each, see
-# testbed.wan) with region RTTs, about 10 minutes, a dollar or two.
+# Google Cloud driver check: 600 nodes on 3 hosts (200 netns'd nodes each, with
+# testbed.wan's star-model delays), about 10 minutes, about a dollar an hour.
 #   deploy/gcp.sh up scenarios/gcp-smoke.yaml && deploy/gcp.sh run scenarios/gcp-smoke.yaml
 name: gcp-smoke
 scenario:

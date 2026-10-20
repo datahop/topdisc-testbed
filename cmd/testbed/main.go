@@ -59,7 +59,7 @@ func main() {
 			gcp = (cfg.Scenario.Population.Nodes + per - 1) / per
 		}
 		b, _ := json.Marshal(map[string]any{"regions": cfg.Fleet(), "home_region": cfg.Testbed.Cloud.HomeRegion, "public_ips": cfg.Testbed.Cloud.PublicIPs,
-			"g5k_machines": machines, "gcp_machines": gcp, "gcp": cfg.Testbed.Gcp})
+			"g5k_machines": machines, "gcp_machines": gcp, "gcp": cfg.Testbed.Gcp, "wan": cfg.Testbed.Wan.Enabled})
 		fmt.Println(string(b))
 		return
 	}

@@ -24,7 +24,11 @@ import (
 // Inventory is `terraform output -json inventory` of a deploy/terraform module.
 type Inventory struct {
 	Coordinator string `json:"coordinator"`
-	Hosts       []struct {
+	// Routes: "" when the hosts route each other's node subnets themselves
+	// (one L2, as on Grid'5000); "network" when the network does it (a VPC
+	// route per host on GCP), which only covers the synthetic subnets.
+	Routes string `json:"routes"`
+	Hosts  []struct {
 		Index  int    `json:"index"`
 		IP     string `json:"ip"`
 		Public string `json:"public_ip"` // advertised by the nodes when set; IP stays the control address
@@ -64,6 +68,9 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 		topicIdx, model, err := assign.Topics(cfg, filepath.Dir(cfg.SourcePath))
 		if err != nil {
 			return err
+		}
+		if inv.Routes == "network" {
+			return fmt.Errorf("population.addresses crawl needs hosts that route each other's /24s; this inventory's network routes the synthetic node subnets only")
 		}
 		pool, err = addr.Draw(sc.Population.Nodes, model, sc.Population.Topics, sc.Population.Seed, func(i int) int {
 			if i < len(topicIdx) && len(topicIdx[i]) > 0 {
@@ -139,7 +146,7 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 	}
 	routes := prefixRoutes(pool, hostOf, inv)
 	if err := each(len(agents), func(h int) error {
-		req := prepareRequest{Host: h, Peers: peers, Wan: star, Seed: sc.Population.Seed, Verbosity: cc.Verbosity, SamplePeriodMs: cfg.Testbed.Traces.HostSamplePeriod.Milliseconds(), Assignments: mine[h]}
+		req := prepareRequest{Host: h, Peers: peers, Wan: star, Seed: sc.Population.Seed, Verbosity: cc.Verbosity, SamplePeriodMs: cfg.Testbed.Traces.HostSamplePeriod.Milliseconds(), Assignments: mine[h], NetRoutes: inv.Routes == "network"}
 		if pool != nil {
 			req.RealAddrs, req.Routes = true, routes[h]
 		}
@@ -259,6 +266,7 @@ type prepareRequest struct {
 	// addressing is.
 	Routes    []host.Route `json:"routes,omitempty"`
 	RealAddrs bool         `json:"real_addrs,omitempty"`
+	NetRoutes bool         `json:"net_routes,omitempty"`
 }
 
 type agent struct{ base string }

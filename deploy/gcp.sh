@@ -3,7 +3,8 @@
 # testbed.gcp.vnodes_per_machine nodes, each node in its own netns, as on Grid'5000).
 #   deploy/gcp.sh up <scenario> [tf args]  terraform apply sized from the scenario + build + push to the bucket;
 #                                          refuses if the fleet over MAX_HOURS (6) costs more than MAX_SPEND ($100)
-#                                          or does not fit the project's CPU quotas
+#                                          or does not fit the project's CPU quotas (e.g. -var zone=us-central1-f
+#                                          -var machine_type=n1-standard-8 when the scenario's type is stocked out)
 #   deploy/gcp.sh push                  rebuild and re-push the binaries only
 #   deploy/gcp.sh run scenarios/x.yaml  run it on the coordinator, wait, pull the results, then destroy everything
 #                                       (up and run destroy on failure too; only a failed pull keeps the deployment; KEEP=1 keeps it always)
@@ -35,38 +36,49 @@ build_push() {
 }
 
 # On-demand prices in us-central1 (2026-10-20, USD/h); other regions are
-# within 15 % and priced the same. Zone-local traffic is free.
+# within 15 % and priced the same. Zone-local traffic is free. Disk sizes
+# follow the terraform args when given.
 cost_guard() {
-  python3 - "$1" "$MAX_HOURS" "$MAX_SPEND" <<'PY' || exit 1
-import json, sys
+  f=$1; shift
+  python3 - "$f" "$MAX_HOURS" "$MAX_SPEND" "$@" <<'PY' || exit 1
+import json, re, sys
 f = json.load(open(sys.argv[1])); g = f["gcp"]; hosts = f["gcp_machines"]
 hours, cap = float(sys.argv[2]), float(sys.argv[3])
-PER_VCPU = {"e2": 0.0335, "n2": 0.0486, "n2d": 0.0423, "n1": 0.0475, "c3": 0.0524, "t2d": 0.0423}
+args = " ".join(sys.argv[4:])
+PRICES = {"e2-standard-2": 0.067, "e2-standard-4": 0.134, "e2-standard-8": 0.268, "e2-standard-16": 0.536,
+          "n1-standard-4": 0.190, "n1-standard-8": 0.380, "n1-standard-16": 0.760,
+          "n2-standard-4": 0.194, "n2-standard-8": 0.389, "n2-standard-16": 0.777, "n2-highmem-8": 0.524,
+          "n2d-standard-8": 0.338, "t2d-standard-8": 0.338, "c3-standard-8": 0.419}
 def price(t):
-    fam, _, n = t.split("-"); return PER_VCPU[fam] * int(n)
-disks = (hosts * 20 + 100) * 0.1 / 730
+    if t not in PRICES: sys.exit("no price for %s; add it to deploy/gcp.sh" % t)
+    return PRICES[t]
+def var(name, default):
+    m = re.search(r"%s=(\d+)" % name, args); return int(m.group(1)) if m else default
+disks = (hosts * var("host_disk_gb", 20) + var("coordinator_disk_gb", 100)) * 0.1 / 730
 hourly = hosts * price(g["machine_type"]) + price(g["coordinator_type"]) + disks
 print("cost: %d x %s + %s + disks = $%.2f/h, $%.0f over %g h (cap $%.0f)" % (hosts, g["machine_type"], g["coordinator_type"], hourly, hourly * hours, hours, cap))
 if hourly * hours > cap:
     sys.exit("refusing: over MAX_SPEND; lower MAX_HOURS or the fleet, or raise MAX_SPEND knowingly")
 PY
 }
-# The region's CPUS and per-family quota, and the project's all-regions
-# CPUS, each must hold the fleet. A fleet over quota comes up short and the
-# inventory then refuses it; check first.
+# The project's all-regions CPUS and, in the region, the family's own pool
+# when the API lists one (N2_CPUS, E2_CPUS, ...) else the shared CPUS, must
+# each hold the fleet. A fleet over quota comes up short and the inventory
+# then refuses it; check first. Skipped on a live deployment, whose own
+# usage would be counted against it.
 quota_guard() {
   python3 - "$1" "$PROJECT" <<'PY' || exit 1
 import json, subprocess, sys
 f = json.load(open(sys.argv[1])); g = f["gcp"]; hosts = f["gcp_machines"]
-def cpus(t): return int(t.split("-")[-1])
-need = {}
-for t, n in ((g["machine_type"], hosts), (g["coordinator_type"], 1)):
-    fam = t.split("-")[0].upper()
-    for q in ("CPUS", "CPUS_ALL_REGIONS") + (() if fam == "N1" else (fam + "_CPUS",)):
-        need[q] = need.get(q, 0) + cpus(t) * n
 region = json.loads(subprocess.check_output(["gcloud", "compute", "regions", "describe", g["region"], "--project", sys.argv[2], "--format=json"]))["quotas"]
 project = json.loads(subprocess.check_output(["gcloud", "compute", "project-info", "describe", "--project", sys.argv[2], "--format=json"]))["quotas"]
 have = {q["metric"]: q["limit"] - q["usage"] for q in region + project}
+def cpus(t): return int(t.split("-")[-1])
+need = {}
+for t, n in ((g["machine_type"], hosts), (g["coordinator_type"], 1)):
+    fam = t.split("-")[0].upper() + "_CPUS"
+    for q in ("CPUS_ALL_REGIONS", fam if fam in have else "CPUS"):
+        need[q] = need.get(q, 0) + cpus(t) * n
 for q, n in need.items():
     if q not in have: sys.exit("quota %s not found in %s" % (q, g["region"]))
     if have[q] < n: sys.exit("refusing: need %d of %s, %d free in %s; request an increase or shrink the fleet" % (n, q, have[q], g["region"]))
@@ -86,18 +98,20 @@ fleet_file() { f=$(mktemp); ./testbed fleet "$1" > "$f"; echo "$f"; }
 
 case "$1" in
   up)
-    [ -n "$KEEP" ] || trap 'st=$?; [ $st -eq 0 ] || { echo "up failed; destroying"; "$0" down; "$0" check; }; exit $st' EXIT
     sc=$2; shift 2
     go build -o testbed ./cmd/testbed
     f=$(fleet_file "$sc")
     hosts=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["gcp_machines"])' "$f")
+    wan=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["wan"])' "$f")
     g=$(python3 -c 'import json,sys; g=json.load(open(sys.argv[1]))["gcp"]; print(" ".join("-var %s=%s" % (k, g[k]) for k in ("region","zone","machine_type","coordinator_type")))' "$f")
-    [ "$hosts" -gt 0 ] || { echo "the scenario has no testbed.gcp.vnodes_per_machine"; exit 1; }
+    [ "$hosts" -gt 0 ] || { echo "not a GCP scenario: testbed.gcp.vnodes_per_machine is unset"; exit 1; }
+    [ "$wan" = True ] || { echo "testbed.wan must be enabled: the nodes live in network namespaces"; exit 1; }
     echo "fleet: $hosts hosts; $g"
-    cost_guard "$f"
-    quota_guard "$f"
-    rm -f "$f"
+    cost_guard "$f" "$@"
     terraform -chdir=$TF init -input=false >/dev/null
+    if terraform -chdir=$TF state list 2>/dev/null | grep -q 'instance\.host\['; then echo "live deployment: quota guard skipped"; else quota_guard "$f"; fi
+    rm -f "$f"
+    [ -n "$KEEP" ] || trap 'st=$?; [ $st -eq 0 ] || { echo "up failed; destroying"; "$0" down; "$0" check; }; exit $st' EXIT
     terraform -chdir=$TF apply -auto-approve -input=false -var "project=$PROJECT" -var "hosts=$hosts" -var "max_hours=$MAX_HOURS" $g "$@"
     build_push ;;
   push) build_push ;;
