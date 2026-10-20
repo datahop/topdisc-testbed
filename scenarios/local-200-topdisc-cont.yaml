@@ -1,0 +1,25 @@
+# local backend, 200 nodes on one machine: TopDisc, one continuous search per node, no churn.
+# One of the 32 matrix scenarios written by tools/scenario_matrix.py.
+name: local-200-topdisc-cont
+scenario:
+  population:
+    nodes: 200
+    topics: 5
+    seed: 1
+    bootstrap_sample: 5
+    zipf_s: 1.0
+  phases:
+    bootstrap_wait: 20s
+    start_window: 2m
+    register_wait: 30s
+    search_stagger: 10ms
+    search_timeout: 4m
+  topic:
+    ad_cache_size: 5000
+    search_yield_floor: 8
+  search:
+    model: continuous
+  conn_model:
+    enabled: false
+testbed:
+  backend: local
