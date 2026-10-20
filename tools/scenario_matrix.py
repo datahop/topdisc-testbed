@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Writes the evaluation matrix: four backends x two protocols x two lookup
-models x churn or not, 32 scenarios named
+"""Writes the evaluation matrix: five backends x two protocols x two lookup
+models x churn or not, 40 scenarios named
 <backend>-<size>-<topdisc|discv5>-<cont|conn>[-churn].yaml. Every run uses
 the 2026-09-18 crawl as its topic and churn model, bootstrap sampling, and
 the same phases within a backend, so any two differ in one thing only.
@@ -29,6 +29,19 @@ BACKENDS = {
         phases={"bootstrap_wait": "3m", "start_window": "15m", "register_wait": "15m", "search_stagger": "10ms", "search_timeout": "90m"},
         testbed={"backend": "cloud", "cloud": {"inventory": "inventory.json", "home_region": "us-east-1", "public_ips": False}},
         addresses=None),
+    "gcp-15k": dict(
+        nodes=15000, topics=100,
+        network={"latency_ms": 30, "bandwidth_mibps": 100, "model": "regions",
+                 "regions": {"us-east-1": 0.4, "eu-central-1": 0.3, "ap-southeast-1": 0.3},
+                 "rtt_table": "models/region-rtt.json"},
+        phases={"bootstrap_wait": "180s", "start_window": "15m", "register_wait": "15m", "search_stagger": "10ms", "search_timeout": "90m"},
+        testbed={"backend": "cloud",
+                 "cloud": {"inventory": "inventory.json", "home_region": "us-east-1", "verbosity": 2, "grace": "30s"},
+                 "gcp": {"region": "us-central1", "zone": "us-central1-a", "machine_type": "n2-standard-8",
+                         "coordinator_type": "e2-standard-8", "vnodes_per_machine": 200},
+                 "wan": {"enabled": True, "delay_min_ms": 4, "delay_max_ms": 45, "jitter_ms": 3, "rate_kbps": 1000},
+                 "traces": {"host_sample_period": "30s"}},
+        addresses="crawl"),
     "simnet-7k5": dict(
         nodes=7500, topics=100,
         network={"latency_ms": 30, "bandwidth_mibps": 1000},
@@ -47,6 +60,7 @@ BACKENDS = {
 DESC = {
     "g5k-25k": "Grid'5000, 25,000 nodes on 50 gros machines with region RTTs",
     "aws-7k5": "AWS, 7,500 nodes in three regions, private addresses",
+    "gcp-15k": "Google Cloud, 15,000 nodes on 75 packed VMs with region RTTs",
     "simnet-7k5": "simnet, 7,500 in-process nodes",
     "local-200": "local backend, 200 nodes on one machine",
 }
@@ -76,7 +90,7 @@ def scenario(backend, proto, model, churn):
     head = (f"# {DESC[backend]}: {'TopDisc' if proto == 'topdisc' else 'plain discv5 built on the fork'}, "
             f"{'one continuous search per node' if model == 'cont' else 'the connection model (searches feed the dialer, stop at full slots)'}, "
             f"{'each node leaving and returning as its chain did in the crawl, one day over the run' if churn else 'no churn'}.\n"
-            f"# One of the 32 matrix scenarios written by tools/scenario_matrix.py.\n")
+            f"# One of the matrix scenarios written by tools/scenario_matrix.py.\n")
     body = yaml.safe_dump({"name": name, "scenario": sc, "testbed": b["testbed"]}, sort_keys=False, width=120)
     # a bare hh:mm:ss is a YAML 1.1 sexagesimal number
     return name, head + body.replace("walltime: 05:00:00", 'walltime: "05:00:00"')

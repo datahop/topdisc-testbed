@@ -1,14 +1,22 @@
 variable "project" {}
 variable "region" { default = "us-central1" }
 variable "zone" { default = "us-central1-a" }
-variable "nodes" {
-  description = "instances, one node each; raise the CPU quota for 10k"
-  default     = 1000
+variable "subnet" {
+  description = "the hosts' and coordinator's addresses; the nodes live in 10.100.0.0/16 and up, one /16 per host"
+  default     = "172.20.0.0/20"
 }
-variable "instance_type" {
-  description = "one node per instance; t2a-standard-1 is the smallest arm64 (no arm64 shared-core type); e2-micro for amd64 builds"
-  default     = "t2a-standard-1"
+variable "hosts" {
+  description = "host VMs; testbed fleet <scenario> prints the count (gcp_machines)"
+  default     = 1
 }
-variable "coordinator_type" { default = "t2a-standard-2" }
-variable "spot" { default = false }
-variable "binaries_url" {}
+variable "machine_type" { default = "n2-standard-8" }
+variable "coordinator_type" { default = "e2-standard-4" }
+variable "host_disk_gb" { default = 20 }
+variable "coordinator_disk_gb" {
+  description = "holds every trace while the coordinator aggregates (about 2 MB per node)"
+  default     = 100
+}
+variable "max_hours" {
+  description = "the coordinator deletes the hosts and halts this long after boot; 0 disables"
+  default     = 6
+}

@@ -80,6 +80,7 @@ type TestbedConfig struct {
 	Wan       WanConfig       `yaml:"wan"`
 	Cloud     CloudConfig     `yaml:"cloud"`
 	G5k       G5kConfig       `yaml:"g5k"`
+	Gcp       GcpConfig       `yaml:"gcp"`
 	Simulator SimulatorConfig `yaml:"simulator"`
 	Harness   HarnessConfig   `yaml:"harness"`
 	Traces    TracesConfig    `yaml:"traces"`
@@ -222,6 +223,17 @@ type G5kConfig struct {
 	Image            string `yaml:"image"` // unused: left over from a dropped Distem-vnode design
 }
 
+// GcpConfig: the Google Cloud backend (deploy/gcp.sh): VMs in one zone, each
+// running hostagent with vnodes_per_machine node processes in their own
+// netns, as on Grid'5000, plus a coordinator VM. Traffic stays in the region.
+type GcpConfig struct {
+	Region           string `yaml:"region" json:"region"`
+	Zone             string `yaml:"zone" json:"zone"`
+	MachineType      string `yaml:"machine_type" json:"machine_type"`
+	CoordinatorType  string `yaml:"coordinator_type" json:"coordinator_type"`
+	VnodesPerMachine int    `yaml:"vnodes_per_machine" json:"vnodes_per_machine"`
+}
+
 // LocalConfig: the local backend — N node processes on this host.
 type LocalConfig struct {
 	NodeBinary   string        `yaml:"node_binary"`
@@ -288,6 +300,11 @@ var paramDocs = []paramDoc{
 	{"testbed.g5k.queue", "OAR queue: default, production, besteffort"},
 	{"testbed.g5k.env", "kadeploy environment for the physical machines"},
 	{"testbed.g5k.vnodes_per_machine", "node processes (netns'd, see testbed.wan) per physical machine; sizes the reservation (measure on the first one)"},
+	{"testbed.gcp.region", "Google Cloud region of the fleet (deploy/gcp.sh)"},
+	{"testbed.gcp.zone", "zone of every VM"},
+	{"testbed.gcp.machine_type", "VM type of the hosts; 8 vCPUs carry 200 nodes"},
+	{"testbed.gcp.coordinator_type", "VM type of the coordinator; it holds every trace while it aggregates"},
+	{"testbed.gcp.vnodes_per_machine", "node processes (netns'd, see testbed.wan) per host VM; sizes the fleet"},
 	{"testbed.g5k.image", "unused; left over from a dropped Distem-vnode design"},
 	{"testbed.wan.enabled", "give each node its own netns shaped by netem (Linux, root)"},
 	{"testbed.wan.delay_min_ms", "star model: min one-way delay per node; plan RTT 8ms -> 4"},
@@ -384,6 +401,7 @@ func Default() Config {
 	c.Testbed.Local.PlainBinary = "./topdisc-node-plain"
 	c.Testbed.Cloud.Inventory, c.Testbed.Cloud.HomeRegion, c.Testbed.Cloud.AgentPort, c.Testbed.Cloud.Verbosity, c.Testbed.Cloud.Grace = "inventory.json", "us-east-1", 9000, 2, mustDur("30s")
 	c.Testbed.G5k = G5kConfig{Site: "nancy", Walltime: "02:00:00", Queue: "default", Env: "debian11-x64-base", VnodesPerMachine: 250, Image: "file:///home/USER/topdisc-vnode.tar.gz"}
+	c.Testbed.Gcp = GcpConfig{Region: "us-central1", Zone: "us-central1-a", MachineType: "n2-standard-8", CoordinatorType: "e2-standard-4", VnodesPerMachine: 200}
 	c.Testbed.Wan.DelayMinMs, c.Testbed.Wan.DelayMaxMs, c.Testbed.Wan.JitterMs, c.Testbed.Wan.RateKbps = 4, 45, 3, 160
 	c.Scenario.Population.Nodes = 5
 	c.Scenario.Population.Topics = 1

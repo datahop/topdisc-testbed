@@ -151,7 +151,7 @@ func (r *Runner) Prepare(as []assign.Assignment, peers map[int]string) error {
 		}
 	} else {
 		for h, addr := range peers {
-			if h != r.Host {
+			if h != r.Host && onLink(addr) {
 				routes = append(routes, fmt.Sprintf("route replace %s via %s", Subnet(h), addr))
 			}
 		}
@@ -162,6 +162,15 @@ func (r *Runner) Prepare(as []assign.Assignment, peers map[int]string) error {
 	// One `ip` per route costs a process each: at ~13k routes per machine on
 	// crawl addresses that is minutes of forking before the run can start.
 	return ipBatch(routes)
+}
+
+// onLink reports whether addr is reachable without a gateway. A peer behind
+// one (a cloud VPC that routes the node subnets to their hosts itself) needs
+// no host route: the default route carries its /16, and the kernel refuses
+// a route via an address that is not on-link.
+func onLink(addr string) bool {
+	out, err := exec.Command("ip", "route", "get", addr).Output()
+	return err == nil && !strings.Contains(string(out), " via ")
 }
 
 // Start launches node idx (again, with the same identity, if it ran before).

@@ -1,10 +1,19 @@
 #!/bin/sh
-# Writes inventory.json for the cloud backend from the running fleet.
+# Writes inventory.json for the cloud backend from the running fleet, on the
+# coordinator. Host i is the VM topdisc-host-i: the VPC routes its node /16
+# to that VM, so the hosts are listed by VM index and a gap is an error.
+#   ./inventory-gcp.sh <nodes per host>
 set -e
-gcloud compute instances list --filter='labels.role=host AND status=RUNNING' --format='value(networkInterfaces[0].networkIP)' |
+per=${1:?nodes per host}
+me=$(curl -s -H Metadata-Flavor:Google http://169.254.169.254/computeMetadata/v1/instance/network-interfaces/0/ip)
+gcloud compute instances list --zones "$(cat /opt/topdisc/zone)" --filter='labels.role=host AND status=RUNNING' \
+  --format='value(name,networkInterfaces[0].networkIP)' |
 python3 -c '
 import json,sys
-ips=sorted(l.strip() for l in sys.stdin if l.strip())
-print(json.dumps({"coordinator":"","hosts":[{"index":i,"ip":ip,"nodes":1} for i,ip in enumerate(ips)]}))
-' > inventory.json
-echo "$(python3 -c 'import json;print(len(json.load(open("inventory.json"))["hosts"]))') hosts"
+per=int(sys.argv[1])
+hosts=sorted((int(n.rsplit("-",1)[1]),ip) for n,ip in (l.split() for l in sys.stdin if l.strip()))
+for want,(i,_) in enumerate(hosts):
+    if i!=want: sys.exit("host %d is not running (running: %s)" % (want, [i for i,_ in hosts]))
+json.dump({"coordinator":sys.argv[2],"hosts":[{"index":i,"ip":ip,"nodes":per} for i,ip in hosts]},open("inventory.json","w"))
+print("%d hosts x %d nodes" % (len(hosts),per))
+' "$per" "$me"

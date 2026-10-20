@@ -1,5 +1,5 @@
 # Grid'5000, 25,000 nodes on 50 gros machines with region RTTs: plain discv5 built on the fork, the connection model (searches feed the dialer, stop at full slots), no churn.
-# One of the 32 matrix scenarios written by tools/scenario_matrix.py.
+# One of the matrix scenarios written by tools/scenario_matrix.py.
 name: g5k-25k-discv5-conn
 scenario:
   population:

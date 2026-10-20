@@ -54,7 +54,12 @@ func main() {
 		if per := cfg.Testbed.G5k.VnodesPerMachine; per > 0 {
 			machines = (cfg.Scenario.Population.Nodes + per - 1) / per
 		}
-		b, _ := json.Marshal(map[string]any{"regions": cfg.Fleet(), "home_region": cfg.Testbed.Cloud.HomeRegion, "public_ips": cfg.Testbed.Cloud.PublicIPs, "g5k_machines": machines})
+		gcp := 0
+		if per := cfg.Testbed.Gcp.VnodesPerMachine; per > 0 {
+			gcp = (cfg.Scenario.Population.Nodes + per - 1) / per
+		}
+		b, _ := json.Marshal(map[string]any{"regions": cfg.Fleet(), "home_region": cfg.Testbed.Cloud.HomeRegion, "public_ips": cfg.Testbed.Cloud.PublicIPs,
+			"g5k_machines": machines, "gcp_machines": gcp, "gcp": cfg.Testbed.Gcp})
 		fmt.Println(string(b))
 		return
 	}

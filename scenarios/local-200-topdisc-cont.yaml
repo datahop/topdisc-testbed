@@ -1,5 +1,5 @@
 # local backend, 200 nodes on one machine: TopDisc, one continuous search per node, no churn.
-# One of the 32 matrix scenarios written by tools/scenario_matrix.py.
+# One of the matrix scenarios written by tools/scenario_matrix.py.
 name: local-200-topdisc-cont
 scenario:
   population:
