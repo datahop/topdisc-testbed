@@ -52,6 +52,10 @@ type Runner struct {
 	// per-/24 limits and the ad cache's ipTree score see real diversity.
 	Routes    []Route
 	RealAddrs bool
+	// NetRoutes: the network delivers the other hosts' node subnets (a VPC
+	// route per host), so no route via a peer is installed; without it every
+	// peer must be on-link, which Prepare checks before creating anything.
+	NetRoutes bool
 
 	mu     sync.Mutex
 	procs  map[int]*exec.Cmd
@@ -124,6 +128,7 @@ func (r *Runner) Prepare(as []assign.Assignment, peers map[int]string) error {
 	}
 	rng := rand.New(rand.NewSource(r.Seed + int64(r.Host)))
 	var routes []string
+	vias := map[string]bool{}
 	for k, a := range as {
 		d := r.Wan.Delay(rng)
 		r.delay[a.Idx] = d
@@ -148,12 +153,19 @@ func (r *Runner) Prepare(as []assign.Assignment, peers map[int]string) error {
 	if r.RealAddrs {
 		for _, rt := range r.Routes {
 			routes = append(routes, fmt.Sprintf("route replace %s via %s", rt.Prefix, rt.Via))
+			vias[rt.Via] = true
 		}
-	} else {
+	} else if !r.NetRoutes {
 		for h, addr := range peers {
 			if h != r.Host {
 				routes = append(routes, fmt.Sprintf("route replace %s via %s", Subnet(h), addr))
+				vias[addr] = true
 			}
+		}
+	}
+	for via := range vias {
+		if !onLink(via) {
+			return fmt.Errorf("peer %s is not on-link: a route via it would be refused; the hosts need one L2, or an inventory with routes: network (synthetic addresses only)", via)
 		}
 	}
 	if err := root(cmds); err != nil {
@@ -162,6 +174,12 @@ func (r *Runner) Prepare(as []assign.Assignment, peers map[int]string) error {
 	// One `ip` per route costs a process each: at ~13k routes per machine on
 	// crawl addresses that is minutes of forking before the run can start.
 	return ipBatch(routes)
+}
+
+// onLink reports whether addr is reachable without a gateway.
+func onLink(addr string) bool {
+	out, err := exec.Command("ip", "route", "get", addr).Output()
+	return err == nil && !strings.Contains(string(out), " via ")
 }
 
 // Start launches node idx (again, with the same identity, if it ran before).

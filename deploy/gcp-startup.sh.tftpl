@@ -1,0 +1,90 @@
+#!/bin/sh
+# Every VM: sysctls, limits, the binaries from the bucket. Hosts start the
+# hostagent as root; the coordinator gets save-runs and the scale-down timer.
+set -e
+cat > /etc/sysctl.d/90-topdisc.conf <<'SYSCTL'
+net.core.rmem_max = 8388608
+net.core.wmem_max = 8388608
+net.core.rmem_default = 4194304
+net.core.wmem_default = 4194304
+net.core.netdev_max_backlog = 250000
+net.ipv4.ip_forward = 1
+net.ipv4.conf.all.rp_filter = 0
+net.ipv4.conf.default.rp_filter = 0
+net.ipv4.neigh.default.gc_thresh1 = 8192
+net.ipv4.neigh.default.gc_thresh2 = 32768
+net.ipv4.neigh.default.gc_thresh3 = 65536
+fs.file-max = 4000000
+kernel.pid_max = 4194304
+SYSCTL
+sysctl --system >/dev/null
+cat > /etc/security/limits.d/90-topdisc.conf <<'LIMITS'
+* soft nofile 1000000
+* hard nofile 1000000
+LIMITS
+mkdir -p /opt/topdisc && chmod 1777 /opt/topdisc && rm -f /opt/topdisc/ready
+echo "${bucket}" > /opt/topdisc/bucket
+echo "${zone}" > /opt/topdisc/zone
+until gsutil -q cp "gs://${bucket}/topdisc-linux-amd64.tgz" /opt/topdisc/binaries.tgz; do sleep 15; done
+tar xzf /opt/topdisc/binaries.tgz -C /opt/topdisc
+%{ if role == "host" ~}
+cat > /etc/systemd/system/hostagent.service <<'UNIT'
+[Unit]
+Description=topdisc hostagent
+After=network-online.target
+[Service]
+ExecStart=/opt/topdisc/hostagent -serve :9000 -node-binary /opt/topdisc/topdisc-node -workdir /opt/topdisc/run
+LimitNOFILE=1000000
+LimitNPROC=1000000
+Restart=always
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload && systemctl enable hostagent && systemctl restart hostagent
+%{ else ~}
+cat > /opt/topdisc/save-runs.sh <<'SAVE'
+#!/bin/sh
+# Uploads every run directory to the bucket once, so the results survive
+# the deployment: after each run, and again before the scale-down.
+cd /opt/topdisc || exit 0
+b=$(cat bucket)
+for d in $(ls -d *-2*/ 2>/dev/null); do
+  d=$(basename "$d")
+  [ -e "$d.saved" ] && continue
+  tar czf "/tmp/$d.tgz" "$d" && gsutil -q cp "/tmp/$d.tgz" "gs://$b/runs/$d.tgz" && touch "$d.saved" && echo "saved $d to gs://$b/runs/$d.tgz"
+  rm -f "/tmp/$d.tgz"
+done
+SAVE
+cat > /opt/topdisc/scale-down.sh <<'DOWN'
+#!/bin/sh
+# Hard spending stop, independent of the machine that ran terraform: delete
+# the hosts, then halt. What is left (network, bucket, this stopped VM's
+# disk) costs little; `deploy/gcp.sh down` removes it.
+/opt/topdisc/save-runs.sh >> /opt/topdisc/scale-down.log 2>&1
+zone=$(cat /opt/topdisc/zone)
+hosts=$(gcloud compute instances list --zones "$zone" --filter='labels.topdisc=host AND name~^topdisc-host-[0-9]+$' --format='value(name)')
+[ -z "$hosts" ] || gcloud compute instances delete --zone "$zone" --quiet $hosts >> /opt/topdisc/scale-down.log 2>&1 || true
+echo "fleet stopped at $(date -u)" >> /opt/topdisc/scale-down.log
+shutdown -h now
+DOWN
+chmod 755 /opt/topdisc/save-runs.sh /opt/topdisc/scale-down.sh
+cat > /etc/systemd/system/fleet-scale-down.service <<'UNIT'
+[Unit]
+Description=topdisc fleet scale-down (spending cap)
+[Service]
+Type=oneshot
+ExecStart=/opt/topdisc/scale-down.sh
+UNIT
+cat > /etc/systemd/system/fleet-scale-down.timer <<'UNIT'
+[Unit]
+Description=topdisc fleet scale-down max_hours after boot
+[Timer]
+OnBootSec=${max_hours}h
+[Install]
+WantedBy=timers.target
+UNIT
+%{ if max_hours > 0 ~}
+systemctl daemon-reload && systemctl enable --now fleet-scale-down.timer
+%{ endif ~}
+%{ endif ~}
+touch /opt/topdisc/ready

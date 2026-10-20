@@ -1,5 +1,5 @@
 # simnet, 7,500 in-process nodes: plain discv5 built on the fork, one continuous search per node, no churn.
-# One of the 32 matrix scenarios written by tools/scenario_matrix.py.
+# One of the matrix scenarios written by tools/scenario_matrix.py.
 name: simnet-7k5-discv5-cont
 scenario:
   population:

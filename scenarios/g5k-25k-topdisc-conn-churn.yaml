@@ -1,5 +1,5 @@
 # Grid'5000, 25,000 nodes on 50 gros machines with region RTTs: TopDisc, the connection model (searches feed the dialer, stop at full slots), each node leaving and returning as its chain did in the crawl, one day over the run.
-# One of the 32 matrix scenarios written by tools/scenario_matrix.py.
+# One of the matrix scenarios written by tools/scenario_matrix.py.
 name: g5k-25k-topdisc-conn-churn
 scenario:
   population:

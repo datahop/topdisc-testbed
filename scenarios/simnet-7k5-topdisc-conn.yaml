@@ -1,5 +1,5 @@
 # simnet, 7,500 in-process nodes: TopDisc, the connection model (searches feed the dialer, stop at full slots), no churn.
-# One of the 32 matrix scenarios written by tools/scenario_matrix.py.
+# One of the matrix scenarios written by tools/scenario_matrix.py.
 name: simnet-7k5-topdisc-conn
 scenario:
   population:
