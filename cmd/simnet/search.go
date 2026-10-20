@@ -446,6 +446,22 @@ func runOneSearcher(n nodeRec, topicIdx int, topic topicindex.TopicID, deadlineA
 		}()
 	}
 
+	// A node is away when the connection model says so, or when session
+	// churn stopped its discovery: a search session yields nothing then and
+	// the searcher waits for the rejoin, with the model's wake-up or by
+	// polling the live discovery once a second.
+	offline := func() bool {
+		return (pacing.Conns != nil && pacing.Conns.isOffline(n.idx)) || currentDisc(n.idx) == nil
+	}
+	wake := func() <-chan struct{} {
+		if pacing.Conns != nil {
+			return pacing.Conns.wakeCh(n.idx)
+		}
+		ch := make(chan struct{})
+		go func() { time.Sleep(time.Second); close(ch) }()
+		return ch
+	}
+
 	rng := rand.New(rand.NewSource(rngSeed)) // per-searcher, so pacing pauses don't align
 	start := time.Now()
 	var (
@@ -639,7 +655,7 @@ sessions:
 		if continuous {
 			// Only a departure ends the search early: wait for the node to
 			// rejoin, then search again.
-			if pacing.Conns == nil || !pacing.Conns.isOffline(n.idx) {
+			if !offline() {
 				break sessions
 			}
 		}
@@ -656,12 +672,12 @@ sessions:
 		}
 		if scheduled || continuous {
 			// A departed node waits for its rejoin before looking up again.
-			for pacing.Conns != nil && pacing.Conns.isOffline(n.idx) {
+			for offline() {
 				select {
 				case <-deadline:
 					hitDeadline = true
 					break sessions
-				case <-pacing.Conns.wakeCh(n.idx):
+				case <-wake():
 				}
 			}
 			continue sessions
