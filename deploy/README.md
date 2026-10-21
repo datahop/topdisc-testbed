@@ -26,23 +26,6 @@ Instances fetch the binaries from S3 in a retry loop, so `up` may push after
 they boot. `aws login` (or credentials in the environment) is the only
 prerequisite.
 
-Manual sequence (Hetzner):
-
-```
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o out/topdisc-node ./cmd/node
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o out/hostagent ./cmd/hostagent
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o out/testbed ./cmd/testbed
-tar czf topdisc-linux-arm64.tgz -C out .        # upload anywhere the instances can fetch it
-
-cd deploy/terraform/hetzner && terraform init && terraform apply -var nodes=1000 -var binaries_url=https://…/topdisc-linux-arm64.tgz
-
-terraform -chdir=deploy/terraform/hetzner output -json inventory > inventory.json   # state lives where apply ran
-# copy inventory.json and the scenario to /opt/topdisc on the coordinator, then there:
-cd /opt/topdisc && ./testbed aws-7k5-topdisc-cont.yaml
-
-terraform destroy
-```
-
 The inventory is `{coordinator, hosts:[{index, ip, nodes}]}`, one host per
 instance. The coordinator assigns node indices in inventory order (node 0,
 the bootnode, on the first instance), posts each instance its assignment,
@@ -145,6 +128,37 @@ guards only with the quota raised and `MAX_HOURS=3` (or a higher
 zone=… -var machine_type=…` after the scenario overrides it for one
 deployment. Validated densities on an 8-vCPU host: 200 (smoke) and 500
 (`gcp-density.yaml`).
+
+## Hetzner Cloud
+
+`deploy/hetzner.sh` is the Google Cloud layout on Hetzner servers: a server
+per `testbed.hetzner.vnodes_per_machine` nodes (500 on a `cx53`, 16 shared
+vCPUs and 32 GB), each node in its own netns with `testbed.wan`'s star-model
+delays, plus a coordinator, on a private network that routes one /16 per
+host to it (`hcloud_network_route`); the hosts forward, and cloud-init adds
+the route to the node subnets via the private gateway, without which that
+traffic leaves by the public interface. Every server keeps a public IPv4
+(Hetzner has none without) for SSH only; the driver pushes the binaries
+over it and starts the agents, writes `inventory.json` (`routes: network`)
+from the terraform outputs, and pulls the run directory with rsync.
+
+```
+printf '%s' '<token>' > ~/.config/hcloud/token && chmod 600 ~/.config/hcloud/token   # project API token, read & write
+deploy/hetzner.sh up  scenarios/hetzner-smoke.yaml    # terraform apply sized by `testbed fleet` (hetzner_machines); build; push; agents; inventory
+deploy/hetzner.sh run scenarios/hetzner-smoke.yaml    # runs on the coordinator, waits, pulls into runs/, destroys
+deploy/hetzner.sh check                               # servers up and what they have cost so far
+```
+
+Spending: `up` prices the fleet from the API (gross, hourly) and refuses one
+over `MAX_SPEND` (EUR 100) for `MAX_HOURS` (6); Hetzner has no budget or
+spending cap of its own, no usage endpoint (`check` prices the running
+servers by uptime) and no scale-down timer here, since that would put the
+token on a server: a laptop that dies mid-run leaves the servers up until
+`down`. A new project is limited to 16 shared cores and cannot request more
+until its first invoice is paid; the 25k matrix needs 900 shared cores and
+60 servers. Older types (`cpx41`, `cpx51`) can no longer be ordered.
+Validated 2026-10-20: `hetzner-smoke.yaml`, 400 nodes on 2 `cx43`, recall
+1.000, no UDP drops, EUR 0.15 an hour.
 
 ## Grid'5000
 

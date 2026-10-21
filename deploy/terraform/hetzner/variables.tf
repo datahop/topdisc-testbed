@@ -1,25 +1,19 @@
 variable "hcloud_token" {
   sensitive = true
 }
-variable "location" {
-  default = "fsn1"
+variable "location" { default = "fsn1" }
+variable "subnet" {
+  description = "the hosts' and coordinator's private addresses; the nodes live in 10.100.0.0/16 and up, one /16 per host"
+  default     = "172.20.0.0/20"
 }
-variable "network_zone" {
-  default = "eu-central"
+variable "hosts" {
+  description = "host servers; testbed fleet <scenario> prints the count (hetzner_machines)"
+  default     = 1
 }
-variable "nodes" {
-  description = "servers, one node each; the account server limit must cover it"
-  default     = 1000
-}
-variable "instance_type" {
-  description = "one node per server; cax11 is arm64 (2 vCPU, 4 GB), cx22 amd64"
-  default     = "cax11"
-}
-variable "coordinator_type" {
-  default = "cpx21"
-}
-variable "admin_cidr" {
-  description = "who may SSH to the public addresses"
-}
+variable "server_type" { default = "cpx51" }
+variable "coordinator_type" { default = "cpx51" }
 variable "ssh_public_key" {}
-variable "binaries_url" {}
+variable "admin_cidr" {
+  description = "where SSH may come from"
+  default     = "0.0.0.0/0"
+}

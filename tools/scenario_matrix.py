@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Writes the evaluation matrix: six backends x two protocols x two lookup
-models x churn or not, 48 scenarios named
+"""Writes the evaluation matrix: seven backends x two protocols x two lookup
+models x churn or not, 56 scenarios named
 <backend>-<size>-<topdisc|discv5>-<cont|conn>[-churn].yaml. Every run uses
 the 2026-09-18 crawl as its topic and churn model, bootstrap sampling, and
 the same phases within a backend, so any two differ in one thing only.
@@ -57,6 +57,19 @@ BACKENDS = {
                  "traces": {"host_sample_period": "30s"}},
         # synthetic addresses: the VPC routes one /16 per host, not crawl /24s
         addresses=None),
+    "hetzner-25k": dict(
+        nodes=25000, topics=100,
+        network={"latency_ms": 30, "bandwidth_mibps": 100, "model": "regions",
+                 "regions": {"us-east-1": 0.4, "eu-central-1": 0.3, "ap-southeast-1": 0.3},
+                 "rtt_table": "models/region-rtt.json"},
+        phases={"bootstrap_wait": "180s", "start_window": "15m", "register_wait": "15m", "search_stagger": "10ms", "search_timeout": "90m"},
+        testbed={"backend": "cloud",
+                 "cloud": {"inventory": "inventory.json", "home_region": "us-east-1", "verbosity": 2, "grace": "30s"},
+                 "hetzner": {"location": "fsn1", "server_type": "cx53", "coordinator_type": "cx53", "vnodes_per_machine": 500},
+                 "wan": {"enabled": True, "delay_min_ms": 4, "delay_max_ms": 45, "jitter_ms": 3, "rate_kbps": 1000},
+                 "traces": {"host_sample_period": "30s"}},
+        # synthetic addresses: the VPC routes one /16 per host, not crawl /24s
+        addresses=None),
     "simnet-7k5": dict(
         nodes=7500, topics=100,
         network={"latency_ms": 30, "bandwidth_mibps": 1000},
@@ -77,6 +90,7 @@ DESC = {
     "aws-7k5": "AWS, 7,500 nodes in three regions, private addresses",
     "gcp-15k": "Google Cloud, 15,000 nodes on 75 packed VMs with star-model WAN delays",
     "gcp-5k5": "Google Cloud, 5,500 nodes on 11 packed VMs (500 each) with star-model WAN delays, the 96-vCPU quota",
+    "hetzner-25k": "Hetzner Cloud, 25,000 nodes on 50 packed servers (500 each) with star-model WAN delays",
     "simnet-7k5": "simnet, 7,500 in-process nodes",
     "local-200": "local backend, 200 nodes on one machine",
 }

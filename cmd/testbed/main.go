@@ -58,8 +58,12 @@ func main() {
 		if per := cfg.Testbed.Gcp.VnodesPerMachine; per > 0 {
 			gcp = (cfg.Scenario.Population.Nodes + per - 1) / per
 		}
+		hetzner := 0
+		if per := cfg.Testbed.Hetzner.VnodesPerMachine; per > 0 {
+			hetzner = (cfg.Scenario.Population.Nodes + per - 1) / per
+		}
 		b, _ := json.Marshal(map[string]any{"regions": cfg.Fleet(), "home_region": cfg.Testbed.Cloud.HomeRegion, "public_ips": cfg.Testbed.Cloud.PublicIPs,
-			"g5k_machines": machines, "gcp_machines": gcp, "gcp": cfg.Testbed.Gcp, "wan": cfg.Testbed.Wan.Enabled})
+			"g5k_machines": machines, "gcp_machines": gcp, "gcp": cfg.Testbed.Gcp, "hetzner_machines": hetzner, "hetzner": cfg.Testbed.Hetzner, "wan": cfg.Testbed.Wan.Enabled})
 		fmt.Println(string(b))
 		return
 	}

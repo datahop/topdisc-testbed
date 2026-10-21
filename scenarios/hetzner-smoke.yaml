@@ -1,0 +1,37 @@
+# Hetzner driver check: 400 nodes on 2 hosts (200 netns'd nodes each, with
+# testbed.wan's star-model delays), about 10 minutes, EUR 0.15 an hour.
+#   deploy/hetzner.sh up scenarios/hetzner-smoke.yaml && deploy/hetzner.sh run scenarios/hetzner-smoke.yaml
+name: hetzner-smoke
+scenario:
+  population:
+    nodes: 400
+    topics: 5
+    seed: 1
+    bootstrap_sample: 5
+  phases:
+    bootstrap_wait: 60s
+    start_window: 2m
+    register_wait: 2m
+    search_stagger: 10ms
+    search_timeout: 5m
+  search:
+    model: continuous
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json          # written by deploy/hetzner.sh from the terraform outputs
+    home_region: us-east-1
+    grace: 30s
+  hetzner:
+    location: fsn1
+    server_type: cx43
+    coordinator_type: ccx13
+    vnodes_per_machine: 200
+  wan:
+    enabled: true
+    delay_min_ms: 4
+    delay_max_ms: 45
+    jitter_ms: 3
+    rate_kbps: 1000
+  traces:
+    host_sample_period: 30s
