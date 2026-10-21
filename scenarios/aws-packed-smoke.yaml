@@ -1,0 +1,42 @@
+# AWS packed-host driver check: 600 nodes on 3 hosts (200 netns'd nodes each,
+# with testbed.wan's star-model delays), about 10 minutes, about $1.20 an hour.
+#   deploy/aws-packed.sh up scenarios/aws-packed-smoke.yaml && deploy/aws-packed.sh run scenarios/aws-packed-smoke.yaml
+name: aws-packed-smoke
+scenario:
+  population:
+    nodes: 600
+    topics: 5
+    seed: 1
+    bootstrap_sample: 5
+  network:
+    model: regions
+    regions: {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}
+    rtt_table: models/region-rtt.json
+  phases:
+    bootstrap_wait: 60s
+    start_window: 2m
+    register_wait: 2m
+    search_stagger: 10ms
+    search_timeout: 5m
+  search:
+    model: continuous
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json          # written on the coordinator by inventory-aws-packed.sh
+    home_region: us-east-1
+    grace: 30s
+  aws_packed:
+    region: us-east-1
+    zone: us-east-1a
+    instance_type: m6a.2xlarge
+    coordinator_type: m6a.xlarge
+    vnodes_per_machine: 200
+  wan:
+    enabled: true
+    delay_min_ms: 4
+    delay_max_ms: 45
+    jitter_ms: 3
+    rate_kbps: 1000
+  traces:
+    host_sample_period: 30s

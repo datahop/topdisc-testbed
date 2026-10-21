@@ -82,6 +82,7 @@ type TestbedConfig struct {
 	G5k       G5kConfig       `yaml:"g5k"`
 	Gcp       GcpConfig       `yaml:"gcp"`
 	Hetzner   HetznerConfig   `yaml:"hetzner"`
+	AwsPacked AwsPackedConfig `yaml:"aws_packed" json:"aws_packed"`
 	Simulator SimulatorConfig `yaml:"simulator"`
 	Harness   HarnessConfig   `yaml:"harness"`
 	Traces    TracesConfig    `yaml:"traces"`
@@ -245,6 +246,17 @@ type HetznerConfig struct {
 	VnodesPerMachine int    `yaml:"vnodes_per_machine" json:"vnodes_per_machine"`
 }
 
+// AwsPackedConfig: the AWS packed-host backend (deploy/aws-packed.sh), the
+// GCP layout on EC2: packed hosts in one subnet whose route table sends one
+// /16 per host to it, plus a coordinator.
+type AwsPackedConfig struct {
+	Region           string `yaml:"region" json:"region"`
+	Zone             string `yaml:"zone" json:"zone"`
+	InstanceType     string `yaml:"instance_type" json:"instance_type"`
+	CoordinatorType  string `yaml:"coordinator_type" json:"coordinator_type"`
+	VnodesPerMachine int    `yaml:"vnodes_per_machine" json:"vnodes_per_machine"`
+}
+
 // LocalConfig: the local backend — N node processes on this host.
 type LocalConfig struct {
 	NodeBinary   string        `yaml:"node_binary"`
@@ -320,6 +332,11 @@ var paramDocs = []paramDoc{
 	{"testbed.hetzner.server_type", "server type of the hosts; cx53 (16 shared vCPUs, 32 GB) carries 500 nodes"},
 	{"testbed.hetzner.coordinator_type", "server type of the coordinator; it holds every trace while it aggregates"},
 	{"testbed.hetzner.vnodes_per_machine", "node processes (netns'd, see testbed.wan) per host; sizes the fleet; 0 = not a Hetzner scenario"},
+	{"testbed.aws_packed.region", "AWS region of the packed fleet (deploy/aws-packed.sh)"},
+	{"testbed.aws_packed.zone", "availability zone of every instance"},
+	{"testbed.aws_packed.instance_type", "instance type of the hosts; m6a.2xlarge (8 vCPUs, 32 GB) carries 500 nodes"},
+	{"testbed.aws_packed.coordinator_type", "instance type of the coordinator; it holds every trace while it aggregates"},
+	{"testbed.aws_packed.vnodes_per_machine", "node processes (netns'd, see testbed.wan) per host; sizes the fleet; 0 = not an AWS packed scenario"},
 	{"testbed.g5k.image", "unused; left over from a dropped Distem-vnode design"},
 	{"testbed.wan.enabled", "give each node its own netns shaped by netem (Linux, root)"},
 	{"testbed.wan.delay_min_ms", "star model: min one-way delay per node; plan RTT 8ms -> 4"},
@@ -418,6 +435,7 @@ func Default() Config {
 	c.Testbed.G5k = G5kConfig{Site: "nancy", Walltime: "02:00:00", Queue: "default", Env: "debian11-x64-base", VnodesPerMachine: 250, Image: "file:///home/USER/topdisc-vnode.tar.gz"}
 	c.Testbed.Gcp = GcpConfig{Region: "us-central1", Zone: "us-central1-a", MachineType: "n2-standard-8", CoordinatorType: "e2-standard-4"}
 	c.Testbed.Hetzner = HetznerConfig{Location: "fsn1", ServerType: "cx53", CoordinatorType: "cx53"}
+	c.Testbed.AwsPacked = AwsPackedConfig{Region: "us-east-1", Zone: "us-east-1a", InstanceType: "m6a.2xlarge", CoordinatorType: "m6a.xlarge"}
 	c.Testbed.Wan.DelayMinMs, c.Testbed.Wan.DelayMaxMs, c.Testbed.Wan.JitterMs, c.Testbed.Wan.RateKbps = 4, 45, 3, 160
 	c.Scenario.Population.Nodes = 5
 	c.Scenario.Population.Topics = 1
