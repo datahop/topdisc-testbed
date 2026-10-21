@@ -5,7 +5,10 @@
 # nodes. Private addresses only: the binaries come from the bucket over
 # Private Google Access, SSH goes through IAP.
 terraform {
-  required_providers { google = { source = "hashicorp/google", version = "~> 6.0" } }
+  required_providers {
+    google = { source = "hashicorp/google", version = "~> 6.0" }
+    random = { source = "hashicorp/random", version = "~> 3.0" }
+  }
 }
 provider "google" {
   project = var.project
@@ -41,9 +44,13 @@ resource "google_compute_firewall" "iap" {
 }
 
 # Binaries in, run archives out. Destroyed with the deployment: gcp.sh down
-# copies the archives first.
+# copies the archives first. A deleted bucket's name stays taken for a
+# while, so each deployment gets its own.
+resource "random_id" "bucket" {
+  byte_length = 3
+}
 resource "google_storage_bucket" "tb" {
-  name                        = "${var.project}-topdisc"
+  name                        = "${var.project}-topdisc-${random_id.bucket.hex}"
   location                    = var.region
   force_destroy               = true
   uniform_bucket_level_access = true

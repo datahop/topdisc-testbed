@@ -32,7 +32,7 @@ build_push() {
   (cd legacy && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -modfile=go.fork.mod -tags fork -o ../out/topdisc-node-plain ./cmd/node-legacy)
   cp deploy/inventory-gcp.sh out/
   tar czf out/topdisc-linux-amd64.tgz -C out topdisc-node topdisc-node-legacy topdisc-node-plain hostagent testbed inventory-gcp.sh
-  gsutil -q cp out/topdisc-linux-amd64.tgz "gs://$(tfout bucket)/topdisc-linux-amd64.tgz"
+  gcloud storage cp -q out/topdisc-linux-amd64.tgz "gs://$(tfout bucket)/topdisc-linux-amd64.tgz"
 }
 
 # On-demand prices in us-central1 (2026-10-20, USD/h); other regions are
@@ -109,7 +109,7 @@ case "$1" in
     echo "fleet: $hosts hosts; $g"
     cost_guard "$f" "$@"
     terraform -chdir=$TF init -input=false >/dev/null
-    if terraform -chdir=$TF state list 2>/dev/null | grep -q 'instance\.host\['; then echo "live deployment: quota guard skipped"; else quota_guard "$f"; fi
+    if terraform -chdir=$TF state list 2>/dev/null | grep -q 'google_compute_instance\.'; then echo "live deployment: quota guard skipped"; else quota_guard "$f"; fi
     rm -f "$f"
     [ -n "$KEEP" ] || trap 'st=$?; [ $st -eq 0 ] || { echo "up failed; destroying"; "$0" down; "$0" check; }; exit $st' EXIT
     terraform -chdir=$TF apply -auto-approve -input=false -var "project=$PROJECT" -var "hosts=$hosts" -var "max_hours=$MAX_HOURS" $g "$@"
@@ -132,7 +132,9 @@ case "$1" in
     echo "$out" | grep -q "^$hosts hosts" || { echo "fleet never complete"; exit 1; }
     # The coordinator saves the run to the bucket itself, so a laptop that is
     # away at the end loses nothing; pull then only downloads.
-    gssh "cd /opt/topdisc && setsid sh -c './testbed scenario.yaml > run.out 2>&1; rc=\$?; ./save-runs.sh >> run.out 2>&1; echo RUN-EXIT \$rc >> run.out' > /dev/null 2>&1 < /dev/null &"
+    # setsid -f: the forked run is detached from this SSH session, which
+    # would otherwise stay open (and this driver stuck) until the run ends.
+    gssh "cd /opt/topdisc && setsid -f sh -c './testbed scenario.yaml > run.out 2>&1; rc=\$?; ./save-runs.sh >> run.out 2>&1; echo RUN-EXIT \$rc >> run.out' > /dev/null 2>&1 < /dev/null"
     echo "started on the coordinator; waiting"
     while :; do
       out=$(gssh "tail -c 4000 /opt/topdisc/run.out" 2>/dev/null || true)
@@ -150,23 +152,23 @@ case "$1" in
     "$0" pull || { PULL_FAILED=1; exit 1; } ;;
   check)
     gcloud compute instances list --project "$PROJECT" --filter='name~^topdisc-' --format='table(name,zone.basename(),machineType.basename(),status)'
-    gsutil ls -p "$PROJECT" 2>/dev/null | grep topdisc || true ;;
+    gcloud storage ls --project "$PROJECT" 2>/dev/null | grep topdisc || true ;;
   pull)
     mkdir -p runs
     b=$(tfout bucket)
     d=$(gssh "cd /opt/topdisc && ./save-runs.sh >/dev/null 2>&1; d=\$(ls -td *-2*/ | head -1) && d=\$(basename \$d) && gsutil -q ls gs://$b/runs/\$d.tgz && echo PULLED \$d" | sed -n 's/^PULLED //p')
     [ -n "$d" ] || { echo "pull: no run archive in gs://$b/runs/"; exit 1; }
     for i in 1 2 3 4 5; do
-      gsutil -q cp "gs://$b/runs/$d.tgz" "runs/$d.tgz" && tar xzf "runs/$d.tgz" -C runs && rm -f "runs/$d.tgz" && break
+      gcloud storage cp -q "gs://$b/runs/$d.tgz" "runs/$d.tgz" && tar xzf "runs/$d.tgz" -C runs && rm -f "runs/$d.tgz" && break
       echo "pull: download failed (try $i of 5); retrying"; sleep 20
     done
     [ -f "runs/$d/nodes.json" ] || { echo "pull: runs/$d incomplete"; exit 1; }
     echo "runs/$d ($(ls runs/$d/traces | wc -l | tr -d ' ') traces)" ;;
   ssh) gcloud compute ssh "$(tfout coordinator)" --project "$PROJECT" --zone "$(tfout zone)" --tunnel-through-iap ;;
   down)
-    if b=$(tfout bucket 2>/dev/null) && [ -n "$b" ]; then
+    if b=$(tfout bucket 2>/dev/null) && [ -n "$b" ] && [ -n "$(gcloud storage ls "gs://$b/runs/" 2>/dev/null)" ]; then
       mkdir -p runs/archives
-      gsutil -m -q rsync "gs://$b/runs/" runs/archives/ || [ -n "$FORCE" ] || { echo "down: could not copy gs://$b/runs/ to runs/archives; not destroying (FORCE=1 to destroy anyway)"; exit 1; }
+      gcloud storage rsync -q "gs://$b/runs/" runs/archives/ || [ -n "$FORCE" ] || { echo "down: could not copy gs://$b/runs/ to runs/archives; not destroying (FORCE=1 to destroy anyway)"; exit 1; }
       ls runs/archives/*.tgz 2>/dev/null | sed 's/^/kept: /'
     fi
     for i in 1 2 3; do
