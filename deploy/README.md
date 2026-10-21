@@ -129,6 +129,36 @@ zone=… -var machine_type=…` after the scenario overrides it for one
 deployment. Validated densities on an 8-vCPU host: 200 (smoke) and 500
 (`gcp-density.yaml`).
 
+## AWS packed hosts
+
+`deploy/aws-packed.sh` is the Google Cloud layout on EC2, for runs the
+one-node-per-instance AWS backend above cannot afford: an instance per
+`testbed.aws_packed.vnodes_per_machine` nodes (500 on an `m6a.2xlarge`, 8
+vCPUs and 32 GB), each node in its own netns with `testbed.wan`'s star-model
+delays, plus a coordinator, all in one subnet of one zone. The subnet's
+route table sends host i's `10.(100+i).0.0/16` to its network interface; the
+hosts forward and run without the source/destination check. Every instance
+has a public IPv4 for S3 and SSM only (nothing gets in from outside the
+VPC); the coordinator is reached through SSM, as in `deploy/aws.sh`, saves
+every run to the bucket, and `inventory-aws-packed.sh` lists the hosts by
+instance index with `routes: network`.
+
+```
+export AWS_PROFILE=datahop-testbed
+deploy/aws-packed.sh up  scenarios/aws-packed-smoke.yaml    # terraform apply sized by `testbed fleet` (aws_packed_machines); build amd64; push to the bucket
+deploy/aws-packed.sh run scenarios/aws-packed-smoke.yaml    # runs on the coordinator, waits, pulls into runs/, destroys
+deploy/aws-packed.sh check
+```
+
+Spending: `up` prices the fleet (on-demand, us-east-1) and refuses one over
+`MAX_SPEND` ($150) for `MAX_HOURS` (6), checks the region's on-demand vCPU
+quota (L-1216C47A, 5,100 in us-east-1 on 2026-10-21) and the route-table
+route quota (L-93826ACB, 500) against the fleet, and the coordinator
+terminates the hosts and halts `max_hours` after boot. `down` copies the
+bucket's run archives to `runs/archives` before destroying. The `aws-25k`
+scenarios run on 50 hosts and an `m6a.4xlarge` coordinator for about $18 an
+hour, $55 a run.
+
 ## Hetzner Cloud
 
 `deploy/hetzner.sh` is the Google Cloud layout on Hetzner servers: a server

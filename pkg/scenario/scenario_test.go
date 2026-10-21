@@ -42,8 +42,11 @@ func TestLoadSearchModes(t *testing.T) {
 func TestGcpOffByDefault(t *testing.T) {
 	// testbed fleet sizes the GCP fleet from this; a scenario without a
 	// testbed.gcp section must size no hosts.
-	if per := Default().Testbed.Gcp.VnodesPerMachine; per != 0 {
-		t.Fatalf("default vnodes_per_machine = %d, want 0", per)
+	d := Default().Testbed
+	for name, per := range map[string]int{"gcp": d.Gcp.VnodesPerMachine, "hetzner": d.Hetzner.VnodesPerMachine, "aws_packed": d.AwsPacked.VnodesPerMachine} {
+		if per != 0 {
+			t.Fatalf("default %s.vnodes_per_machine = %d, want 0", name, per)
+		}
 	}
 }
 

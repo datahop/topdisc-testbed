@@ -1,0 +1,92 @@
+#!/bin/sh
+# Every instance: sysctls, limits, the binaries from the bucket. Hosts start
+# the hostagent as root; the coordinator gets save-runs and the scale-down timer.
+set -e
+cat > /etc/sysctl.d/90-topdisc.conf <<'SYSCTL'
+net.core.rmem_max = 8388608
+net.core.wmem_max = 8388608
+net.core.rmem_default = 4194304
+net.core.wmem_default = 4194304
+net.core.netdev_max_backlog = 250000
+net.ipv4.ip_forward = 1
+net.ipv4.conf.all.rp_filter = 0
+net.ipv4.conf.default.rp_filter = 0
+net.ipv4.neigh.default.gc_thresh1 = 8192
+net.ipv4.neigh.default.gc_thresh2 = 32768
+net.ipv4.neigh.default.gc_thresh3 = 65536
+fs.file-max = 4000000
+kernel.pid_max = 4194304
+SYSCTL
+sysctl --system >/dev/null
+cat > /etc/security/limits.d/90-topdisc.conf <<'LIMITS'
+* soft nofile 1000000
+* hard nofile 1000000
+LIMITS
+mkdir -p /opt/topdisc && chmod 1777 /opt/topdisc && rm -f /opt/topdisc/ready
+echo "${bucket}" > /opt/topdisc/bucket
+echo "${region}" > /opt/topdisc/region
+until aws s3 cp --only-show-errors --region "${region}" "s3://${bucket}/topdisc-linux-amd64.tgz" /opt/topdisc/binaries.tgz; do sleep 15; done
+tar xzf /opt/topdisc/binaries.tgz -C /opt/topdisc
+%{ if role == "host" ~}
+# the netem qdiscs need tc, which the AL2023 image leaves out
+until dnf install -y -q iproute-tc >/dev/null 2>&1; do sleep 10; done
+cat > /etc/systemd/system/hostagent.service <<'UNIT'
+[Unit]
+Description=topdisc hostagent
+After=network-online.target
+[Service]
+ExecStart=/opt/topdisc/hostagent -serve :9000 -node-binary /opt/topdisc/topdisc-node -workdir /opt/topdisc/run
+LimitNOFILE=1000000
+LimitNPROC=1000000
+Restart=always
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload && systemctl enable hostagent && systemctl restart hostagent
+%{ else ~}
+cat > /opt/topdisc/save-runs.sh <<'SAVE'
+#!/bin/sh
+# Uploads every run directory to the bucket once, so the results survive
+# the deployment: after each run, and again before the scale-down.
+cd /opt/topdisc || exit 0
+b=$(cat bucket); r=$(cat region)
+for d in $(ls -d *-2*/ 2>/dev/null); do
+  d=$(basename "$d")
+  [ -e "$d.saved" ] && continue
+  tar czf "/tmp/$d.tgz" "$d" && aws s3 cp --only-show-errors --region "$r" "/tmp/$d.tgz" "s3://$b/runs/$d.tgz" && touch "$d.saved" && echo "saved $d to s3://$b/runs/$d.tgz"
+  rm -f "/tmp/$d.tgz"
+done
+SAVE
+cat > /opt/topdisc/scale-down.sh <<'DOWN'
+#!/bin/sh
+# Hard spending stop, independent of the machine that ran terraform:
+# terminate the hosts, then halt. What is left (VPC, bucket, this stopped
+# instance's volume) costs little; `deploy/aws-packed.sh down` removes it.
+/opt/topdisc/save-runs.sh >> /opt/topdisc/scale-down.log 2>&1
+r=$(cat /opt/topdisc/region)
+ids=$(aws ec2 describe-instances --region "$r" --filters Name=tag:topdisc,Values=host Name=instance-state-name,Values=running,pending,stopped --query 'Reservations[].Instances[].InstanceId' --output text)
+[ -z "$ids" ] || aws ec2 terminate-instances --region "$r" --instance-ids $ids >> /opt/topdisc/scale-down.log 2>&1 || true
+echo "fleet stopped at $(date -u)" >> /opt/topdisc/scale-down.log
+shutdown -h now
+DOWN
+chmod 755 /opt/topdisc/save-runs.sh /opt/topdisc/scale-down.sh
+cat > /etc/systemd/system/fleet-scale-down.service <<'UNIT'
+[Unit]
+Description=topdisc fleet scale-down (spending cap)
+[Service]
+Type=oneshot
+ExecStart=/opt/topdisc/scale-down.sh
+UNIT
+cat > /etc/systemd/system/fleet-scale-down.timer <<'UNIT'
+[Unit]
+Description=topdisc fleet scale-down max_hours after boot
+[Timer]
+OnBootSec=${max_hours}h
+[Install]
+WantedBy=timers.target
+UNIT
+%{ if max_hours > 0 ~}
+systemctl daemon-reload && systemctl enable --now fleet-scale-down.timer
+%{ endif ~}
+%{ endif ~}
+touch /opt/topdisc/ready
