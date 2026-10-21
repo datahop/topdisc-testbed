@@ -81,6 +81,7 @@ type TestbedConfig struct {
 	Cloud     CloudConfig     `yaml:"cloud"`
 	G5k       G5kConfig       `yaml:"g5k"`
 	Gcp       GcpConfig       `yaml:"gcp"`
+	Hetzner   HetznerConfig   `yaml:"hetzner"`
 	Simulator SimulatorConfig `yaml:"simulator"`
 	Harness   HarnessConfig   `yaml:"harness"`
 	Traces    TracesConfig    `yaml:"traces"`
@@ -234,6 +235,16 @@ type GcpConfig struct {
 	VnodesPerMachine int    `yaml:"vnodes_per_machine" json:"vnodes_per_machine"`
 }
 
+// HetznerConfig: the Hetzner Cloud backend (deploy/hetzner.sh), the GCP
+// layout on Hetzner servers: packed hosts on a private network that routes
+// one /16 per host, plus a coordinator.
+type HetznerConfig struct {
+	Location         string `yaml:"location" json:"location"`
+	ServerType       string `yaml:"server_type" json:"server_type"`
+	CoordinatorType  string `yaml:"coordinator_type" json:"coordinator_type"`
+	VnodesPerMachine int    `yaml:"vnodes_per_machine" json:"vnodes_per_machine"`
+}
+
 // LocalConfig: the local backend — N node processes on this host.
 type LocalConfig struct {
 	NodeBinary   string        `yaml:"node_binary"`
@@ -305,6 +316,10 @@ var paramDocs = []paramDoc{
 	{"testbed.gcp.machine_type", "VM type of the hosts; 8 vCPUs carry 200 nodes"},
 	{"testbed.gcp.coordinator_type", "VM type of the coordinator; it holds every trace while it aggregates"},
 	{"testbed.gcp.vnodes_per_machine", "node processes (netns'd, see testbed.wan) per host VM; sizes the fleet; 0 = not a GCP scenario"},
+	{"testbed.hetzner.location", "Hetzner Cloud location of the fleet (deploy/hetzner.sh): fsn1, nbg1, hel1, ash, hil, sin"},
+	{"testbed.hetzner.server_type", "server type of the hosts; cx53 (16 shared vCPUs, 32 GB) carries 500 nodes"},
+	{"testbed.hetzner.coordinator_type", "server type of the coordinator; it holds every trace while it aggregates"},
+	{"testbed.hetzner.vnodes_per_machine", "node processes (netns'd, see testbed.wan) per host; sizes the fleet; 0 = not a Hetzner scenario"},
 	{"testbed.g5k.image", "unused; left over from a dropped Distem-vnode design"},
 	{"testbed.wan.enabled", "give each node its own netns shaped by netem (Linux, root)"},
 	{"testbed.wan.delay_min_ms", "star model: min one-way delay per node; plan RTT 8ms -> 4"},
@@ -402,6 +417,7 @@ func Default() Config {
 	c.Testbed.Cloud.Inventory, c.Testbed.Cloud.HomeRegion, c.Testbed.Cloud.AgentPort, c.Testbed.Cloud.Verbosity, c.Testbed.Cloud.Grace = "inventory.json", "us-east-1", 9000, 2, mustDur("30s")
 	c.Testbed.G5k = G5kConfig{Site: "nancy", Walltime: "02:00:00", Queue: "default", Env: "debian11-x64-base", VnodesPerMachine: 250, Image: "file:///home/USER/topdisc-vnode.tar.gz"}
 	c.Testbed.Gcp = GcpConfig{Region: "us-central1", Zone: "us-central1-a", MachineType: "n2-standard-8", CoordinatorType: "e2-standard-4"}
+	c.Testbed.Hetzner = HetznerConfig{Location: "fsn1", ServerType: "cx53", CoordinatorType: "cx53"}
 	c.Testbed.Wan.DelayMinMs, c.Testbed.Wan.DelayMaxMs, c.Testbed.Wan.JitterMs, c.Testbed.Wan.RateKbps = 4, 45, 3, 160
 	c.Scenario.Population.Nodes = 5
 	c.Scenario.Population.Topics = 1
