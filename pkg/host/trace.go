@@ -7,32 +7,18 @@ import (
 	"strings"
 )
 
-// sessionPath is where Start parks the trace of a node's earlier session
-// before it restarts the node: node<idx>.s<k>.json next to node<idx>.json.
+// sessionPath is where the runner parked the trace of a node's earlier
+// session before in-process churn: node<idx>.s<k>.json next to node<idx>.json.
 func sessionPath(trace string, k int) string {
 	return strings.TrimSuffix(trace, ".json") + fmt.Sprintf(".s%d.json", k)
 }
 
-// rotateTrace parks the trace an earlier session of the node left, so a
-// churn restart does not overwrite it.
-func rotateTrace(trace string) error {
-	if _, err := os.Stat(trace); err != nil {
-		return nil
-	}
-	k := 1
-	for {
-		if _, err := os.Stat(sessionPath(trace, k)); err != nil {
-			break
-		}
-		k++
-	}
-	return os.Rename(trace, sessionPath(trace, k))
-}
-
-// LoadTrace reads a node's trace. A node that churn restarted left one file
-// per session; they are merged into one trace, oldest first: counters are
-// summed, event lists joined, sample counters carried on across restarts and
-// sessions[] lists when each process ran.
+// LoadTrace reads a node's trace. Nodes now write one trace with sessions[]
+// and it is returned as is. The merge remains for traces archived before
+// in-process churn, which cmd/recollect and the hostagent's /trace still
+// read: a node that churn restarted left one file per session, merged here
+// oldest first: counters summed, event lists joined, sample counters carried
+// on across restarts and sessions[] listing when each process ran.
 func LoadTrace(trace string) ([]byte, error) {
 	var parts [][]byte
 	for k := 1; ; k++ {

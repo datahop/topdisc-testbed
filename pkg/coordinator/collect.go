@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/datahop/topdisc-testbed/pkg/assign"
 	"github.com/datahop/topdisc-testbed/pkg/host"
@@ -30,6 +31,10 @@ type NodeTrace struct {
 	FirstCapableMs int64                       `json:"first_capable_ms"`
 	Ops            []map[string]any            `json:"ops"`
 	TopicLoad      map[string]any              `json:"topic_load"`
+	Sessions       []struct {
+		StartMs int64 `json:"start_ms"`
+		EndMs   int64 `json:"end_ms"`
+	} `json:"sessions"` // the node's online periods
 }
 
 // Collect reads the per-node traces, prints the run summary and writes
@@ -156,12 +161,26 @@ func Collect(trDir, runDir string, as []assign.Assignment) error {
 	return nil
 }
 
-func planned(as []assign.Assignment) int {
-	n := 0
+// planned counts the churn calls drive can apply: a departure before StopAt
+// that is not an arrival, and a return before StopAt.
+func planned(as []assign.Assignment) (departs, rejoins int) {
+	searchAt, stopAt := time.UnixMilli(as[0].Phases.SearchAt), time.UnixMilli(as[0].Phases.StopAt)
 	for _, a := range as {
-		n += len(a.Churn)
+		for _, ev := range a.Churn {
+			down, up := churnTimes(searchAt, ev)
+			if !down.Before(stopAt) {
+				break
+			}
+			if ev.DownAt > 0 {
+				departs++
+			}
+			if !up.Before(stopAt) {
+				break
+			}
+			rejoins++
+		}
 	}
-	return n
+	return departs, rejoins
 }
 
 func sum(v []int) int {

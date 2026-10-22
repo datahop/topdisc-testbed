@@ -975,12 +975,37 @@ def peer_table(ctx):
     return L
 
 
+def churn_departures(r):
+    """Per node, its sessions ended by churn (end_ms before the run's stop_at_ms), from nodes.json;
+    None for runs whose nodes.json has no sessions."""
+    if not hasattr(r, "_departures"):
+        nodes = load(os.path.join(r.dir, "nodes.json"), []) or []
+        stop = r.phases.get("stop_at_ms")
+        withs = [n["sessions"] for n in nodes if n.get("sessions") is not None]
+        r._departures = [sum(1 for s in ss if s["end_ms"] < stop) for ss in withs] if withs and stop else None
+    return r._departures
+
+
+def departures(r):
+    d = churn_departures(r)
+    if d is None:  # older runs: one parked trace file per departure
+        return len(glob.glob(os.path.join(r.dir, 'traces', '*.s*.json')))
+    return sum(d)
+
+
+def nodes_left(r):
+    d = churn_departures(r)
+    if d is None:
+        return len({os.path.basename(p).split('.')[0] for p in glob.glob(os.path.join(r.dir, 'traces', '*.s*.json'))})
+    return sum(1 for n in d if n > 0)
+
+
 def churn_table(ctx):
     """What churn did to each run: sessions kept, and the providers that were up at the end."""
     L = head(ctx)
     for name, f in [
-        ("departures with a kept trace", lambda r: f"{len(glob.glob(os.path.join(r.dir, 'traces', '*.s*.json'))):,}"),
-        ("nodes that left at least once", lambda r: f"{len({os.path.basename(p).split('.')[0] for p in glob.glob(os.path.join(r.dir, 'traces', '*.s*.json'))}):,}"),
+        ("departures with a kept trace", lambda r: f"{departures(r):,}"),
+        ("nodes that left at least once", lambda r: f"{nodes_left(r):,}"),
         ("searchers with a provider down at the end", lambda r: f"{sum(1 for x in r.results if x.get('targetOnline', x['target']) < x['target']):,} of {len(r.results):,}"),
         ("providers up at the end, share of the topic, median / min", lambda r: " / ".join(
             f"{100 * pct([x.get('targetOnline', x['target']) / x['target'] for x in r.results], q):.0f} %" for q in (50, 0))),
