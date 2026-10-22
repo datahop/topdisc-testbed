@@ -51,7 +51,7 @@ func (c *churnLog) record(op string, idx int, err error, ok, failed *int) {
 func (c *churnLog) active() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.departs > 0 || c.killFailed+c.startFailed > 0
+	return c.departs+c.rejoins > 0 || c.killFailed+c.startFailed > 0
 }
 
 func (c *churnLog) summary() string {
@@ -71,9 +71,10 @@ func printPhases(backend string, as []assign.Assignment, t0 int64) {
 }
 
 // drive starts every node (bootnode first), applies the churn schedule and
-// returns once StopAt+grace has passed. Churn: kill at DownAt, restart the
-// same identity at UpAt; a restarted node re-registers and re-searches at
-// once because its phase times are past.
+// returns once StopAt+grace has passed. Churn: take the node down at DownAt,
+// bring it up at UpAt; the process stays. A node that comes back re-registers
+// and re-searches at once because its phase times are past. An arrival
+// (DownAt 0) starts down and comes up for the first time at UpAt.
 func drive(as []assign.Assignment, ctl hostControl, grace time.Duration) error {
 	if err := ctl.start(as[0].Idx); err != nil {
 		return err
@@ -83,7 +84,8 @@ func drive(as []assign.Assignment, ctl hostControl, grace time.Duration) error {
 		return err
 	}
 	searchAt := time.UnixMilli(as[0].Phases.SearchAt)
-	stop := time.UnixMilli(as[0].Phases.StopAt).Add(grace)
+	stopAt := time.UnixMilli(as[0].Phases.StopAt)
+	stop := stopAt.Add(grace)
 	cl := &churnLog{out: os.Stdout}
 	for _, a := range as {
 		if len(a.Churn) == 0 {
@@ -91,15 +93,17 @@ func drive(as []assign.Assignment, ctl hostControl, grace time.Duration) error {
 		}
 		go func(idx int, events []churn.Event) {
 			for _, ev := range events {
-				down, up := searchAt.Add(time.Duration(ev.DownAt*float64(time.Second))), searchAt.Add(time.Duration(ev.UpAt*float64(time.Second)))
-				// Nothing past the stop: a departure then is the end of the
-				// run, and a return would start a node after collection.
-				if !down.Before(stop) {
+				down, up := churnTimes(searchAt, ev)
+				// Nothing at or past StopAt: the node writes its trace then,
+				// so a departure changes nothing and a return comes too late.
+				if !down.Before(stopAt) {
 					return
 				}
-				time.Sleep(time.Until(down))
-				cl.kill(idx, ctl.kill(idx))
-				if !up.Before(stop) {
+				if ev.DownAt > 0 {
+					time.Sleep(time.Until(down))
+					cl.kill(idx, ctl.kill(idx))
+				}
+				if !up.Before(stopAt) {
 					return
 				}
 				time.Sleep(time.Until(up))
@@ -114,8 +118,14 @@ func drive(as []assign.Assignment, ctl hostControl, grace time.Duration) error {
 			fmt.Printf("[churn] %s\n", cl.summary())
 		}
 	}
-	if p := planned(as); p > 0 {
-		fmt.Printf("churn applied: %s (planned %d)\n", cl.summary(), p)
+	if d, r := planned(as); d+r > 0 {
+		fmt.Printf("churn applied: %s (planned departs=%d rejoins=%d)\n", cl.summary(), d, r)
 	}
 	return nil
+}
+
+// churnTimes is when an event's departure and return fall: seconds from node
+// 0's search start.
+func churnTimes(searchAt time.Time, ev churn.Event) (down, up time.Time) {
+	return searchAt.Add(time.Duration(ev.DownAt * float64(time.Second))), searchAt.Add(time.Duration(ev.UpAt * float64(time.Second)))
 }

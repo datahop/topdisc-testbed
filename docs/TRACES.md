@@ -223,15 +223,32 @@ From fork tag `v1.17.2-testbed.10` on, for the correctness checks (`figures/chec
 
 ## Sessions under churn
 
-Each node trace carries `session: {start_ms, end_ms}`, when that process ran.
-A churn departure sends the node SIGTERM; it writes its trace and exits, and
-the runner parks that file as `node<idx>.s<k>.json` before it restarts the
-node, so no session is lost. The hostagent and the collectors read a churned
-node through one merge (`host.LoadTrace`): counters summed, `lookups`, `ops`
-and `refill_ms` joined, the sample counters of later sessions carried on from
-the earlier totals so the series stays cumulative, the dialer's finds of every
-session kept, and `sessions[]` listing every process. A node that never
-returned has only parked files; they merge the same way. In `series.json`
-each node's last sample is carried over the slots up to its next one or the
-end of the run, so a node that is away keeps its total in the cumulative
-network series and the node count per slot stays the population.
+A node is one process for the whole run. A churn departure (`/down` on the
+node's status port, called by the runner or the hostagent) stops its p2p
+server in place: the sockets close and peers see silence. A return (`/up`)
+builds a new server with the same key, address and port, with an empty table,
+no ads and no registrations; its phase times are past, so it registers and
+searches at once. An arrival (first event with `DownAt` 0) starts its process
+with everyone else but stays down until its first `UpAt`.
+
+The node writes one trace, at `StopAt`, covering every session, with
+`sessions[]` listing each online period (one entry for a node that never
+churned; no `session` key). Each new server counts from zero, so the trace
+sums or joins across sessions: `wire`, `peer_drops` and `topic_load` are
+summed; `lookups`, `ops`, `refill_ms` and `samples` are joined, the sample
+counters carried on from the earlier sessions' totals so the series stays
+cumulative; `first_capable_ms` is the earliest over sessions; `conn` is the
+last dialer session's, with `found` holding every session's finds timed from
+its `start_ms` (earlier ones negative). `outbound`, `inbound`, `ads_held` and
+the registrar and advertiser fields (`ads_*`, `stale_ad_max_ms`, `reg_*`) are
+the last session's. `admissions` and `wait` are process-wide and cover every
+session. A node down at `StopAt` reports its last session as it was when it
+went down. `nodes.json` carries each node's `sessions`.
+
+Runs from before in-process churn left one file per process, the earlier ones
+parked as `node<idx>.s<k>.json`. `host.LoadTrace` still merges those (what
+`cmd/recollect` and the hostagent's `/trace` read) by the same rules, except
+that `topic_load` and `wait` are the last process's. In `series.json` each
+node's last sample is carried over the slots up to its next one or the end of
+the run, so a node that is away keeps its total in the cumulative network
+series and the node count per slot stays the population.
