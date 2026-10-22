@@ -140,6 +140,8 @@ class Run:
         self.topic_of = {r["nodeIdx"]: r["topic"] for r in self.results}
         # Churn: found and target count the providers up at the end of the search.
         self.churned = any(x.get("uniqueFoundOnline") is not None for x in self.results)
+        # Under churn a searcher whose topic had nobody up at the end cannot be scored.
+        self.results = [r for r in self.results if self.tgt(r)]
         if self.churned:
             self.notes.append("churn: found and target count the providers that were up at the end of the search")
         self.size_of = {t["topic"]: t.get("target", 0) + 1 for t in self.m.get("perTopic") or []}
@@ -161,7 +163,7 @@ class Run:
     def first_found(self, rs=None):
         """Seconds to each searcher's first provider; a provider found at 0 ms
         (already in the routing table) counts."""
-        return [float(self.found_at(x)[0]) for x in (self.results if rs is None else rs) if x.get("uniqueFoundAtMs")]
+        return [float(f[0]) for x in (self.results if rs is None else rs) if len(f := self.found_at(x))]
 
     def table_hits(self, rs=None):
         """Share of searchers whose first provider came at 0 ms: a plain node
@@ -368,7 +370,7 @@ def found_over_time(ctx):
     if not LOG_TIME:
         # Zoom to where the curves still move: the time by which 95 % of
         # searchers had found their last provider, with a margin.
-        last = [float(r.found_at(x)[-1]) for r in ctx.runs for x in r.results if x.get("uniqueFoundAtMs")]
+        last = [float(f[-1]) for r in ctx.runs for x in r.results if len(f := r.found_at(x))]
         if last:
             horizon = min(horizon, max(pct(last, 95) * 1.3, 1.0))
     grid = (np.concatenate([[0], np.logspace(-2, np.log10(horizon), 240)]) if LOG_TIME

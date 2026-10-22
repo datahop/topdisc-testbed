@@ -93,10 +93,13 @@ func (r *Runner) sample() {
 	s.UDPRcvbufErrors, s.UDPInErrors = udpErrors()
 	r.mu.Lock()
 	pids := map[int]int{}
-	for idx, c := range r.procs {
-		if c.Process != nil && c.ProcessState == nil {
-			pids[idx] = c.Process.Pid
+	for idx, p := range r.procs {
+		select {
+		case <-p.done:
+			continue
+		default:
 		}
+		pids[idx] = p.cmd.Process.Pid
 	}
 	r.mu.Unlock()
 	m.mu.Lock()

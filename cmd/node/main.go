@@ -418,7 +418,7 @@ func main() {
 		for t, l := range srv.DiscoveryV5().TopicLoadStats() {
 			topicLoad[t.String()] = l
 		}
-		b, _ := json.MarshalIndent(map[string]any{
+		b, err := json.MarshalIndent(map[string]any{
 			"idx": asg.Idx, "id": srv.Self().ID().String(), "outbound": out, "inbound": in,
 			"peer_drops": drops, "refill_ms": refills, "lookups": lookups, "first_capable_ms": firstCapableMs, "legacy": false,
 			"ads_held": len(srv.DiscoveryV5().LocalTopicNodes(topic)), "wire": wire,
@@ -429,7 +429,13 @@ func main() {
 			"ops": ops, "topic_load": topicLoad, "conn": conn,
 			"session": map[string]any{"start_ms": procStart.UnixMilli(), "end_ms": time.Now().UnixMilli()},
 		}, "", " ")
-		os.WriteFile(asg.TraceFile, b, 0o644)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "trace:", err)
+			return
+		}
+		if err := os.WriteFile(asg.TraceFile, b, 0o644); err != nil {
+			fmt.Fprintln(os.Stderr, "trace:", err)
+		}
 	}
 	if asg.Phases.StopAt > 0 {
 		go func() { wait(asg.Phases.StopAt); writeTrace(); srv.Stop(); os.Exit(0) }()

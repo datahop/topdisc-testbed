@@ -3,6 +3,7 @@
 package coordinator
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -56,7 +57,12 @@ func RunLocal(cfg scenario.Config, runDir string) error {
 	}
 	ctl := hostControl{
 		start: func(idx int) error { return r.Start(idx) },
-		kill:  func(idx int) bool { return r.Kill(idx) },
+		kill: func(idx int) error {
+			if !r.Kill(idx) {
+				return errors.New("not running")
+			}
+			return nil
+		},
 	}
 	if err := drive(as, ctl, lc.Grace); err != nil {
 		return err

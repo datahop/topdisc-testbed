@@ -58,7 +58,7 @@ type Runner struct {
 	NetRoutes bool
 
 	mu     sync.Mutex
-	procs  map[int]*exec.Cmd
+	procs  map[int]*proc
 	delay  map[int]time.Duration
 	legacy map[int]string // node index -> binary, for legacy nodes
 	trace  map[int]string // node index -> trace path, parked between sessions
@@ -67,8 +67,15 @@ type Runner struct {
 
 func (r *Runner) init() {
 	if r.procs == nil {
-		r.procs, r.delay, r.legacy, r.trace = map[int]*exec.Cmd{}, map[int]time.Duration{}, map[int]string{}, map[int]string{}
+		r.procs, r.delay, r.legacy, r.trace = map[int]*proc{}, map[int]time.Duration{}, map[int]string{}, map[int]string{}
 	}
+}
+
+// proc is one started node process; done closes once reap has waited for it.
+type proc struct {
+	cmd      *exec.Cmd
+	done     chan struct{}
+	exitedAt time.Time
 }
 
 // Prepare writes assignments and, with WAN emulation, creates the bridge and
@@ -216,30 +223,50 @@ func (r *Runner) Start(idx int) error {
 	if err := c.Start(); err != nil {
 		return fmt.Errorf("node %d: %w", idx, err)
 	}
+	p := &proc{cmd: c, done: make(chan struct{})}
 	r.mu.Lock()
-	r.procs[idx] = c
+	r.procs[idx] = p
 	r.mu.Unlock()
+	go r.reap(idx, p)
 	return nil
+}
+
+// reap is the only Wait on a node process. It records the exit in the node's
+// log; a proc still registered when it exits was not killed (Kill deletes it
+// under r.mu before signalling).
+func (r *Runner) reap(idx int, p *proc) {
+	p.cmd.Wait()
+	p.exitedAt = time.Now()
+	r.mu.Lock()
+	own := r.procs[idx] == p
+	r.mu.Unlock()
+	how := "exited"
+	if own {
+		how = "exited on its own"
+	}
+	if f, err := os.OpenFile(filepath.Join(r.LogDir, fmt.Sprintf("node%d.log", idx)), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+		fmt.Fprintf(f, "[host] %s: %s at %s\n", how, p.cmd.ProcessState, p.exitedAt.Format(time.TimeOnly))
+		f.Close()
+	}
+	close(p.done)
 }
 
 func (r *Runner) Kill(idx int) bool {
 	r.mu.Lock()
-	c := r.procs[idx]
+	p := r.procs[idx]
 	delete(r.procs, idx)
 	r.mu.Unlock()
-	if c == nil || c.Process == nil {
+	if p == nil {
 		return false
 	}
 	// SIGTERM first, so the node writes its session's trace before it goes;
 	// its socket closes with the process either way.
-	c.Process.Signal(syscall.SIGTERM)
-	done := make(chan struct{})
-	go func() { c.Wait(); close(done) }()
+	p.cmd.Process.Signal(syscall.SIGTERM)
 	select {
-	case <-done:
+	case <-p.done:
 	case <-time.After(5 * time.Second):
-		c.Process.Kill()
-		<-done
+		p.cmd.Process.Kill()
+		<-p.done
 	}
 	return true
 }

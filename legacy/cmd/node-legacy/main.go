@@ -357,7 +357,7 @@ func main() {
 			conn = map[string]any{"start_ms": connStart.UnixMilli(), "found": connFound, "slots_filled_ms": connFullMs}
 		}
 		connMu.Unlock()
-		b, _ := json.MarshalIndent(map[string]any{
+		b, err := json.MarshalIndent(map[string]any{
 			"conn": conn,
 			"idx":  asg.Idx, "id": srv.Self().ID().String(), "legacy": true, "outbound": out, "inbound": in,
 			"peer_drops": drops, "refill_ms": refills, "lookups": lookups, "first_capable_ms": firstCapableMs,
@@ -369,7 +369,13 @@ func main() {
 			"register_at_ms": asg.Phases.RegisterAt, "search_at_ms": asg.Phases.SearchAt,
 			"session": map[string]any{"start_ms": started.UnixMilli(), "end_ms": time.Now().UnixMilli()},
 		}, "", " ")
-		os.WriteFile(asg.TraceFile, b, 0o644)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "trace:", err)
+			return
+		}
+		if err := os.WriteFile(asg.TraceFile, b, 0o644); err != nil {
+			fmt.Fprintln(os.Stderr, "trace:", err)
+		}
 	}
 	if asg.Phases.StopAt > 0 {
 		go func() { wait(asg.Phases.StopAt); writeTrace(); srv.Stop(); os.Exit(0) }()
