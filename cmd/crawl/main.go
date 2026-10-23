@@ -26,7 +26,8 @@
 // requests are spread evenly over the period. The returned nodes enter the
 // registry like crawled ones, so the dead share per FINDNODE request (the
 // deduplicated records returned for one request) can be derived later from
-// the probe events.
+// the probe events. With -sample-full, every node that is up has its whole
+// table read instead (see sampleTable).
 package main
 
 import (
@@ -71,9 +72,10 @@ func main() {
 		workers   = flag.Int("workers", 256, "concurrent pings to nodes that ever answered or are new")
 		deadWork  = flag.Int("dead-workers", 32, "concurrent pings to never-responders")
 		sweep     = flag.Duration("sweep", 10*time.Minute, "period of the sweep count events")
-		sample    = flag.Duration("sample", 0, "period at which every live node's table is sampled with FINDNODE; 0 = off")
+		sample    = flag.Duration("sample", 0, "period at which every live node's table is sampled with FINDNODE; 0 = off. With -sample-full, use -sample 1h -duration 2h20m: the second pass reads every node learned in the first hour, and 20 min remain to ping the returned records")
 		sampleW   = flag.Int("sample-workers", 64, "concurrent FINDNODE requests of the sampler")
 		sampleD   = flag.Int("sample-distances", 3, "random distinct distances in 248..256 per FINDNODE")
+		sampleF   = flag.Bool("sample-full", false, "read the whole table of every live node each sample period: one FINDNODE per distance 256 down to 224 (33 requests per node; 240 and below cover bucket 0); -sample-distances is ignored")
 		verbosity = flag.Int("verbosity", 3, "log verbosity")
 	)
 	flag.Parse()
@@ -151,7 +153,7 @@ func main() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			reg.sampleLoop(disc, stop, sampleConfig{period: *sample, workers: *sampleW, distances: *sampleD})
+			reg.sampleLoop(disc, stop, sampleConfig{period: *sample, workers: *sampleW, distances: *sampleD, full: *sampleF})
 		}()
 	}
 	wg.Add(1)
@@ -608,6 +610,7 @@ type sampleConfig struct {
 	period    time.Duration
 	workers   int
 	distances int
+	full      bool
 }
 
 type replyEvent struct {
@@ -629,7 +632,11 @@ func (r *registry) sampleLoop(disc *discover.UDPv5, stop <-chan struct{}, cfg sa
 		go func() {
 			defer wg.Done()
 			for n := range jobs {
-				r.sampleNode(disc, n, cfg.distances)
+				if cfg.full {
+					r.sampleTable(disc, n)
+				} else {
+					r.sampleNode(disc, n, cfg.distances)
+				}
 			}
 		}()
 	}
@@ -678,11 +685,37 @@ func (r *registry) sampleNode(disc *discover.UDPv5, n *enode.Node, k int) {
 	for _, i := range rand.Perm(9)[:min(max(k, 1), 9)] {
 		dists = append(dists, uint(248+i))
 	}
+	nodes, err := r.findnode(disc, n, dists)
+	r.logReply(n, dists, nodes, err)
+}
+
+// sampleTable reads every bucket of n's table, one distance per request so
+// no reply can hit the result limit of 16, and stops at the first error.
+// Bucket 0 holds every entry at distance <= 240 and is returned whole for any
+// distance <= 240, but the client keeps only records at a requested distance,
+// so distances down to 224 are asked.
+func (r *registry) sampleTable(disc *discover.UDPv5, n *enode.Node) {
+	for d := uint(256); d >= 224; d-- {
+		nodes, err := r.findnode(disc, n, []uint{d})
+		r.logReply(n, []uint{d}, nodes, err)
+		if err != nil {
+			return
+		}
+	}
+}
+
+func (r *registry) findnode(disc *discover.UDPv5, n *enode.Node, dists []uint) ([]*enode.Node, error) {
 	r.samples.Add(1)
 	nodes, err := disc.Findnode(n, dists)
-	ev := replyEvent{Ev: "reply", From: n.ID().String(), Dist: dists}
 	if err != nil {
 		r.sampleErr.Add(1)
+	}
+	return nodes, err
+}
+
+func (r *registry) logReply(n *enode.Node, dists []uint, nodes []*enode.Node, err error) {
+	ev := replyEvent{Ev: "reply", From: n.ID().String(), Dist: dists}
+	if err != nil {
 		ev.Err = errKind(err)
 	}
 	for _, nn := range nodes {

@@ -27,6 +27,18 @@ The node key is kept in `<out>/key`, so a restart keeps the crawler's identity.
 | `-workers` / `-dead-workers` | 256 / 32 | ping concurrency for the two classes; never-responders can never delay the live schedule |
 | `-sweep` | 10m | period of the count events |
 
+`-sample <period> -sample-full` reads the whole table of every live node once
+per period, one FINDNODE per distance 256 down to 224 (240 and below cover
+geth's bucket 0), and logs each reply as a `reply` event (`from dist nodes err`).
+Use `-sample 1h -duration 2h20m`: the second pass reads every node learned in
+the first hour. The 33 requests per node roughly double the crawl time; use
+`-sample-workers 256` for a 27k-node run. Then
+`python3 tools/crawl_tables.py <out>/events.jsonl` rebuilds each node's last
+complete table, every entry marked alive or dead, into `tables.json`. The client
+reads at most 5 NODES packets per FINDNODE, which would silently truncate a full
+bucket only if its records averaged above ~300 bytes; mainnet ENRs (p99 262, max
+292 bytes) never get there.
+
 Load at the full discv5 population (~170k records, ~25k nodes that answer at
 least once): about 100 pings/s, under 1 MB/s.
 
