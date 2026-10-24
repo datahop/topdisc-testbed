@@ -32,7 +32,8 @@ scenario:
     model: models/crawl-2026-09-18.json
     window_real_hours: 24
   ghosts:
-    tables: /home/sergi/workspace/datahop/runs/2026-10-23-crawl-full-aws/data/tables.json.gz
+    tables: models/crawl-2026-10-23-tables.json.gz
+    pool: 75000
 testbed:
   backend: cloud
   cloud:
