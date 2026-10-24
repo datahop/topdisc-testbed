@@ -1,7 +1,8 @@
 // node-legacy is the legacy half of the TopDisc-vs-discv5 comparison: a stock
 // upstream geth p2p.Server with discv5 and no topic discovery at all. Built
-// with -tags fork -modfile=go.fork.mod it runs on the TopDisc fork instead,
-// with the fork's per-message counters (wire_fork.go). It
+// with -tags fork -modfile=go.fork.mod it runs on the fork's discv5
+// instrumentation branch instead, with its per-message counters and pinned
+// entries (wire_fork.go). It
 // publishes its service in the ENR and finds providers by random-walk
 // discovery, which is all a topic-unaware client can do. Same assignment file
 // and trace record as cmd/node, so the figures compare directly.

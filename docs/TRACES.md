@@ -180,9 +180,13 @@ sampling. Runs without those flags carry no measurement overhead.
 ## Fork version and real-backend additions
 
 `run.yaml` records `build.testbed` (testbed commit) and `build.fork` (the
-go-ethereum tag, e.g. `github.com/datahop/go-ethereum@v1.17.2-testbed.3`). The
-fork's testbed tags live on the instrumentation branch (`instr-adaptive` since
-`v1.17.2-testbed.9`) and are never merged into `topdisc`.
+testbed and TopDisc binary's go-ethereum tag, e.g.
+`github.com/datahop/go-ethereum@v1.17.2-testbed.3`). Those tags live on the
+instrumentation branch (`instr-prs-20261023`, earlier `instr-adaptive`) and are
+never merged into `topdisc`. Plain nodes with `legacy_build: fork` pin a second
+series, `v1.17.2-discv5-testbed.N` on `instr-discv5-20261024` (fork `master`
+plus the discv5 instrumentation only); each reports its module in the trace and
+`nodes.json` field `fork`, and the run.log summary lists the distinct values.
 
 Real backends add to `metrics.json`:
 
@@ -221,7 +225,7 @@ From fork tag `v1.17.2-testbed.10` on, for the correctness checks (`figures/chec
 | node trace | `lookups[].search.maxTopicPerReply`, `maxAuxPerReply` | the largest TOPICNODES and NODES reply one search received |
 | simnet | `ads.json`, `buckets.json`, `admissions.json` | the same registrar and advertiser state for every in-process node at the end of the run; `admissions.json` only up to 1000 nodes |
 
-From fork tag `v1.17.2-testbed.18` on, for routing-table ghosts (`scenario.ghosts`, docs/PARAMETERS.md):
+From fork tag `v1.17.2-testbed.18` (plain build: `v1.17.2-discv5-testbed.1`) on, for routing-table ghosts (`scenario.ghosts`, docs/PARAMETERS.md):
 
 | File | Field | Contents |
 |---|---|---|

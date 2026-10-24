@@ -427,8 +427,8 @@ func (n *node) watchPeers(s *session, events chan *p2p.PeerEvent) {
 			if !n.lookupOnly && s.connFullMs < 0 && !s.connStart.IsZero() && outbound >= s.srv.MaxDialedConns() {
 				s.connFullMs = time.Since(s.connStart).Milliseconds()
 			}
-			// Every node of a fork build carries "ng", so the first
-			// capable peer means nothing there.
+			// A fork build never sets firstCapableMs: every peer in its
+			// runs is plain.
 			if s.firstCapableMs < 0 && !forkBuild && capable {
 				s.firstCapableMs = time.Since(s.started).Milliseconds()
 			}
@@ -512,6 +512,7 @@ func (n *node) trace() map[string]any {
 		// epoch value instead of ms into the search.
 		"register_at_ms": a.Phases.RegisterAt, "search_at_ms": a.Phases.SearchAt,
 		"sessions": sessions, "ghosts_assigned": len(n.ghosts), "ghosts_in_table": ghosts, "table_size": table,
+		"fork": forkVersion(),
 	}
 }
 
@@ -539,7 +540,7 @@ func (n *node) status() map[string]any {
 	}
 	n.mu.Unlock()
 	m := map[string]any{"up": s != nil, "sessions": sessions, "goroutines": runtime.NumGoroutine(), "enode": "", "peers": 0, "outbound": 0, "inbound": 0,
-		"table": 0, "lookups": lookups, "refills": refills}
+		"table": 0, "lookups": lookups, "refills": refills, "fork": forkVersion()}
 	if s == nil {
 		return m
 	}

@@ -1,5 +1,7 @@
-// The plain discv5 node built on the TopDisc fork: same discv5 code and wire
-// counters as cmd/node. Build with -modfile=go.fork.mod -tags fork. go.mod
+// The plain discv5 node built on the fork's discv5 instrumentation branch
+// (instr-discv5-*: upstream master's discv5 plus the wire counters and pinned
+// table entries the testbed reads, no topic code), tag series
+// v1.17.2-discv5-testbed.N. Build with -modfile=go.fork.mod -tags fork. go.mod
 // stays on stock upstream geth for runs that mix plain and TopDisc nodes.
 module github.com/datahop/topdisc-testbed/legacy
 
@@ -34,4 +36,4 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 )
 
-replace github.com/ethereum/go-ethereum => github.com/datahop/go-ethereum v1.17.2-testbed.18
+replace github.com/ethereum/go-ethereum => github.com/datahop/go-ethereum v1.17.2-discv5-testbed.1
