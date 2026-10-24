@@ -125,6 +125,9 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 	if err != nil {
 		return err
 	}
+	if s := assign.GhostSummary(as); s != "" {
+		fmt.Println(s)
+	}
 	if err := assign.Write(filepath.Join(runDir, "assignments"), as); err != nil {
 		return err
 	}

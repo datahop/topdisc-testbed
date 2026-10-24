@@ -156,3 +156,40 @@ func TestDownWhileWaitingForSearch(t *testing.T) {
 	}
 	it.Close() // the server's discmix closes it again
 }
+
+// The ghost fields are the last session's snapshot; the timeout counters sum
+// over sessions like the rest of wire.
+func TestTraceGhosts(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := newNode(assign.Assignment{Idx: 1, Topics: []string{"t"}}, key)
+	for i := 0; i < 2; i++ {
+		k, _ := crypto.GenerateKey()
+		n.ghosts = append(n.ghosts, enode.NewV4(&k.PublicKey, nil, 0, 20000+i))
+	}
+	s1 := newSession(time.UnixMilli(1000))
+	s1.wire = map[string]discover.WireCounter{"FINDNODE/v5": {TxMsgs: 2, Timeouts: 2, GhostTimeouts: 1, OwnGhostTimeouts: 1}}
+	s1.ghostsInTable, s1.tableSize = 2, 10
+	n.cur = s1
+	n.fold(s1, time.UnixMilli(2000))
+	s2 := newSession(time.UnixMilli(3000))
+	s2.wire = map[string]discover.WireCounter{"FINDNODE/v5": {TxMsgs: 1, Timeouts: 3, GhostTimeouts: 2}, "PING/v5": {Timeouts: 1}}
+	s2.ghostsInTable, s2.tableSize = 2, 30
+	n.cur = s2
+
+	check := func(when string) {
+		m := n.trace()
+		if m["ghosts_assigned"] != 2 || m["ghosts_in_table"] != 2 || m["table_size"] != 30 {
+			t.Errorf("%s: ghosts_assigned %v ghosts_in_table %v table_size %v, want 2 2 30", when, m["ghosts_assigned"], m["ghosts_in_table"], m["table_size"])
+		}
+		w := m["wire"].(map[string]discover.WireCounter)
+		if f := w["FINDNODE/v5"]; f != (discover.WireCounter{TxMsgs: 3, Timeouts: 5, GhostTimeouts: 3, OwnGhostTimeouts: 1}) || w["PING/v5"].Timeouts != 1 {
+			t.Errorf("%s: timeouts not summed: %+v", when, w)
+		}
+	}
+	check("second session up")
+	n.fold(s2, time.UnixMilli(4000))
+	check("both sessions closed")
+}

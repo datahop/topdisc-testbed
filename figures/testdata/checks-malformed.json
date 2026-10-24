@@ -576,6 +576,22 @@
     "rss_peak": 20.5,
     "mem_avail_min": 898
    }
+  },
+  {
+   "id": "G1",
+   "group": "load",
+   "assertion": "ghosts pinned: every node holds all its assigned ghosts at its last snapshot",
+   "status": "not-exercised",
+   "summary": "no ghosts in this run",
+   "evidence": {}
+  },
+  {
+   "id": "G2",
+   "group": "load",
+   "assertion": "ghosts cost timeouts: some ghostTimeouts recorded and every ownGhostTimeouts \u2264 ghostTimeouts",
+   "status": "not-exercised",
+   "summary": "no ghosts in this run",
+   "evidence": {}
   }
  ],
  "exit": 1

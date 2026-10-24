@@ -178,6 +178,8 @@ func TestTraceAccumulatesSessions(t *testing.T) {
 	s1.wire, s1.lookups = w1, []lookup{{StartMs: 1100}}
 	s1.connStart, s1.connFound = time.UnixMilli(1200), []found{{ID: "p1", AtMs: 5}}
 	n.cur, n.drops, n.firstCapableMs = s1, 1, -1
+	n.ghosts = []*enode.Node{randNode(), randNode()}
+	s1.ghostsInTable, s1.tableSize = 1, 5
 	if forkBuild {
 		n.addSample(sample{AtMs: 1500, Wire: w1})
 	}
@@ -186,6 +188,7 @@ func TestTraceAccumulatesSessions(t *testing.T) {
 	s2.wire, s2.lookups, s2.firstCapableMs = w2, []lookup{{StartMs: 3100}}, 70
 	s2.connStart, s2.connFound = time.UnixMilli(3200), []found{{ID: "p2", AtMs: 7}}
 	n.cur, n.drops = s2, n.drops+2
+	s2.ghostsInTable, s2.tableSize = 2, 9
 	if forkBuild {
 		n.addSample(sample{AtMs: 3500, Wire: w2})
 	}
@@ -216,5 +219,12 @@ func TestTraceAccumulatesSessions(t *testing.T) {
 	}
 	if _, ok := m["session"]; ok {
 		t.Error("trace has a session key")
+	}
+	if m["ghosts_assigned"] != 2 || m["ghosts_in_table"] != 2 || m["table_size"] != 9 {
+		t.Errorf("ghosts_assigned %v ghosts_in_table %v table_size %v, want the last session's 2 2 9", m["ghosts_assigned"], m["ghosts_in_table"], m["table_size"])
+	}
+	n.fold(s2, time.UnixMilli(4000))
+	if m := n.trace(); m["ghosts_in_table"] != 2 || m["table_size"] != 9 {
+		t.Errorf("after the last session closed: ghosts_in_table %v table_size %v, want 2 9", m["ghosts_in_table"], m["table_size"])
 	}
 }

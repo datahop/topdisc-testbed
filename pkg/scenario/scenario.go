@@ -71,6 +71,7 @@ type ScenarioConfig struct {
 	SessionChurn SessionChurnConfig `yaml:"session_churn"`
 	Disconnect   DisconnectConfig   `yaml:"disconnect"`
 	Churn        ChurnConfig        `yaml:"churn"`
+	Ghosts       GhostsConfig       `yaml:"ghosts"`
 }
 
 // TestbedConfig is how this harness executes a scenario.
@@ -188,6 +189,14 @@ type ChurnConfig struct {
 	Interval time.Duration `yaml:"interval"`
 	Frac     float64       `yaml:"frac"`
 	Mode     string        `yaml:"mode"`
+}
+
+// GhostsConfig: unreachable records pinned in every node's discv5 table, as
+// NAT'd nodes stay in the tables of the peers they contact.
+type GhostsConfig struct {
+	Share  float64 `yaml:"share"`
+	Tables string  `yaml:"tables"`
+	Pool   int     `yaml:"pool"`
 }
 
 // WanConfig: per-node WAN emulation (netns + netem); star model, Linux only.
@@ -402,6 +411,9 @@ var paramDocs = []paramDoc{
 	{"scenario.churn.interval", "churn round period; 0 = off"},
 	{"scenario.churn.frac", "fraction of nodes acted on per round"},
 	{"scenario.churn.mode", "steadystate (50/50 leave/join) or killonly"},
+	{"scenario.ghosts.share", "mean share of unreachable entries in each node's table; per-node shares follow the mainnet quantile curve scaled to this mean, spread over buckets 248..256; 0 = off (mainnet 2026-10-23: 0.11)"},
+	{"scenario.ghosts.tables", "tables.json(.gz) of a crawl (mainnet dead entries per bucket); node i replays the dead counts of crawled node i mod M. Relative to this file; exclusive with share"},
+	{"scenario.ghosts.pool", "ghost identities to draw from; 0 = max(2 x nodes, 1024)"},
 	{"testbed.simulator.link_buf", "link input queue depth; 0 = simnet default 1024"},
 	{"testbed.simulator.link_no_aqm", "skip fq_codel and rate limiting on links"},
 	{"testbed.simulator.router_buf", "router per-shard queue; 0 = simnet default 8192"},
@@ -512,6 +524,9 @@ func Load(path string) (Config, error) {
 	default:
 		return c, fmt.Errorf("%s: population.legacy_build %q: want stock or fork", path, p.LegacyBuild)
 	}
+	if err := c.checkGhosts(filepath.Dir(path)); err != nil {
+		return c, fmt.Errorf("%s: %w", path, err)
+	}
 	if c.Scenario.Search.Model != "conn" && c.Scenario.ConnModel.Enabled {
 		return c, fmt.Errorf("%s: search.model %s is lookup-only and never dials; remove conn_model or use search.model conn", path, c.Scenario.Search.Model)
 	}
@@ -519,6 +534,55 @@ func Load(path string) (Config, error) {
 		c.Name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	}
 	return c, nil
+}
+
+// GhostPortBase is the first UDP port ghost records advertise; they use
+// [GhostPortBase, GhostPortBase+GhostPortSpan), which no node binds.
+const GhostPortBase, GhostPortSpan = 20000, 10000
+
+// On reports whether the scenario pins ghost records.
+func (g GhostsConfig) On() bool { return g.Share > 0 || g.Tables != "" }
+
+// TablesPath resolves the tables path against the scenario directory.
+func (g GhostsConfig) TablesPath(dir string) string {
+	if g.Tables == "" || filepath.IsAbs(g.Tables) {
+		return g.Tables
+	}
+	return filepath.Join(dir, g.Tables)
+}
+
+func (c Config) checkGhosts(dir string) error {
+	g, p := c.Scenario.Ghosts, c.Scenario.Population
+	if g.Share < 0 || g.Share > 0.5 {
+		return fmt.Errorf("ghosts.share %g: want 0..0.5", g.Share)
+	}
+	if g.Pool < 0 {
+		return fmt.Errorf("ghosts.pool %d: want >= 0", g.Pool)
+	}
+	if !g.On() {
+		return nil
+	}
+	if g.Share > 0 && g.Tables != "" {
+		return fmt.Errorf("ghosts.share and ghosts.tables are exclusive")
+	}
+	if c.Testbed.Backend == "simnet" {
+		return fmt.Errorf("ghosts need a real backend (local, cloud); simnet does not pin them")
+	}
+	if p.LegacyFrac > 0 && p.LegacyBuild != "fork" {
+		return fmt.Errorf("ghosts with legacy nodes need population.legacy_build fork: the stock build cannot pin")
+	}
+	if g.Tables != "" {
+		if _, err := os.Stat(g.TablesPath(dir)); err != nil {
+			return fmt.Errorf("ghosts.tables: %w", err)
+		}
+	}
+	if c.Testbed.Backend == "local" {
+		lo, hi := c.Testbed.Local.BasePort, c.Testbed.Local.BasePort+p.Nodes+10000
+		if lo < GhostPortBase+GhostPortSpan && hi > GhostPortBase {
+			return fmt.Errorf("testbed.local.base_port %d: node and status ports %d..%d overlap the ghost ports %d..%d", lo, lo, hi-1, GhostPortBase, GhostPortBase+GhostPortSpan-1)
+		}
+	}
+	return nil
 }
 
 // flatten walks the struct as yaml-path -> value, in declaration order.

@@ -122,6 +122,8 @@ type node struct {
 	topicName  string
 	topic      topicindex.TopicID
 	bootnodes  []*enode.Node
+	ghosts     []*enode.Node // pinned in every session's table
+	ghostIDs   map[enode.ID]struct{}
 	lookupOnly bool
 
 	ctl  sync.Mutex // serialises up, down and the final trace
@@ -182,6 +184,8 @@ type session struct {
 	wire             map[string]discover.WireCounter
 	ops              []map[string]any
 	topicLoad        map[string]discover.TopicLoad
+
+	ghostsInTable, tableSize int
 }
 
 func newSession(started time.Time) *session {
@@ -190,7 +194,7 @@ func newSession(started time.Time) *session {
 }
 
 func newNode(asg assign.Assignment, key *ecdsa.PrivateKey) *node {
-	return &node{asg: asg, key: key, id: enode.PubkeyToIDV4(&key.PublicKey), firstCapableMs: -1,
+	return &node{asg: asg, key: key, id: enode.PubkeyToIDV4(&key.PublicKey), firstCapableMs: -1, ghostIDs: map[enode.ID]struct{}{},
 		lookupOnly: asg.Search.Model == "continuous" || asg.Search.Model == "scheduled"}
 }
 
@@ -262,7 +266,7 @@ func (n *node) up() error {
 	s.srv = &p2p.Server{Config: p2p.Config{
 		PrivateKey: n.key, Name: "topdisc-node", MaxPeers: n.maxPeers, DialRatio: n.dialRatio, NoDial: n.lookupOnly,
 		ListenAddr: fmt.Sprintf("%s:%d", n.ip, n.port), DiscoveryV4: false, DiscoveryV5: true,
-		BootstrapNodesV5: n.bootnodes, Protocols: []p2p.Protocol{proto}, Logger: log.Root(),
+		BootstrapNodesV5: n.bootnodes, DiscoveryV5Pinned: n.ghosts, Protocols: []p2p.Protocol{proto}, Logger: log.Root(),
 		DiscoveryV5Topic: topicindex.Config{
 			AdLifetime: time.Duration(a.Topic.AdLifetimeMs) * time.Millisecond, AdCacheSize: a.Topic.AdCacheSize,
 			RegAttemptTimeout: time.Duration(a.Topic.RegAttemptTimeoutMs) * time.Millisecond, SearchBucketSize: a.Topic.SearchBucketSize,
@@ -557,7 +561,8 @@ func (n *node) watchPeers(s *session, events chan *p2p.PeerEvent) {
 	}
 }
 
-// snapshotLive reads what only a running server can tell: peers and held ads.
+// snapshotLive reads what only a running server can tell: peers, held ads and
+// the table.
 func (n *node) snapshotLive(s *session) {
 	out, in := 0, 0
 	for _, p := range s.srv.Peers() {
@@ -568,8 +573,16 @@ func (n *node) snapshotLive(s *session) {
 		}
 	}
 	held := len(s.srv.DiscoveryV5().LocalTopicNodes(n.topic))
+	table := s.srv.DiscoveryV5().AllNodes()
+	ghosts := 0
+	for _, nd := range table {
+		if _, ok := n.ghostIDs[nd.ID()]; ok {
+			ghosts++
+		}
+	}
 	n.mu.Lock()
 	s.out, s.in, s.adsHeld = out, in, held
+	s.ghostsInTable, s.tableSize = ghosts, len(table)
 	n.mu.Unlock()
 }
 
@@ -653,7 +666,7 @@ func (n *node) trace() map[string]any {
 		"wire": wire, "topic": n.topic.String(), "topics": a.Topics, "register_at_ms": a.Phases.RegisterAt, "search_at_ms": a.Phases.SearchAt,
 		"wait": waits, "samples": samples, "admissions": discover.AdmissionEvents(n.id),
 		"ops": ops, "topic_load": load, "conn": conn, "sessions": sessions,
-		"outbound": 0, "inbound": 0, "ads_held": 0, "ads_first_seen_ms": map[string]map[string]int64{}, "ads_final": map[string][]string{},
+		"outbound": 0, "inbound": 0, "ads_held": 0, "ghosts_assigned": len(n.ghosts), "ghosts_in_table": 0, "table_size": 0, "ads_first_seen_ms": map[string]map[string]int64{}, "ads_final": map[string][]string{},
 		"ads_final_expiry_ms": map[string]map[string]int64{}, "ads_snapshot_ms": int64(0), "stale_ad_max_ms": int64(0),
 		"reg_bucket_full_ms": []int64(nil), "reg_complete_ms": int64(-1), "reg_buckets_final": []topicindex.BucketStats(nil),
 	}
@@ -666,6 +679,7 @@ func (n *node) trace() map[string]any {
 			}
 		}
 		m["outbound"], m["inbound"], m["ads_held"] = s.out, s.in, s.adsHeld
+		m["ghosts_in_table"], m["table_size"] = s.ghostsInTable, s.tableSize
 		m["ads_first_seen_ms"], m["ads_final"], m["ads_final_expiry_ms"], m["ads_snapshot_ms"], m["stale_ad_max_ms"] = first, s.adsLast, s.adsExpiry, s.adsSnapshotMs, s.staleMaxMs
 		m["reg_bucket_full_ms"], m["reg_complete_ms"], m["reg_buckets_final"] = append([]int64(nil), s.bucketFullMs...), s.regCompleteMs, s.bucketsLast
 	}
@@ -733,7 +747,8 @@ func minCapable(a, b int64) int64 {
 }
 
 func addCounter(a, b discover.WireCounter) discover.WireCounter {
-	return discover.WireCounter{TxMsgs: a.TxMsgs + b.TxMsgs, TxBytes: a.TxBytes + b.TxBytes, RxMsgs: a.RxMsgs + b.RxMsgs, RxBytes: a.RxBytes + b.RxBytes}
+	return discover.WireCounter{TxMsgs: a.TxMsgs + b.TxMsgs, TxBytes: a.TxBytes + b.TxBytes, RxMsgs: a.RxMsgs + b.RxMsgs, RxBytes: a.RxBytes + b.RxBytes,
+		Timeouts: a.Timeouts + b.Timeouts, GhostTimeouts: a.GhostTimeouts + b.GhostTimeouts, OwnGhostTimeouts: a.OwnGhostTimeouts + b.OwnGhostTimeouts}
 }
 
 func addWire(a, b map[string]discover.WireCounter) map[string]discover.WireCounter {

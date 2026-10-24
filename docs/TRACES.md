@@ -221,12 +221,27 @@ From fork tag `v1.17.2-testbed.10` on, for the correctness checks (`figures/chec
 | node trace | `lookups[].search.maxTopicPerReply`, `maxAuxPerReply` | the largest TOPICNODES and NODES reply one search received |
 | simnet | `ads.json`, `buckets.json`, `admissions.json` | the same registrar and advertiser state for every in-process node at the end of the run; `admissions.json` only up to 1000 nodes |
 
+From fork tag `v1.17.2-testbed.18` on, for routing-table ghosts (`scenario.ghosts`, docs/PARAMETERS.md):
+
+| File | Field | Contents |
+|---|---|---|
+| node trace, `nodes.json` | `ghosts_assigned` | ghost records the node pins in its table (0 without ghosts, and on the stock legacy build) |
+| node trace, `nodes.json` | `ghosts_in_table`, `table_size` | ghosts among the table's entries, and all entries, at the last snapshot |
+| node trace, `nodes.json`, `oh.json` | `wire{}.timeouts` | requests of that message type that got no reply within the response timeout |
+| node trace, `nodes.json`, `oh.json` | `wire{}.ghostTimeouts`, `ownGhostTimeouts` | of those, to a ghost record; and of those, to a ghost pinned in this node's own table (a holder's request a NAT'd peer would answer on mainnet) |
+| assignment | `ghosts[]`, `ghosts_unplaced` | the node's ghost ENRs, and the requested ghosts no pool identity could meet |
+
+`figures/checks.py` reads them in G1 (every node that ran reports and holds, at
+its last snapshot, as many ghosts as its assignment carries; a trace without the
+ghost fields fails) and G2 (some timeouts at ghosts, never more own-ghost
+than ghost timeouts); both are not-exercised without ghosts.
+
 ## Sessions under churn
 
 A node is one process for the whole run. A churn departure (`/down` on the
 node's status port, called by the runner or the hostagent) stops its p2p
 server in place: the sockets close and peers see silence. A return (`/up`)
-builds a new server with the same key, address and port, with an empty table,
+builds a new server with the same key, address and port, with an empty table (its ghosts pinned again),
 no ads and no registrations; its phase times are past, so it registers and
 searches at once. An arrival (first event with `DownAt` 0) starts its process
 with everyone else but stays down until its first `UpAt`.
@@ -237,10 +252,10 @@ churned; no `session` key). Each new server counts from zero, so the trace
 sums or joins across sessions: `wire`, `peer_drops` and `topic_load` are
 summed; `lookups`, `ops`, `refill_ms` and `samples` are joined, the sample
 counters carried on from the earlier sessions' totals so the series stays
-cumulative; `first_capable_ms` is the earliest over sessions; `conn` is the
+cumulative (the `wire` timeout counters too); `first_capable_ms` is the earliest over sessions; `conn` is the
 last dialer session's, with `found` holding every session's finds timed from
-its `start_ms` (earlier ones negative). `outbound`, `inbound`, `ads_held` and
-the registrar and advertiser fields (`ads_*`, `stale_ad_max_ms`, `reg_*`) are
+its `start_ms` (earlier ones negative). `outbound`, `inbound`, `ads_held`,
+`ghosts_in_table`, `table_size` and the registrar and advertiser fields (`ads_*`, `stale_ad_max_ms`, `reg_*`) are
 the last session's. `admissions` and `wait` are process-wide and cover every
 session. A node down at `StopAt` reports its last session as it was when it
 went down. `nodes.json` carries each node's `sessions`.
