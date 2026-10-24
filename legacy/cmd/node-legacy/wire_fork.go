@@ -16,7 +16,8 @@ const forkBuild = true
 type wireCounter = discover.WireCounter
 
 func addCounter(a, b wireCounter) wireCounter {
-	return wireCounter{TxMsgs: a.TxMsgs + b.TxMsgs, TxBytes: a.TxBytes + b.TxBytes, RxMsgs: a.RxMsgs + b.RxMsgs, RxBytes: a.RxBytes + b.RxBytes}
+	return wireCounter{TxMsgs: a.TxMsgs + b.TxMsgs, TxBytes: a.TxBytes + b.TxBytes, RxMsgs: a.RxMsgs + b.RxMsgs, RxBytes: a.RxBytes + b.RxBytes,
+		Timeouts: a.Timeouts + b.Timeouts, GhostTimeouts: a.GhostTimeouts + b.GhostTimeouts, OwnGhostTimeouts: a.OwnGhostTimeouts + b.OwnGhostTimeouts}
 }
 
 func enableWireStats() { discover.EnableWireStats() }

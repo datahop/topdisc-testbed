@@ -104,6 +104,8 @@ type node struct {
 	id         enode.ID
 	svc        svcEntry
 	bootnodes  []*enode.Node
+	ghosts     []*enode.Node // pinned in every session's table (fork build)
+	ghostIDs   map[enode.ID]struct{}
 	lookupOnly bool
 
 	ctl  sync.Mutex // serialises up, down and the final trace
@@ -149,6 +151,8 @@ type session struct {
 	// Read from the server by snapshotLive and snapshotCounters.
 	out, in int
 	wire    map[string]wireCounter
+
+	ghostsInTable, tableSize int
 }
 
 func newSession(started time.Time) *session {
@@ -156,7 +160,7 @@ func newSession(started time.Time) *session {
 }
 
 func newNode(asg assignment, key *ecdsa.PrivateKey) *node {
-	return &node{asg: asg, key: key, id: enode.PubkeyToIDV4(&key.PublicKey), svc: svcOf(asg.Topics[0]), firstCapableMs: -1,
+	return &node{asg: asg, key: key, id: enode.PubkeyToIDV4(&key.PublicKey), svc: svcOf(asg.Topics[0]), firstCapableMs: -1, ghostIDs: map[enode.ID]struct{}{},
 		lookupOnly: asg.Search.Model == "continuous" || asg.Search.Model == "scheduled"}
 }
 
@@ -232,6 +236,7 @@ func (n *node) up() error {
 		ListenAddr: fmt.Sprintf("%s:%d", a.IP, a.Port), DiscoveryV4: false, DiscoveryV5: true,
 		BootstrapNodesV5: n.bootnodes, Protocols: []p2p.Protocol{proto}, Logger: log.Root(),
 	}}
+	pinGhosts(&s.srv.Config, n.ghosts)
 	if err := s.srv.Start(); err != nil {
 		s.cancel()
 		return err
@@ -432,7 +437,7 @@ func (n *node) watchPeers(s *session, events chan *p2p.PeerEvent) {
 	}
 }
 
-// snapshotLive reads what only a running server can tell: its peers.
+// snapshotLive reads what only a running server can tell: its peers and table.
 func (n *node) snapshotLive(s *session) {
 	out, in := 0, 0
 	for _, p := range s.srv.Peers() {
@@ -442,8 +447,10 @@ func (n *node) snapshotLive(s *session) {
 			out++
 		}
 	}
+	ghosts, table := ghostsInTable(s.srv, n.ghostIDs)
 	n.mu.Lock()
 	s.out, s.in = out, in
+	s.ghostsInTable, s.tableSize = ghosts, table
 	n.mu.Unlock()
 }
 
@@ -489,9 +496,9 @@ func (n *node) trace() map[string]any {
 		}
 		conn = map[string]any{"start_ms": start, "found": rel, "slots_filled_ms": connSrc.connFullMs}
 	}
-	out, in := 0, 0
+	out, in, ghosts, table := 0, 0, 0, 0
 	if s != nil {
-		out, in = s.out, s.in
+		out, in, ghosts, table = s.out, s.in, s.ghostsInTable, s.tableSize
 	}
 	a := n.asg
 	return map[string]any{
@@ -504,7 +511,7 @@ func (n *node) trace() map[string]any {
 		// time it derived for a legacy searcher came out as an absolute
 		// epoch value instead of ms into the search.
 		"register_at_ms": a.Phases.RegisterAt, "search_at_ms": a.Phases.SearchAt,
-		"sessions": sessions,
+		"sessions": sessions, "ghosts_assigned": len(n.ghosts), "ghosts_in_table": ghosts, "table_size": table,
 	}
 }
 

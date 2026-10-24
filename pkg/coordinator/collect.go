@@ -35,6 +35,9 @@ type NodeTrace struct {
 		StartMs int64 `json:"start_ms"`
 		EndMs   int64 `json:"end_ms"`
 	} `json:"sessions"` // the node's online periods
+	GhostsAssigned int `json:"ghosts_assigned"`
+	GhostsInTable  int `json:"ghosts_in_table"` // last session's table
+	TableSize      int `json:"table_size"`
 }
 
 // Collect reads the per-node traces, prints the run summary and writes

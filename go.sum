@@ -32,6 +32,8 @@ github.com/datahop/go-ethereum v1.17.2-testbed.16 h1:0OFTcVE32/8UR58uMQWagBsLJFw
 github.com/datahop/go-ethereum v1.17.2-testbed.16/go.mod h1:f2EhRwqewIZkGoQekywI2Y2RZAMTSavLNkD9qItFy1A=
 github.com/datahop/go-ethereum v1.17.2-testbed.17 h1:mzc3G3/hEvjjn8UZdeZS2WDQhLQ+hzw/V/9KwBObW+I=
 github.com/datahop/go-ethereum v1.17.2-testbed.17/go.mod h1:RDnI/uaBp0lGdh3YftAFxMxLgba1I1QosRI/iC6hEak=
+github.com/datahop/go-ethereum v1.17.2-testbed.18 h1:A4ayb0JyTMdKYWQapuM8FqFdk67qZSWd0WFSp8FdoCQ=
+github.com/datahop/go-ethereum v1.17.2-testbed.18/go.mod h1:RDnI/uaBp0lGdh3YftAFxMxLgba1I1QosRI/iC6hEak=
 github.com/datahop/simnet v0.0.0-20260904122752-904836695aaa h1:Fw2HWHSVpIfnK2+c2Vqk3K6xgyKwzKueJL/zUuhmuPw=
 github.com/datahop/simnet v0.0.0-20260904122752-904836695aaa/go.mod h1:tfQF1u2DmaB6WHODMtQaLtClEf3a296CKQLq5gAsIS0=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

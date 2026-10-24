@@ -79,6 +79,15 @@ func main() {
 			n.bootnodes = append(n.bootnodes, bn)
 		}
 	}
+	for _, s := range asg.Ghosts {
+		g, err := enode.Parse(enode.ValidSchemes, s)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "bad ghost:", err)
+			os.Exit(2)
+		}
+		n.ghosts = append(n.ghosts, g)
+		n.ghostIDs[g.ID()] = struct{}{}
+	}
 	discover.EnableWireStats()
 	discover.EnableWaitStats()
 

@@ -1,0 +1,44 @@
+# AWS, 7,500 nodes in three regions, private addresses: plain discv5 built on the fork, one continuous search per node, each node leaving and returning as its chain did in the crawl, one day over the run.
+# Hand-written copy of the matrix scenario plus ghosts replayed from the mainnet crawl tables (not in tools/scenario_matrix.py).
+name: aws-7k5-discv5-cont-churn-ghosts
+scenario:
+  population:
+    nodes: 7500
+    topics: 100
+    seed: 1
+    bootstrap_sample: 5
+    zipf_s: 1.07
+    topic_model: models/crawl-2026-09-18.json
+    legacy_frac: 1
+    legacy_bootnode: true
+    legacy_build: fork
+  network:
+    regions:
+      us-east-1: 0.3334
+      eu-central-1: 0.3333
+      ap-southeast-1: 0.3333
+  phases:
+    bootstrap_wait: 3m
+    start_window: 15m
+    register_wait: 15m
+    search_stagger: 10ms
+    search_timeout: 90m
+  topic:
+    ad_cache_size: 5000
+    search_yield_floor: 8
+  search:
+    model: continuous
+  conn_model:
+    enabled: false
+  session_churn:
+    enabled: true
+    model: models/crawl-2026-09-18.json
+    window_real_hours: 24
+  ghosts:
+    tables: /home/sergi/workspace/datahop/runs/2026-10-23-crawl-full-aws/data/tables.json.gz
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json
+    home_region: us-east-1
+    public_ips: false

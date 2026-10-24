@@ -54,8 +54,9 @@ type assignment struct {
 		InitialResults   int     `json:"initial_results"`
 		ResultIntervalMs int64   `json:"result_interval_ms"`
 	} `json:"search"`
-	SampleMs  int64  `json:"sample_ms"`
-	TraceFile string `json:"trace_file"`
+	SampleMs  int64    `json:"sample_ms"`
+	TraceFile string   `json:"trace_file"`
+	Ghosts    []string `json:"ghosts"`
 	Churn     []struct {
 		DownAt, UpAt float64 // seconds from search start
 	} `json:"churn"`
@@ -147,6 +148,13 @@ func main() {
 			}
 			n.bootnodes = append(n.bootnodes, bn)
 		}
+	}
+	if n.ghosts, err = parseGhosts(asg.Ghosts); err != nil {
+		fmt.Fprintln(os.Stderr, "bad ghost:", err)
+		os.Exit(2)
+	}
+	for _, g := range n.ghosts {
+		n.ghostIDs[g.ID()] = struct{}{}
 	}
 	enableWireStats()
 
