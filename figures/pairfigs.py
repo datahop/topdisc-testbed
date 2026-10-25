@@ -962,7 +962,29 @@ def load_table(ctx):
         L.append(row(["search phase: FINDNODE + TOPICQUERY sent per node, mean"] + [g(r, "search_requests_per_node", lambda v: f"{v:,.0f}") for r in ctx.runs]))
         L.append(row(["search phase: bytes sent per provider found"] + [g(r, "bytes_sent_per_provider_kb", lambda v: f"{v:.1f} kB") for r in ctx.runs]))
         L.append(row(["search phase: requests per provider found"] + [g(r, "requests_per_provider", lambda v: f"{v:.1f}") for r in ctx.runs]))
+    if any(ghost_stats(r) for r in ctx.runs):
+        def gh(r, k, f):
+            v = ghost_stats(r)
+            return f(v[k]) if v and v[k] is not None else "–"
+        L.append(row(["ghost share of table entries, mean over nodes"] + [gh(r, "share", lambda v: f"{100 * v:.1f} %") for r in ctx.runs]))
+        L.append(row(["timeouts at ghosts per lookup, mean"] + [gh(r, "per_lookup", lambda v: f"{v:,.1f}") for r in ctx.runs]))
+        L.append(row(["&nbsp;&nbsp;of which at the node's own ghosts"] + [gh(r, "own_per_lookup", lambda v: f"{v:,.1f}") for r in ctx.runs]))
     return L
+
+
+def ghost_stats(r):
+    """Ghost table share and ghost timeouts per lookup from nodes.json; None for runs without ghosts."""
+    if not hasattr(r, "_ghosts"):
+        nodes = load(os.path.join(r.dir, "nodes.json"), []) or []
+        r._ghosts = None
+        if any(n.get("ghosts_assigned", 0) > 0 for n in nodes):
+            shares = [n["ghosts_in_table"] / n["table_size"] for n in nodes if n.get("table_size")]
+            lookups = sum(len(n.get("lookups") or []) for n in nodes)
+            ghost = sum(c.get("ghostTimeouts", 0) for n in nodes for c in (n.get("wire") or {}).values())
+            own = sum(c.get("ownGhostTimeouts", 0) for n in nodes for c in (n.get("wire") or {}).values())
+            r._ghosts = {"share": sum(shares) / len(shares) if shares else None,
+                         "per_lookup": ghost / lookups if lookups else None, "own_per_lookup": own / lookups if lookups else None}
+    return r._ghosts
 
 
 def peer_table(ctx):
@@ -975,12 +997,37 @@ def peer_table(ctx):
     return L
 
 
+def churn_departures(r):
+    """Per node, its sessions ended by churn (end_ms before the run's stop_at_ms), from nodes.json;
+    None for runs whose nodes.json has no sessions."""
+    if not hasattr(r, "_departures"):
+        nodes = load(os.path.join(r.dir, "nodes.json"), []) or []
+        stop = r.phases.get("stop_at_ms")
+        withs = [n["sessions"] for n in nodes if n.get("sessions") is not None]
+        r._departures = [sum(1 for s in ss if s["end_ms"] < stop) for ss in withs] if withs and stop else None
+    return r._departures
+
+
+def departures(r):
+    d = churn_departures(r)
+    if d is None:  # older runs: one parked trace file per departure
+        return len(glob.glob(os.path.join(r.dir, 'traces', '*.s*.json')))
+    return sum(d)
+
+
+def nodes_left(r):
+    d = churn_departures(r)
+    if d is None:
+        return len({os.path.basename(p).split('.')[0] for p in glob.glob(os.path.join(r.dir, 'traces', '*.s*.json'))})
+    return sum(1 for n in d if n > 0)
+
+
 def churn_table(ctx):
     """What churn did to each run: sessions kept, and the providers that were up at the end."""
     L = head(ctx)
     for name, f in [
-        ("departures with a kept trace", lambda r: f"{len(glob.glob(os.path.join(r.dir, 'traces', '*.s*.json'))):,}"),
-        ("nodes that left at least once", lambda r: f"{len({os.path.basename(p).split('.')[0] for p in glob.glob(os.path.join(r.dir, 'traces', '*.s*.json'))}):,}"),
+        ("departures with a kept trace", lambda r: f"{departures(r):,}"),
+        ("nodes that left at least once", lambda r: f"{nodes_left(r):,}"),
         ("searchers with a provider down at the end", lambda r: f"{sum(1 for x in r.results if x.get('targetOnline', x['target']) < x['target']):,} of {len(r.results):,}"),
         ("providers up at the end, share of the topic, median / min", lambda r: " / ".join(
             f"{100 * pct([x.get('targetOnline', x['target']) / x['target'] for x in r.results], q):.0f} %" for q in (50, 0))),

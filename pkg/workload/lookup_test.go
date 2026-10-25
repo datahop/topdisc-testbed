@@ -20,7 +20,7 @@ func testNode(b byte) *enode.Node {
 func TestContinuous(t *testing.T) {
 	nodes := []*enode.Node{testNode(1), testNode(2), testNode(1), testNode(3), testNode(2)}
 	var updates []Lookup
-	Continuous(func() enode.Iterator { return enode.IterNodes(nodes) }, nil, 0, 0, time.Now().Add(time.Minute), func(l Lookup) {
+	Continuous(func() enode.Iterator { return enode.IterNodes(nodes) }, nil, 0, 0, time.Now().Add(time.Minute), nil, func(l Lookup) {
 		updates = append(updates, l)
 	})
 	if len(updates) != 4 {
@@ -44,7 +44,7 @@ func TestContinuousPacing(t *testing.T) {
 	const interval = 40 * time.Millisecond
 	start := time.Now()
 	var final Lookup
-	Continuous(func() enode.Iterator { return enode.IterNodes(nodes) }, nil, 2, interval, time.Now().Add(time.Minute), func(l Lookup) {
+	Continuous(func() enode.Iterator { return enode.IterNodes(nodes) }, nil, 2, interval, time.Now().Add(time.Minute), nil, func(l Lookup) {
 		final = l
 	})
 	if final.Results != 4 {
@@ -55,5 +55,37 @@ func TestContinuousPacing(t *testing.T) {
 	}
 	if at := final.Found[1].AtMs; at > 20 {
 		t.Fatalf("second registrant (within initial) found after %d ms", at)
+	}
+}
+
+// blockIter yields nothing until closed.
+type blockIter struct{ closed chan struct{} }
+
+func (it *blockIter) Next() bool        { <-it.closed; return false }
+func (it *blockIter) Node() *enode.Node { return nil }
+func (it *blockIter) Close()            { close(it.closed) }
+
+// A stop during the wait for the next lookup, or during a lookup, returns at
+// once and records nothing.
+func TestScheduledStops(t *testing.T) {
+	open := func() enode.Iterator { return &blockIter{closed: make(chan struct{})} }
+	for _, first := range []time.Duration{time.Minute, 0} {
+		stop := make(chan struct{})
+		var recorded []Lookup
+		done := make(chan struct{})
+		go func() {
+			Scheduled(open, nil, 1, 0, []time.Time{time.Now().Add(first), time.Now().Add(2 * time.Minute)}, time.Now().Add(time.Hour), stop, func(l Lookup) { recorded = append(recorded, l) })
+			close(done)
+		}()
+		time.Sleep(50 * time.Millisecond)
+		close(stop)
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatalf("first lookup at +%v: Scheduled did not return after stop", first)
+		}
+		if len(recorded) != 0 {
+			t.Fatalf("first lookup at +%v: recorded %d lookups after stop, want 0", first, len(recorded))
+		}
 	}
 }

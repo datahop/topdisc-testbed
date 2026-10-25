@@ -506,6 +506,37 @@ class TestCheckLogic(unittest.TestCase):
         w1 = next(c for c in read(out)["checks"] if c["id"] == "W1")
         self.assertEqual(w1["assertion"], "bounded wait: every admission within 2 % of the attempt timeout")
 
+    def test_g1_against_assignments(self):
+        """G1 counts what the assignments carry, not what the traces claim."""
+        tol = checks.argparser().parse_args([self.rd])
+        self.assertEqual(checks.g1_ghosts_pinned(checks.Run(self.rd), tol)["status"], "not-exercised")
+        for i in range(7):
+            a = read(os.path.join(self.rd, f"assignments/node{i}.json"))
+            a["ghosts"] = ["enr:-ghost"] * (i % 3 + 1)
+            write(self.rd, f"assignments/node{i}.json", a, indent=1)
+            p = os.path.join(self.rd, f"traces/node{i}.json")
+            if os.path.exists(p):
+                t = read(p)
+                t.update(ghosts_assigned=i % 3 + 1, ghosts_in_table=i % 3 + 1, table_size=20)
+                write(self.rd, f"traces/node{i}.json", t)
+        v = checks.g1_ghosts_pinned(checks.Run(self.rd), tol)
+        self.assertEqual(v["status"], "pass", v["summary"])
+
+        t = read(os.path.join(self.rd, "traces/node3.json"))
+        for k in checks.GHOST_FIELDS:
+            del t[k]
+        write(self.rd, "traces/node3.json", t)
+        t = read(os.path.join(self.rd, "traces/node4.json"))
+        t["ghosts_in_table"] = 1  # holds one of its two
+        write(self.rd, "traces/node4.json", t)
+        t = read(os.path.join(self.rd, "traces/node5.json"))
+        t.update(ghosts_assigned=1, ghosts_in_table=1)  # claims fewer than assigned
+        write(self.rd, "traces/node5.json", t)
+        v = checks.g1_ghosts_pinned(checks.Run(self.rd), tol)
+        self.assertEqual(v["status"], "fail")
+        self.assertEqual(v["evidence"]["missing"], [3])
+        self.assertEqual(v["evidence"]["offenders"], [(4, 1, 2, 2), (5, 1, 1, 3)])
+
     def test_plain_run(self):
         c = self.plain()
         self.assertEqual((c["L3"]["status"], c["L3"]["summary"]), ("not-exercised", "every node runs plain discv5"))

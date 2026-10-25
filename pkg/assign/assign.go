@@ -72,6 +72,11 @@ type Assignment struct {
 	SampleMs   int64         `json:"sample_ms"`             // period of the node's counter/cache samples (series.json); 0 = off
 	Churn      []churn.Event `json:"churn"`                 // seconds from search start
 	TraceFile  string        `json:"trace_file"`            // where the node writes its trace at StopAt
+	// Ghosts are unreachable records (ENR text) the node pins in its discv5
+	// table (scenario.ghosts); GhostsUnplaced counts the ones its layout asked
+	// for that no pool identity could fill.
+	Ghosts         []string `json:"ghosts,omitempty"`
+	GhostsUnplaced int      `json:"ghosts_unplaced,omitempty"`
 }
 
 // Host describes where a node runs; the backend supplies one per node.
@@ -183,6 +188,9 @@ func Generate(cfg scenario.Config, hosts func(idx int) Host, t0 int64, modelDir 
 			a.Churn = model.ScheduleTopic(rand.New(rand.NewSource(churn.NodeSeed(sc.Population.Seed, i))), ph.SearchTimeout.Seconds(), sc.SessionChurn.WindowHours, ChurnTopic(model, sc, topicIdx[i]))
 		}
 		out[i] = a
+	}
+	if err := assignGhosts(out, keys, cfg, hosts, modelDir); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

@@ -73,9 +73,11 @@ func main() {
 		}
 		fmt.Fprintf(w, "prepared %d nodes\n", len(p.Assignments))
 	})
+	// The churn calls hold mu only to read r: a host takes thousands of nodes
+	// down in the same second, and each waits for its node's server to stop.
+	runner := func() *host.Runner { mu.Lock(); defer mu.Unlock(); return r }
 	http.HandleFunc("/start", func(w http.ResponseWriter, req *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
+		r := runner()
 		if r == nil {
 			fail(w, fmt.Errorf("not prepared"))
 			return
@@ -84,12 +86,15 @@ func main() {
 			fail(w, err)
 		}
 	})
+	// A churn departure: the node stays a process.
 	http.HandleFunc("/kill", func(w http.ResponseWriter, req *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
-		idx := idxOf(req)
-		if r == nil || !r.Kill(idx) {
-			fail(w, fmt.Errorf("node %d not running", idx))
+		r := runner()
+		if r == nil {
+			fail(w, fmt.Errorf("not prepared"))
+			return
+		}
+		if err := r.Down(idxOf(req)); err != nil {
+			fail(w, err)
 		}
 	})
 	http.HandleFunc("/stop", func(w http.ResponseWriter, req *http.Request) {

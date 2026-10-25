@@ -1,6 +1,7 @@
 __pycache__/
 !go.sum
 !scenarios/models/*.json
+scenarios/models/*.json.gz
 .terraform/
 *.json
 !figures/testdata/*.json
