@@ -19,7 +19,9 @@ Two forks, both pinned in `go.mod`:
   router shard and discovery freezes network-wide.
 - [`datahop/go-ethereum`](https://github.com/datahop/go-ethereum) — the TopDisc
   implementation, plus the instrumentation the testbed reads (per-message-type
-  wire counters, registrar wait-time quotes, search provenance).
+  wire counters, registrar wait-time quotes, search provenance). The plain
+  discv5 binary pins a second series via `legacy/go.fork.mod`: fork `master`
+  plus the same counters and pinned table entries, no topic code.
 
 ## Running
 

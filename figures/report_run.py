@@ -146,6 +146,8 @@ PARAM_KEYS = [
     ("session_churn", "scenario.session_churn.enabled"),
     ("churn interval", "scenario.churn.interval"),
     ("disconnect interval", "scenario.disconnect.interval"),
+    ("ghosts share", "scenario.ghosts.share"),
+    ("ghosts tables", "scenario.ghosts.tables"),
     ("build.testbed", "build.testbed"),
     ("build.fork", "build.fork"),
 ]

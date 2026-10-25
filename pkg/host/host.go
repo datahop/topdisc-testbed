@@ -5,7 +5,9 @@ package host
 
 import (
 	"fmt"
+	"io"
 	"math/rand"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,13 +63,16 @@ type Runner struct {
 	procs  map[int]*proc
 	delay  map[int]time.Duration
 	legacy map[int]string // node index -> binary, for legacy nodes
-	trace  map[int]string // node index -> trace path, parked between sessions
+	status map[int]string // node index -> ip:port of its status and churn control
 	mon    *monitor
 }
 
+// control carries the churn calls to the nodes' status ports.
+var control = &http.Client{Timeout: 30 * time.Second}
+
 func (r *Runner) init() {
 	if r.procs == nil {
-		r.procs, r.delay, r.legacy, r.trace = map[int]*proc{}, map[int]time.Duration{}, map[int]string{}, map[int]string{}
+		r.procs, r.delay, r.legacy, r.status = map[int]*proc{}, map[int]time.Duration{}, map[int]string{}, map[int]string{}
 	}
 }
 
@@ -92,7 +97,7 @@ func (r *Runner) Prepare(as []assign.Assignment, peers map[int]string) error {
 		return err
 	}
 	for _, a := range as {
-		r.trace[a.Idx] = a.TraceFile
+		r.status[a.Idx] = fmt.Sprintf("%s:%d", a.IP, a.StatusPort)
 		if a.Legacy {
 			bin, what := r.LegacyBinary, "legacy"
 			if a.LegacyFork {
@@ -195,9 +200,16 @@ func onLink(addr string) bool {
 	return err == nil && !strings.Contains(string(out), " via ")
 }
 
-// Start launches node idx (again, with the same identity, if it ran before).
+// Start launches node idx. A node already launched is a churn return: its
+// process stays up for the whole run, so Start asks it to come back (Up).
 func (r *Runner) Start(idx int) error {
 	r.init()
+	r.mu.Lock()
+	_, started := r.procs[idx]
+	r.mu.Unlock()
+	if started {
+		return r.Up(idx)
+	}
 	logf, err := os.OpenFile(filepath.Join(r.LogDir, fmt.Sprintf("node%d.log", idx)), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
@@ -207,9 +219,6 @@ func (r *Runner) Start(idx int) error {
 	// open for the life of the agent, which caps vnodes_per_machine at the
 	// agent's own file limit.
 	defer logf.Close()
-	if err := rotateTrace(r.trace[idx]); err != nil {
-		return fmt.Errorf("node %d: %w", idx, err)
-	}
 	bin := r.NodeBinary
 	if lb, ok := r.legacy[idx]; ok {
 		bin = lb
@@ -232,8 +241,8 @@ func (r *Runner) Start(idx int) error {
 }
 
 // reap is the only Wait on a node process. It records the exit in the node's
-// log; a proc still registered when it exits was not killed (Kill deletes it
-// under r.mu before signalling).
+// log; a proc still registered when it exits was not killed (terminate deletes
+// it under r.mu before signalling).
 func (r *Runner) reap(idx int, p *proc) {
 	p.cmd.Wait()
 	p.exitedAt = time.Now()
@@ -251,7 +260,32 @@ func (r *Runner) reap(idx int, p *proc) {
 	close(p.done)
 }
 
-func (r *Runner) Kill(idx int) bool {
+// Down is a churn departure: node idx stops its p2p server and stays a process.
+func (r *Runner) Down(idx int) error { return r.call(idx, "down") }
+
+// Up is a churn return: node idx starts a new p2p server with its identity.
+func (r *Runner) Up(idx int) error { return r.call(idx, "up") }
+
+func (r *Runner) call(idx int, op string) error {
+	r.mu.Lock()
+	addr := r.status[idx]
+	r.mu.Unlock()
+	if addr == "" {
+		return fmt.Errorf("node %d: no status address", idx)
+	}
+	resp, err := control.Post(fmt.Sprintf("http://%s/%s", addr, op), "", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(b)))
+	}
+	return nil
+}
+
+func (r *Runner) terminate(idx int) bool {
 	r.mu.Lock()
 	p := r.procs[idx]
 	delete(r.procs, idx)
@@ -259,8 +293,7 @@ func (r *Runner) Kill(idx int) bool {
 	if p == nil {
 		return false
 	}
-	// SIGTERM first, so the node writes its session's trace before it goes;
-	// its socket closes with the process either way.
+	// SIGTERM first, so a node still running past its stop writes its trace.
 	p.cmd.Process.Signal(syscall.SIGTERM)
 	select {
 	case <-p.done:
@@ -279,7 +312,7 @@ func (r *Runner) StopAll() {
 	}
 	r.mu.Unlock()
 	for _, i := range idx {
-		r.Kill(i)
+		r.terminate(i)
 	}
 	if r.Wan != nil {
 		var cmds []string

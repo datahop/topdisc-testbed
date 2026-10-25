@@ -235,7 +235,8 @@ def first_record(t):
 def slim_node(i, t, lim):
     """The fields of a trace (or simnet node state) the checks read, per-event lists reduced."""
     s = {k: t[k] for k in ("idx", "id", "topic", "legacy", "stop_ms", "ads_snapshot_ms", "stale_ad_max_ms",
-                           "reg_complete_ms", "search_at_ms", "ads_final", "ads_final_expiry_ms") if k in t}
+                           "reg_complete_ms", "search_at_ms", "ads_final", "ads_final_expiry_ms",
+                           "ghosts_assigned", "ghosts_in_table", "table_size") if k in t}
     if "ads_first_seen_ms" in t:
         v = t["ads_first_seen_ms"]
         s["ads_first_seen_ms"] = derive(lambda: {topic: list(seen) for topic, seen in v.items()} if isinstance(v, dict) else v)
@@ -474,6 +475,7 @@ class Run:
         self.assign = {}
         for p in glob.glob(os.path.join(rd, "assignments", "node*.json")):
             a = json.load(open(p))
+            a["n_ghosts"] = len(a.pop("ghosts", None) or [])
             self.assign[a["idx"]] = a
         # the coordinator times every node's churn from node 0's search start (pkg/coordinator/drive.go)
         # without node 0's search start, each node's own (the coordinator's base cannot be recovered)
@@ -1252,19 +1254,24 @@ def accounting(run, tol, types, what):
     setups = totals(run, "SESSION-SETUP(undecryptable)")[1]
     all_tx = sum(totals(run, t)[0] for t in REQUESTS)
     all_rx = sum(totals(run, t)[1] for t in REQUESTS)
-    unexplained = all_tx - all_rx - setups
+    # a request to a ghost record (scenario.ghosts) is never received; each one timed out once
+    ghosts = sum(n["byType"].get(t, {}).get("ghostTimeouts", 0) for n in run.oh for t in REQUESTS)
+    ghosts_t = sum(n["byType"].get(t, {}).get("ghostTimeouts", 0) for n in run.oh for t in types)
+    by = f" and the {ghosts} requests to ghosts" if ghosts else ""
+    gev = {"ghost_requests": ghosts} if ghosts else {}
+    unexplained = all_tx - all_rx - setups - ghosts
     share = (tx - rx) / tx
     loss = unexplained / all_tx if all_tx else 0
     limit = tol.loss_churn if run.has_churn() else tol.loss
     what += " (churn: requests to departed nodes are lost by design)" if run.has_churn() else ""
     if any(run.legacy.values()):
         # legacy nodes count no traffic, so only the topic requests balance and only up to the session setups
-        return pf(tx < rx or tx - rx > setups, f"{what}: {tx} sent, {rx} received, difference within the {setups} session setups (legacy nodes count no traffic)",
-                  f"{what}: {tx} sent, {rx} received, difference not within the {setups} session setups", sent=tx, received=rx, session_setups=setups)
-    return pf(abs(loss) > limit or (tx - rx > setups and not run.has_churn()),
-              f"{what}: {tx} sent, {rx} received (+{share:.1%} first packets before a session); requests unexplained by session setups {loss:+.2%}",
-              f"{what}: {tx} sent, {rx} received; {unexplained} requests neither received nor explained by session setups ({loss:+.2%}, tolerance {limit:.0%})",
-              sent=tx, received=rx, session_setups=setups, unexplained=unexplained)
+        return pf(tx < rx or tx - rx > setups + ghosts_t, f"{what}: {tx} sent, {rx} received, difference within the {setups} session setups{by} (legacy nodes count no traffic)",
+                  f"{what}: {tx} sent, {rx} received, difference not within the {setups} session setups{by}", sent=tx, received=rx, session_setups=setups, **gev)
+    return pf(abs(loss) > limit or (tx - rx > setups + ghosts_t and not run.has_churn()),
+              f"{what}: {tx} sent, {rx} received (+{share:.1%} first packets before a session); requests unexplained by session setups{by} {loss:+.2%}",
+              f"{what}: {tx} sent, {rx} received; {unexplained} requests neither received nor explained by session setups{by} ({loss:+.2%}, tolerance {limit:.0%})",
+              sent=tx, received=rx, session_setups=setups, unexplained=unexplained, **gev)
 
 
 def a1_request_accounting(run, tol):
@@ -1339,6 +1346,62 @@ def h3_hosts_under_load(run, tol):
               f"host saturated: CPU peak {hot:.0f}% or free memory {lowmem} MB", cpu_peak=hot, rss_peak=max(rss), mem_avail_min=lowmem)
 
 
+GHOST_FIELDS = ("ghosts_assigned", "ghosts_in_table", "table_size")
+
+
+def ghosts_on(run):
+    return (run.params.get("scenario.ghosts.share", "0") not in ("", "0") or bool(run.params.get("scenario.ghosts.tables"))
+            or any(a["n_ghosts"] for a in run.assign.values()))
+
+
+def g1_ghosts_pinned(run, tol):
+    if not ghosts_on(run):
+        return verdict("not-exercised", "no ghosts in this run")
+    if run.simnet:
+        return verdict("not-exercised", "simnet pins no ghosts")
+    if not run.assign:
+        return verdict("needs-data", "no assignments")
+    # expected counts come from the assignments: a trace that drops or misreports them must not pass
+    ran = {i: t for i, t in run.traces.items() if i in run.assign and i not in run.uncovered and got(t["first_record"]) is not None}
+    expected = sum(run.assign[i]["n_ghosts"] for i in ran)
+    if expected == 0:
+        return verdict("fail", "ghosts configured but no node that ran was assigned one")
+    missing, short = [], []
+    for i, t in sorted(ran.items()):
+        want = run.assign[i]["n_ghosts"]
+        if not want:
+            continue
+        if any(k not in t for k in GHOST_FIELDS):
+            missing.append(i)
+        elif t["ghosts_assigned"] != want or t["ghosts_in_table"] != want:
+            short.append((i, t["ghosts_in_table"], t["ghosts_assigned"], want))
+    held = sum(t.get("ghosts_in_table", 0) for t in ran.values())
+    size = sum(t.get("table_size", 0) for t in ran.values())
+    share = f" ({held / size:.1%} of table entries)" if size else ""
+    return pf(missing or short, f"{len(ran)} nodes hold all {expected} ghosts their assignments carry, at their last snapshot{share}",
+              f"{len(missing)} nodes with ghosts trace no ghost fields, {len(short)} report or hold a different count than assigned",
+              expected=expected, held=held, missing=missing[:10], offenders=short[:10])
+
+
+def g2_ghost_timeouts(run, tol):
+    if not ghosts_on(run):
+        return verdict("not-exercised", "no ghosts in this run")
+    if not run.oh:
+        return verdict("needs-data", "no oh.json")
+    ghost = own = calls = 0
+    bad = []
+    for n in run.oh:
+        for k, c in n["byType"].items():
+            g, o = c.get("ghostTimeouts", 0), c.get("ownGhostTimeouts", 0)
+            ghost, own, calls = ghost + g, own + o, calls + c.get("timeouts", 0)
+            if o > g:
+                bad.append((n["idx"], k, o, g))
+    if bad:
+        return verdict("fail", f"{len(bad)} counters with more own-ghost than ghost timeouts", offenders=bad[:10])
+    return pf(ghost == 0, f"{ghost} timeouts at ghosts ({own} at the caller's own) of {calls} timeouts",
+              "no timeout at a ghost recorded", ghost_timeouts=ghost, own_ghost_timeouts=own, timeouts=calls)
+
+
 CHECKS = [
     ("registration", [
         ("C1", "capacity: ads held never exceed the cache size", c1_capacity),
@@ -1377,6 +1440,8 @@ CHECKS = [
         ("H1", "no packet drops on any host", h1_no_drops),
         ("H2", "complete collection: a trace for every node", h2_complete_collection),
         ("H3", "hosts under load: node CPU and host memory within limits", h3_hosts_under_load),
+        ("G1", "ghosts pinned: every node holds all its assigned ghosts at its last snapshot", g1_ghosts_pinned),
+        ("G2", "ghosts cost timeouts: some ghostTimeouts recorded and every ownGhostTimeouts ≤ ghostTimeouts", g2_ghost_timeouts),
     ]),
 ]
 

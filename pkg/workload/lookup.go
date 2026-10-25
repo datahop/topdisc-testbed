@@ -35,14 +35,16 @@ type Found struct {
 // lookup, passed to update each time a new registrant is found and when the
 // search ends. It takes initial new registrants at once, then one per interval
 // (0 = as fast as they come). isRegistrant filters what counts as a result; nil
-// counts every node.
-func Continuous(open func() enode.Iterator, isRegistrant func(enode.ID) bool, initial int, interval time.Duration, deadline time.Time, update func(Lookup)) {
-	update(runOne(open, isRegistrant, 0, 0, deadline, update, initial, interval))
+// counts every node. Closing stop ends the search early with what it found.
+func Continuous(open func() enode.Iterator, isRegistrant func(enode.ID) bool, initial int, interval time.Duration, deadline time.Time, stop <-chan struct{}, update func(Lookup)) {
+	l, _ := runOne(open, isRegistrant, 0, 0, deadline, stop, update, initial, interval)
+	update(l)
 }
 
 // Scheduled runs one lookup at each of the given times (a lookup that overruns
-// the next time starts the next one at once), until the deadline.
-func Scheduled(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target int, timeout time.Duration, at []time.Time, deadline time.Time, record func(Lookup)) {
+// the next time starts the next one at once), until the deadline. Closing stop
+// returns at once; a lookup it cuts short is not recorded.
+func Scheduled(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target int, timeout time.Duration, at []time.Time, deadline time.Time, stop <-chan struct{}, record func(Lookup)) {
 	for _, t := range at {
 		if !t.Before(deadline) {
 			return
@@ -51,12 +53,18 @@ func Scheduled(open func() enode.Iterator, isRegistrant func(enode.ID) bool, tar
 		case <-time.After(time.Until(t)):
 		case <-time.After(time.Until(deadline)):
 			return
+		case <-stop:
+			return
 		}
-		record(runOne(open, isRegistrant, target, timeout, deadline, nil, 0, 0))
+		l, stopped := runOne(open, isRegistrant, target, timeout, deadline, stop, nil, 0, 0)
+		if stopped {
+			return
+		}
+		record(l)
 	}
 }
 
-func runOne(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target int, timeout time.Duration, deadline time.Time, progress func(Lookup), initial int, interval time.Duration) Lookup {
+func runOne(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target int, timeout time.Duration, deadline time.Time, stopCh <-chan struct{}, progress func(Lookup), initial int, interval time.Duration) (Lookup, bool) {
 	start := time.Now()
 	it := open()
 	defer func() { go it.Close() }() // Close can block on a busy search; do not hold the loop
@@ -89,10 +97,12 @@ func runOne(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target
 		select {
 		case ok := <-next:
 			if !ok {
-				return done(false)
+				return done(false), false
 			}
 		case <-time.After(time.Until(stop)):
-			return done(false)
+			return done(false), false
+		case <-stopCh:
+			return done(false), true
 		}
 		id := it.Node().ID()
 		if isRegistrant == nil || isRegistrant(id) {
@@ -109,13 +119,15 @@ func runOne(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target
 					select {
 					case <-time.After(time.Until(paceStart.Add(time.Duration(over) * interval))):
 					case <-time.After(time.Until(stop)):
-						return done(false)
+						return done(false), false
+					case <-stopCh:
+						return done(false), true
 					}
 				}
 			}
 		}
 		if target > 0 && len(seen) >= target {
-			return done(true)
+			return done(true), false
 		}
 	}
 }

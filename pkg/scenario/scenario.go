@@ -71,6 +71,7 @@ type ScenarioConfig struct {
 	SessionChurn SessionChurnConfig `yaml:"session_churn"`
 	Disconnect   DisconnectConfig   `yaml:"disconnect"`
 	Churn        ChurnConfig        `yaml:"churn"`
+	Ghosts       GhostsConfig       `yaml:"ghosts"`
 }
 
 // TestbedConfig is how this harness executes a scenario.
@@ -190,6 +191,14 @@ type ChurnConfig struct {
 	Mode     string        `yaml:"mode"`
 }
 
+// GhostsConfig: unreachable records pinned in every node's discv5 table, as
+// NAT'd nodes stay in the tables of the peers they contact.
+type GhostsConfig struct {
+	Share  float64 `yaml:"share"`
+	Tables string  `yaml:"tables"`
+	Pool   int     `yaml:"pool"`
+}
+
 // WanConfig: per-node WAN emulation (netns + netem); star model, Linux only.
 type WanConfig struct {
 	Enabled    bool    `yaml:"enabled"`
@@ -306,7 +315,7 @@ var paramDocs = []paramDoc{
 	{"testbed.backend", "simnet: in-process on this host; local: one node process per node on this host; cloud: Terraform fleet"},
 	{"testbed.local.node_binary", "local backend: path to the node binary"},
 	{"testbed.local.legacy_binary", "local backend: stock-geth node binary for population.legacy_frac nodes (legacy/cmd/node-legacy)"},
-	{"testbed.local.plain_binary", "local backend: the same program built on the fork, for population.legacy_build fork (go build -modfile=go.fork.mod -tags fork in legacy/)"},
+	{"testbed.local.plain_binary", "local backend: the same program built on the fork's discv5 instrumentation branch (upstream discv5 plus the testbed counters and pinned entries, no topic code), for population.legacy_build fork (go build -modfile=go.fork.mod -tags fork in legacy/)"},
 	{"testbed.local.base_port", "local backend: node i listens on base_port+i, status on +10000"},
 	{"testbed.local.grace", "local backend: wait after the last StopAt before collecting"},
 	{"testbed.local.verbosity", "node log level: 2 warn, 3 info, 4 debug (disconnect reasons)"},
@@ -352,7 +361,7 @@ var paramDocs = []paramDoc{
 	{"scenario.population.seed", "RNG seed for every random draw; 0 = time"},
 	{"scenario.population.legacy_frac", "fraction of nodes that are legacy discv5: they never register and find the providers of their service by DHT random walks (simnet drops the topic-discovery ENR flag; real backends run stock upstream geth, legacy_binary); real backends draw the same fraction within every service"},
 	{"scenario.population.legacy_bootnode", "let node 0 (the bootnode) be drawn legacy too; default keeps it TopDisc-capable, since a fresh stock bootnode serves no nodes until it has revalidated its table (~20 nodes/min)"},
-	{"scenario.population.legacy_build", "real backends: what the legacy nodes run. stock (default): upstream geth, legacy_binary. fork: the same program built on the TopDisc fork (plain_binary), so it runs the fork's discv5 code and records per-message wire counters like a TopDisc node; it never registers or searches a topic, but its ENR carries the fork's ng entry, so fork needs every node legacy (legacy_frac 1, legacy_bootnode true)"},
+	{"scenario.population.legacy_build", "real backends: what the legacy nodes run. stock (default): upstream geth, legacy_binary. fork: the same program built on the fork's discv5 instrumentation branch (plain_binary: upstream discv5 plus the testbed counters and pinned entries, no topic code), so it records per-message wire counters like a TopDisc node; fork keeps the all-legacy rule (legacy_frac 1, legacy_bootnode true) until a mixed run is validated"},
 	{"scenario.population.vanilla_frac", "fraction running stock upstream geth (needs -tags vanilla)"},
 	{"scenario.network.latency_ms", "simnet: per-pair one-way latency, ms (cloud: given by regions)"},
 	{"scenario.network.bandwidth_mibps", "simnet: per-direction link bandwidth (cloud: given by the instance type)"},
@@ -402,6 +411,9 @@ var paramDocs = []paramDoc{
 	{"scenario.churn.interval", "churn round period; 0 = off"},
 	{"scenario.churn.frac", "fraction of nodes acted on per round"},
 	{"scenario.churn.mode", "steadystate (50/50 leave/join) or killonly"},
+	{"scenario.ghosts.share", "mean share of unreachable entries in each node's table; per-node shares follow the mainnet quantile curve scaled to this mean, spread over buckets 248..256; 0 = off (mainnet 2026-10-23: 0.11)"},
+	{"scenario.ghosts.tables", "tables.json(.gz) of a crawl (mainnet dead entries per bucket); node i replays the dead counts of crawled node i mod M. Relative to this file; exclusive with share"},
+	{"scenario.ghosts.pool", "ghost identities to draw from; 0 = max(2 x nodes, 1024)"},
 	{"testbed.simulator.link_buf", "link input queue depth; 0 = simnet default 1024"},
 	{"testbed.simulator.link_no_aqm", "skip fq_codel and rate limiting on links"},
 	{"testbed.simulator.router_buf", "router per-shard queue; 0 = simnet default 8192"},
@@ -504,13 +516,15 @@ func Load(path string) (Config, error) {
 	switch p := c.Scenario.Population; p.LegacyBuild {
 	case "", "stock":
 	case "fork":
-		// A TopDisc node would take the fork build's ng entry for the real
-		// thing and send it registrations and queries.
+		// Mixed runs with the fork's plain build are not validated yet.
 		if p.LegacyFrac != 1 || !p.LegacyBootnode {
 			return c, fmt.Errorf("%s: population.legacy_build fork needs every node legacy: legacy_frac 1 and legacy_bootnode true", path)
 		}
 	default:
 		return c, fmt.Errorf("%s: population.legacy_build %q: want stock or fork", path, p.LegacyBuild)
+	}
+	if err := c.checkGhosts(filepath.Dir(path)); err != nil {
+		return c, fmt.Errorf("%s: %w", path, err)
 	}
 	if c.Scenario.Search.Model != "conn" && c.Scenario.ConnModel.Enabled {
 		return c, fmt.Errorf("%s: search.model %s is lookup-only and never dials; remove conn_model or use search.model conn", path, c.Scenario.Search.Model)
@@ -519,6 +533,55 @@ func Load(path string) (Config, error) {
 		c.Name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	}
 	return c, nil
+}
+
+// GhostPortBase is the first UDP port ghost records advertise; they use
+// [GhostPortBase, GhostPortBase+GhostPortSpan), which no node binds.
+const GhostPortBase, GhostPortSpan = 20000, 10000
+
+// On reports whether the scenario pins ghost records.
+func (g GhostsConfig) On() bool { return g.Share > 0 || g.Tables != "" }
+
+// TablesPath resolves the tables path against the scenario directory.
+func (g GhostsConfig) TablesPath(dir string) string {
+	if g.Tables == "" || filepath.IsAbs(g.Tables) {
+		return g.Tables
+	}
+	return filepath.Join(dir, g.Tables)
+}
+
+func (c Config) checkGhosts(dir string) error {
+	g, p := c.Scenario.Ghosts, c.Scenario.Population
+	if g.Share < 0 || g.Share > 0.5 {
+		return fmt.Errorf("ghosts.share %g: want 0..0.5", g.Share)
+	}
+	if g.Pool < 0 {
+		return fmt.Errorf("ghosts.pool %d: want >= 0", g.Pool)
+	}
+	if !g.On() {
+		return nil
+	}
+	if g.Share > 0 && g.Tables != "" {
+		return fmt.Errorf("ghosts.share and ghosts.tables are exclusive")
+	}
+	if c.Testbed.Backend == "simnet" {
+		return fmt.Errorf("ghosts need a real backend (local, cloud); simnet does not pin them")
+	}
+	if p.LegacyFrac > 0 && p.LegacyBuild != "fork" {
+		return fmt.Errorf("ghosts with legacy nodes need population.legacy_build fork: the stock build cannot pin")
+	}
+	if g.Tables != "" {
+		if _, err := os.Stat(g.TablesPath(dir)); err != nil {
+			return fmt.Errorf("ghosts.tables: %w", err)
+		}
+	}
+	if c.Testbed.Backend == "local" {
+		lo, hi := c.Testbed.Local.BasePort, c.Testbed.Local.BasePort+p.Nodes+10000
+		if lo < GhostPortBase+GhostPortSpan && hi > GhostPortBase {
+			return fmt.Errorf("testbed.local.base_port %d: node and status ports %d..%d overlap the ghost ports %d..%d", lo, lo, hi-1, GhostPortBase, GhostPortBase+GhostPortSpan-1)
+		}
+	}
+	return nil
 }
 
 // flatten walks the struct as yaml-path -> value, in declaration order.

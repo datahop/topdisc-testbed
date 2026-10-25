@@ -281,7 +281,41 @@ type leanTrace struct {
 		AtMs int64 `json:"at_ms"`
 	} `json:"samples"`
 	Session  *traceSession  `json:"session"`  // one process
-	Sessions []traceSession `json:"sessions"` // merged across churn restarts
+	Sessions []traceSession `json:"sessions"` // every online period; empty = never up
+}
+
+// spans is when the node was up. ok is false for a trace with no session
+// data (older runs); an empty sessions[] is a node that never came up.
+func (lt leanTrace) spans() (ss [][2]int64, ok bool) {
+	switch {
+	case lt.Sessions != nil:
+		ss = make([][2]int64, 0, len(lt.Sessions))
+		for _, s := range lt.Sessions {
+			ss = append(ss, [2]int64{s.StartMs, s.EndMs})
+		}
+		return ss, true
+	case lt.Session != nil:
+		return [][2]int64{{lt.Session.StartMs, lt.Session.EndMs}}, true
+	}
+	return nil, false
+}
+
+// onlineAt says whether a node was up at a moment: under churn a provider
+// counts toward a searcher's target only while one of its sessions covers
+// it. Nodes without session data (older runs) count as always up.
+func onlineAt(sessions map[string][][2]int64, stopMs int64) func(id string, atMs int64) bool {
+	return func(id string, atMs int64) bool {
+		ss, ok := sessions[id]
+		if !ok || stopMs == 0 {
+			return true
+		}
+		for _, s := range ss {
+			if s[0] <= atMs && atMs <= s[1] {
+				return true
+			}
+		}
+		return false
+	}
 }
 
 // traceSession is when one process of the node ran.
@@ -339,11 +373,8 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 			providers[th] = map[string]bool{}
 		}
 		providers[th][lt.ID] = true
-		for _, s := range lt.Sessions {
-			sessions[lt.ID] = append(sessions[lt.ID], [2]int64{s.StartMs, s.EndMs})
-		}
-		if len(lt.Sessions) == 0 && lt.Session != nil {
-			sessions[lt.ID] = [][2]int64{{lt.Session.StartMs, lt.Session.EndMs}}
+		if ss, ok := lt.spans(); ok {
+			sessions[lt.ID] = ss
 		}
 		if !a.Legacy {
 			if registrants[th] == nil {
@@ -358,26 +389,12 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 	if len(present) == 0 {
 		return fmt.Errorf("no traces")
 	}
-	// Under churn a provider counts toward a searcher's target only while
-	// it is up: online says whether one of its sessions covers a moment.
-	// Traces without session data (older runs) count as always up.
 	stopMs := as[0].Phases.StopAt
 	churned := false
 	for _, a := range as {
 		churned = churned || len(a.Churn) > 0
 	}
-	online := func(id string, atMs int64) bool {
-		ss, ok := sessions[id]
-		if !ok || stopMs == 0 {
-			return true
-		}
-		for _, s := range ss {
-			if s[0] <= atMs && atMs <= s[1] {
-				return true
-			}
-		}
-		return false
-	}
+	online := onlineAt(sessions, stopMs)
 	epochMs := as[0].Phases.RegisterBase
 	if epochMs == 0 {
 		epochMs = as[0].Phases.RegisterAt
