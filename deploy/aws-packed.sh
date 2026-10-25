@@ -44,7 +44,8 @@ args = " ".join(sys.argv[4:])
 PRICES = {"m6a.large": 0.0864, "m6a.xlarge": 0.1728, "m6a.2xlarge": 0.3456, "m6a.4xlarge": 0.6912,
           "c6a.xlarge": 0.153, "c6a.2xlarge": 0.306, "c6a.4xlarge": 0.612,
           "m6i.xlarge": 0.192, "m6i.2xlarge": 0.384, "m6i.4xlarge": 0.768,
-          "c6i.xlarge": 0.17, "c6i.2xlarge": 0.34, "c6i.4xlarge": 0.68}
+          "c6i.xlarge": 0.17, "c6i.2xlarge": 0.34, "c6i.4xlarge": 0.68,
+          "r6a.8xlarge": 1.8144}
 def price(t):
     if t not in PRICES: sys.exit("no price for %s; add it to deploy/aws-packed.sh" % t)
     return PRICES[t]
