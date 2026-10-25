@@ -87,8 +87,9 @@ func main() {
 	http.HandleFunc("/kill", func(w http.ResponseWriter, req *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
-		if r != nil {
-			fmt.Fprint(w, r.Kill(idxOf(req)))
+		idx := idxOf(req)
+		if r == nil || !r.Kill(idx) {
+			fail(w, fmt.Errorf("node %d not running", idx))
 		}
 	})
 	http.HandleFunc("/stop", func(w http.ResponseWriter, req *http.Request) {

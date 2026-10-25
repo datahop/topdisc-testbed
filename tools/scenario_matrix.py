@@ -79,7 +79,7 @@ BACKENDS = {
         testbed={"backend": "cloud",
                  "cloud": {"inventory": "inventory.json", "home_region": "us-east-1", "verbosity": 2, "grace": "30s"},
                  "aws_packed": {"region": "us-east-1", "zone": "us-east-1a", "instance_type": "m6a.2xlarge",
-                                "coordinator_type": "m6a.4xlarge", "vnodes_per_machine": 500},
+                                "coordinator_type": "r6a.8xlarge", "vnodes_per_machine": 500},
                  "wan": {"enabled": True, "delay_min_ms": 4, "delay_max_ms": 45, "jitter_ms": 3, "rate_kbps": 1000},
                  "traces": {"host_sample_period": "30s"}},
         # synthetic addresses: the route table routes one /16 per host, not crawl /24s

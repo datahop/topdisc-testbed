@@ -1,0 +1,994 @@
+{
+ "run": "synthetic-real",
+ "backend": "real",
+ "parameters": {
+  "ad_lifetime_ms": 60000,
+  "cache_size": 10,
+  "attempt_timeout_ms": 90000,
+  "bucket_size": 3,
+  "topic_nodes_limit": 4,
+  "aux_nodes_limit": 2
+ },
+ "tolerances": {
+  "loss": 0.02,
+  "loss_churn": 0.3,
+  "skew_ms": 5000,
+  "floor_ms": 1000,
+  "stale_ms": 5000,
+  "idle_bucket_ms": 120000,
+  "snapshot_ms": 30000,
+  "fanout_keep": 0.5,
+  "incomplete_frac": 0.01,
+  "load_multiple": 10.0,
+  "cpu_pct": 80.0,
+  "mem_avail_mb": 64.0,
+  "attempt_slack": 0.02,
+  "min_search_online_ms": 300000
+ },
+ "checks": [
+  {
+   "id": "C1",
+   "group": "registration",
+   "assertion": "capacity: ads held never exceed the cache size",
+   "status": "fail",
+   "summary": "2 nodes over capacity",
+   "evidence": {
+    "peak": 12,
+    "capacity": 10,
+    "offenders": [
+     [
+      3,
+      11,
+      10
+     ],
+     [
+      2,
+      12,
+      10
+     ]
+    ]
+   }
+  },
+  {
+   "id": "C2",
+   "group": "registration",
+   "assertion": "no duplicates: one ad per advertiser and topic per registrar",
+   "status": "fail",
+   "summary": "1 duplicate ads",
+   "evidence": {
+    "offenders": [
+     [
+      0,
+      "aaaaaaaa",
+      "00000000",
+      2
+     ]
+    ]
+   }
+  },
+  {
+   "id": "C3",
+   "group": "registration",
+   "assertion": "only registrants: every held ad is from a node registering that topic",
+   "status": "fail",
+   "summary": "1 ads from nodes not registering that topic; 0 ads from ids without a trace",
+   "evidence": {
+    "offenders": [
+     [
+      1,
+      "bbbbbbbb",
+      0
+     ]
+    ],
+    "unknown_ids": 0
+   }
+  },
+  {
+   "id": "C4",
+   "group": "registration",
+   "assertion": "only capable nodes: no legacy node in any cache",
+   "status": "fail",
+   "summary": "1 ads from legacy nodes",
+   "evidence": {
+    "offenders": [
+     [
+      0,
+      "00000000"
+     ]
+    ]
+   }
+  },
+  {
+   "id": "C5",
+   "group": "registration",
+   "assertion": "no self-ads: a registrar never holds its own ad",
+   "status": "fail",
+   "summary": "1 registrars hold their own ad",
+   "evidence": {
+    "offenders": [
+     3
+    ]
+   }
+  },
+  {
+   "id": "K1",
+   "group": "registration",
+   "assertion": "departed nodes leave caches within an ad lifetime",
+   "status": "fail",
+   "summary": "2 ads of long-departed nodes; 1 ads from ids without a trace (see H2)",
+   "evidence": {
+    "offenders": [
+     [
+      3,
+      4,
+      450
+     ],
+     [
+      2,
+      4,
+      450
+     ]
+    ],
+    "unknown_ids": 1,
+    "schedule_down_trace_up": 0,
+    "schedule_down_trace_shorter": 0,
+    "churn_base": "node 0"
+   }
+  },
+  {
+   "id": "E1",
+   "group": "registration",
+   "assertion": "lifetime: expired ads are swept promptly and no ad expires beyond a lifetime",
+   "status": "fail",
+   "summary": "expired ads lingered 7.0 s (tolerance 5 s); 1 ads with expiry beyond a lifetime",
+   "evidence": {
+    "stale_max_ms": 7000,
+    "offenders": [
+     [
+      0,
+      "00000000",
+      200
+     ]
+    ]
+   }
+  },
+  {
+   "id": "E2",
+   "group": "registration",
+   "assertion": "renewal keeps fan-out: final fan-out against the post-register level",
+   "status": "fail",
+   "summary": "1 advertisers below 50% of their post-register fan-out (median ratio 1.00)",
+   "evidence": {
+    "median_ratio": 1.0,
+    "offenders": [
+     [
+      2,
+      3,
+      1
+     ]
+    ],
+    "advertisers": 5
+   }
+  },
+  {
+   "id": "E3",
+   "group": "registration",
+   "assertion": "renewal accounting: renewals received match renewals sent beyond session setups",
+   "status": "not-exercised",
+   "summary": "churn: a restarted advertiser's fresh REGTOPIC arrives as a renewal where its ad is still held (60 renewals sent, 55 received); A1 checks the totals",
+   "evidence": {}
+  },
+  {
+   "id": "W1",
+   "group": "registration",
+   "assertion": "bounded wait: every admission within 2 % of the attempt timeout",
+   "status": "fail",
+   "summary": "8 admissions past the 97 s allowed (90 s attempt timeout + 2 % + clock skew)",
+   "evidence": {
+    "longest_ms": 120000,
+    "limit_ms": 96800,
+    "slack": 0.02,
+    "offenders": [
+     [
+      1,
+      "aaaaaaaa",
+      120000
+     ],
+     [
+      1,
+      "aaaaaaaa",
+      99000.5
+     ],
+     [
+      3,
+      "aaaaaaaa",
+      120000
+     ],
+     [
+      3,
+      "aaaaaaaa",
+      99000.5
+     ],
+     [
+      0,
+      "aaaaaaaa",
+      120000
+     ],
+     [
+      0,
+      "aaaaaaaa",
+      99000.5
+     ],
+     [
+      2,
+      "aaaaaaaa",
+      120000
+     ],
+     [
+      2,
+      "aaaaaaaa",
+      99000.5
+     ]
+    ],
+    "samples": 20
+   }
+  },
+  {
+   "id": "W2",
+   "group": "registration",
+   "assertion": "no early admission: admitted only after the required wait",
+   "status": "fail",
+   "summary": "24 of 60 admissions before the required wait",
+   "evidence": {
+    "offenders": [
+     [
+      1,
+      "00000000",
+      0,
+      10000
+     ],
+     [
+      1,
+      "00000000",
+      0,
+      10000
+     ],
+     [
+      1,
+      "00000000",
+      0,
+      10000
+     ],
+     [
+      1,
+      "00000000",
+      0,
+      10000
+     ],
+     [
+      1,
+      "00000000",
+      0,
+      10000
+     ],
+     [
+      1,
+      "00000000",
+      0,
+      10000
+     ],
+     [
+      0,
+      "00000000",
+      0,
+      10000
+     ],
+     [
+      0,
+      "00000000",
+      0,
+      10000
+     ],
+     [
+      0,
+      "00000000",
+      0,
+      10000
+     ],
+     [
+      0,
+      "00000000",
+      0,
+      10000
+     ]
+    ],
+    "admissions": 60
+   }
+  },
+  {
+   "id": "W3",
+   "group": "registration",
+   "assertion": "lower bound: a repeated quote never undercuts the previous one by more than the time elapsed",
+   "status": "fail",
+   "summary": "8 of 8 repeated quotes undercut the lower bound",
+   "evidence": {
+    "offenders": [
+     [
+      1,
+      "00000000",
+      50000,
+      10000,
+      2000
+     ],
+     [
+      1,
+      "00000000",
+      50000,
+      10000,
+      2000
+     ],
+     [
+      0,
+      "00000000",
+      50000,
+      10000,
+      2000
+     ],
+     [
+      0,
+      "00000000",
+      50000,
+      10000,
+      2000
+     ],
+     [
+      2,
+      "00000000",
+      50000,
+      10000,
+      2000
+     ],
+     [
+      2,
+      "00000000",
+      50000,
+      10000,
+      2000
+     ],
+     [
+      5,
+      "00000000",
+      50000,
+      10000,
+      2000
+     ],
+     [
+      5,
+      "00000000",
+      50000,
+      10000,
+      2000
+     ]
+    ],
+    "pairs": 8
+   }
+  },
+  {
+   "id": "W4",
+   "group": "registration",
+   "assertion": "full cache admits nothing",
+   "status": "fail",
+   "summary": "16 admissions into a full cache",
+   "evidence": {
+    "offenders": [
+     [
+      1,
+      10
+     ],
+     [
+      1,
+      11
+     ],
+     [
+      1,
+      12
+     ],
+     [
+      1,
+      13
+     ],
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      11
+     ],
+     [
+      0,
+      12
+     ],
+     [
+      0,
+      13
+     ],
+     [
+      2,
+      10
+     ],
+     [
+      2,
+      11
+     ]
+    ]
+   }
+  },
+  {
+   "id": "W5",
+   "group": "registration",
+   "assertion": "ticket validity: early, late, wrong-topic and bad-MAC tickets rejected",
+   "status": "unit-test",
+   "summary": "TicketSealer tests in the fork; rejection counters not traced",
+   "evidence": {}
+  },
+  {
+   "id": "W6",
+   "group": "registration",
+   "assertion": "record address: admitted record IP equals the packet source",
+   "status": "fail",
+   "summary": "20 admissions with a record IP other than the source",
+   "evidence": {
+    "offenders": [
+     [
+      1,
+      "00000000",
+      "8.8.4.4",
+      "9.9.9.0"
+     ],
+     [
+      1,
+      "00000000",
+      "8.8.4.4",
+      "9.9.9.1"
+     ],
+     [
+      1,
+      "00000000",
+      "8.8.4.4",
+      "9.9.9.2"
+     ],
+     [
+      1,
+      "00000000",
+      "8.8.4.4",
+      "9.9.9.3"
+     ],
+     [
+      1,
+      "00000000",
+      "8.8.4.4",
+      "9.9.9.4"
+     ],
+     [
+      0,
+      "00000000",
+      "8.8.4.4",
+      "9.9.9.0"
+     ],
+     [
+      0,
+      "00000000",
+      "8.8.4.4",
+      "9.9.9.1"
+     ],
+     [
+      0,
+      "00000000",
+      "8.8.4.4",
+      "9.9.9.2"
+     ],
+     [
+      0,
+      "00000000",
+      "8.8.4.4",
+      "9.9.9.3"
+     ],
+     [
+      0,
+      "00000000",
+      "8.8.4.4",
+      "9.9.9.4"
+     ]
+    ]
+   }
+  },
+  {
+   "id": "R1",
+   "group": "registration",
+   "assertion": "bucket size: registered plus waiting never exceed the bucket size",
+   "status": "fail",
+   "summary": "3 buckets over size",
+   "evidence": {
+    "offenders": [
+     [
+      1,
+      255,
+      5
+     ],
+     [
+      0,
+      255,
+      4
+     ],
+     [
+      2,
+      255,
+      6
+     ]
+    ]
+   }
+  },
+  {
+   "id": "R2",
+   "group": "registration",
+   "assertion": "bucket IP diversity: one registrar per /24 per bucket",
+   "status": "fail",
+   "summary": "3 buckets with two registrars in one /24",
+   "evidence": {
+    "offenders": [
+     [
+      1,
+      256,
+      "8.8.8",
+      2
+     ],
+     [
+      0,
+      256,
+      "8.8.8",
+      2
+     ],
+     [
+      2,
+      256,
+      "8.8.8",
+      2
+     ]
+    ]
+   }
+  },
+  {
+   "id": "R3",
+   "group": "registration",
+   "assertion": "state maintained: tables complete by search start and no bucket left empty with candidates",
+   "status": "fail",
+   "summary": "3 final buckets idle with candidates left; over time: 12 idle spells beyond 120 s; 1 of 3 tables were still filling at search start (register_wait)",
+   "evidence": {
+    "empty": [
+     [
+      1,
+      256,
+      2
+     ],
+     [
+      0,
+      256,
+      2
+     ],
+     [
+      2,
+      256,
+      2
+     ]
+    ],
+    "incomplete": [
+     [
+      1,
+      0
+     ]
+    ],
+    "idle": [
+     [
+      1,
+      0,
+      180
+     ],
+     [
+      1,
+      1,
+      180
+     ],
+     [
+      1,
+      0,
+      180
+     ],
+     [
+      1,
+      1,
+      180
+     ],
+     [
+      1,
+      0,
+      180
+     ],
+     [
+      1,
+      1,
+      180
+     ],
+     [
+      0,
+      0,
+      180
+     ],
+     [
+      0,
+      1,
+      180
+     ],
+     [
+      0,
+      0,
+      180
+     ],
+     [
+      0,
+      1,
+      180
+     ]
+    ],
+    "advertisers": 3
+   }
+  },
+  {
+   "id": "L1",
+   "group": "search",
+   "assertion": "right topic: every result registers the requested topic",
+   "status": "fail",
+   "summary": "12 of 31 results from nodes not registering the topic; 5 from ids without a trace or a known topic (traces missing, see H2)",
+   "evidence": {
+    "offenders": [
+     [
+      1,
+      3
+     ],
+     [
+      1,
+      4
+     ],
+     [
+      4,
+      1
+     ],
+     [
+      4,
+      5
+     ],
+     [
+      4,
+      1
+     ],
+     [
+      3,
+      1
+     ],
+     [
+      3,
+      5
+     ],
+     [
+      3,
+      1
+     ],
+     [
+      0,
+      3
+     ],
+     [
+      0,
+      4
+     ]
+    ],
+    "results": 31,
+    "unknown_ids": 5
+   }
+  },
+  {
+   "id": "L2",
+   "group": "search",
+   "assertion": "capable results: no legacy node among results",
+   "status": "fail",
+   "summary": "5 results are legacy nodes",
+   "evidence": {
+    "offenders": [
+     [
+      1,
+      5
+     ],
+     [
+      4,
+      5
+     ],
+     [
+      3,
+      5
+     ],
+     [
+      0,
+      5
+     ],
+     [
+      2,
+      5
+     ]
+    ]
+   }
+  },
+  {
+   "id": "L3",
+   "group": "search",
+   "assertion": "no expired results: no result down longer than a lifetime",
+   "status": "fail",
+   "summary": "5 results of long-expired nodes; 5 results from ids without a trace (see H2)",
+   "evidence": {
+    "offenders": [
+     [
+      1,
+      4,
+      191
+     ],
+     [
+      4,
+      4,
+      191
+     ],
+     [
+      3,
+      4,
+      191
+     ],
+     [
+      0,
+      4,
+      191
+     ],
+     [
+      2,
+      4,
+      191
+     ]
+    ],
+    "results": 31,
+    "unknown_ids": 5,
+    "schedule_down_trace_up": 0,
+    "schedule_down_trace_shorter": 0,
+    "churn_base": "node 0"
+   }
+  },
+  {
+   "id": "L4",
+   "group": "search",
+   "assertion": "termination: lookups end at the target or the timeout, hit flag consistent",
+   "status": "fail",
+   "summary": "5 lookups terminated wrongly",
+   "evidence": {
+    "offenders": [
+     [
+      1,
+      "hit flag",
+      1,
+      3
+     ],
+     [
+      4,
+      "hit flag",
+      1,
+      3
+     ],
+     [
+      3,
+      "hit flag",
+      1,
+      3
+     ],
+     [
+      0,
+      "hit flag",
+      1,
+      3
+     ],
+     [
+      2,
+      "hit flag",
+      1,
+      3
+     ]
+    ],
+    "lookups": 11
+   }
+  },
+  {
+   "id": "L5",
+   "group": "search",
+   "assertion": "reply limits: nodes per reply within the topic and aux limits",
+   "status": "fail",
+   "summary": "1 searches saw a reply over the limit (largest 5 registrants, 1 neighbours)",
+   "evidence": {
+    "offenders": [
+     [
+      1,
+      5,
+      1
+     ]
+    ],
+    "max_topic": 5,
+    "max_aux": 1
+   }
+  },
+  {
+   "id": "L6",
+   "group": "search",
+   "assertion": "no duplicate results within a lookup",
+   "status": "fail",
+   "summary": "5 lookups yielded a registrant more than once",
+   "evidence": {
+    "offenders": [
+     [
+      1,
+      1
+     ],
+     [
+      4,
+      1
+     ],
+     [
+      3,
+      1
+     ],
+     [
+      0,
+      1
+     ],
+     [
+      2,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "id": "I1",
+   "group": "search",
+   "assertion": "no topic messages to legacy peers",
+   "status": "fail",
+   "summary": "6 operations sent topic requests to legacy nodes",
+   "evidence": {
+    "offenders": [
+     [
+      1,
+      "REGTOPIC/v5",
+      1
+     ],
+     [
+      4,
+      "REGTOPIC/v5",
+      1
+     ],
+     [
+      3,
+      "REGTOPIC/v5",
+      1
+     ],
+     [
+      0,
+      "REGTOPIC/v5",
+      1
+     ],
+     [
+      2,
+      "REGTOPIC/v5",
+      1
+     ],
+     [
+      5,
+      "REGTOPIC/v5",
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "id": "I2",
+   "group": "search",
+   "assertion": "base discovery: legacy nodes still find providers",
+   "status": "fail",
+   "summary": "1 of 1 legacy nodes found nothing",
+   "evidence": {
+    "offenders": [
+     5
+    ],
+    "churn_base": "node 0"
+   }
+  },
+  {
+   "id": "A1",
+   "group": "load",
+   "assertion": "request accounting: REGTOPIC and TOPICQUERY sent equal received",
+   "status": "fail",
+   "summary": "REGTOPIC and TOPICQUERY (churn: requests to departed nodes are lost by design): 760 sent, 715 received, difference not within the 30 session setups",
+   "evidence": {
+    "sent": 760,
+    "received": 715,
+    "session_setups": 30
+   }
+  },
+  {
+   "id": "A2",
+   "group": "load",
+   "assertion": "every query answered: TOPICNODES sent at least TOPICQUERY received per node",
+   "status": "fail",
+   "summary": "1 nodes replied to fewer queries than they received",
+   "evidence": {
+    "offenders": [
+     [
+      1,
+      60,
+      50
+     ]
+    ]
+   }
+  },
+  {
+   "id": "A3",
+   "group": "load",
+   "assertion": "registrar load bound: busiest registrar within a multiple of the median",
+   "status": "pass",
+   "summary": "busiest registrar at 1.8\u00d7 the median (70 vs 40 queries)",
+   "evidence": {
+    "max": 70,
+    "median": 40,
+    "limit": 10.0
+   }
+  },
+  {
+   "id": "H1",
+   "group": "load",
+   "assertion": "no packet drops on any host",
+   "status": "fail",
+   "summary": "6 UDP receive-buffer drops",
+   "evidence": {
+    "drops": 6,
+    "hosts": 2
+   }
+  },
+  {
+   "id": "H2",
+   "group": "load",
+   "assertion": "complete collection: a trace for every node",
+   "status": "fail",
+   "summary": "1 of 7 traces missing",
+   "evidence": {
+    "assigned": 7,
+    "traces": 6,
+    "no_coverage": 0,
+    "no_coverage_nodes": []
+   }
+  },
+  {
+   "id": "H3",
+   "group": "load",
+   "assertion": "hosts under load: node CPU and host memory within limits",
+   "status": "pass",
+   "summary": "node CPU peak 20%, RSS peak 20 MB, host memory never below 898 MB",
+   "evidence": {
+    "cpu_peak": 20.0,
+    "rss_peak": 20.5,
+    "mem_avail_min": 898
+   }
+  }
+ ],
+ "exit": 1
+}

@@ -3,6 +3,7 @@ __pycache__/
 !scenarios/models/*.json
 .terraform/
 *.json
+!figures/testdata/*.json
 *.tfstate*
 /deploy/g5k/inventory.json
 /deploy/g5k/nodes.txt

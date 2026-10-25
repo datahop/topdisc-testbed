@@ -10,6 +10,7 @@
 //	miss   a node that ever answered did not answer (err)
 //	down   -misses unanswered PINGs in a row over at least two probe periods
 //	sweep  periodic counts, every -sweep
+//	reply  a FINDNODE reply from a live node (-sample): the returned node ids, or err
 //
 // Every node ever seen is pinged forever. A node that has answered at least
 // once is pinged every -probe, also after it went down, so a rejoin is
@@ -19,6 +20,14 @@
 // then pinged every -probe-dead. Never-responders have their own, smaller
 // worker pool, so they cannot delay the schedule of the nodes whose sessions
 // are being measured.
+//
+// With -sample, every node that is up is also sent a FINDNODE once per
+// -sample period, for -sample-distances random distances in 248..256; the
+// requests are spread evenly over the period. The returned nodes enter the
+// registry like crawled ones, so the dead share per FINDNODE request (the
+// deduplicated records returned for one request) can be derived later from
+// the probe events. With -sample-full, every node that is up has its whole
+// table read instead (see sampleTable).
 package main
 
 import (
@@ -29,6 +38,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"os"
 	"os/signal"
@@ -62,6 +72,10 @@ func main() {
 		workers   = flag.Int("workers", 256, "concurrent pings to nodes that ever answered or are new")
 		deadWork  = flag.Int("dead-workers", 32, "concurrent pings to never-responders")
 		sweep     = flag.Duration("sweep", 10*time.Minute, "period of the sweep count events")
+		sample    = flag.Duration("sample", 0, "period at which every live node's table is sampled with FINDNODE; 0 = off. With -sample-full, use -sample 1h -duration 2h20m: the second pass reads every node learned in the first hour, and 20 min remain to ping the returned records")
+		sampleW   = flag.Int("sample-workers", 64, "concurrent FINDNODE requests of the sampler")
+		sampleD   = flag.Int("sample-distances", 3, "random distinct distances in 248..256 per FINDNODE")
+		sampleF   = flag.Bool("sample-full", false, "read the whole table of every live node each sample period: one FINDNODE per distance 256 down to 224 (33 requests per node; 240 and below cover bucket 0); -sample-distances is ignored")
 		verbosity = flag.Int("verbosity", 3, "log verbosity")
 	)
 	flag.Parse()
@@ -135,6 +149,13 @@ func main() {
 		defer wg.Done()
 		reg.probeLoop(disc, stop, probeConfig{probe: *probe, probeDead: *probeDead, misses: *misses, newTries: *newTries, workers: *workers, deadWorkers: *deadWork})
 	}()
+	if *sample > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			reg.sampleLoop(disc, stop, sampleConfig{period: *sample, workers: *sampleW, distances: *sampleD, full: *sampleF})
+		}()
+	}
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -331,6 +352,8 @@ type registry struct {
 	pongs     atomic.Int64
 	deadPings atomic.Int64
 	deadPongs atomic.Int64
+	samples   atomic.Int64
+	sampleErr atomic.Int64
 	errs      map[string]int64 // ping errors of ever-answered nodes, by kind
 }
 
@@ -401,12 +424,15 @@ type sweepEvent struct {
 	New       int              `json:"new"`       // never answered, still within their first tries
 	Dead      int              `json:"dead"`      // never answered after their first tries
 	Errs      map[string]int64 `json:"errs"`      // ping errors of ever-answered nodes, by kind
+
+	Samples   int64 `json:"samples,omitempty"`    // FINDNODE requests of the sampler
+	SampleErr int64 `json:"sampleErrs,omitempty"` // of which failed
 }
 
 func (r *registry) sweep(n int, probe time.Duration, newTries int) {
 	r.mu.Lock()
 	ev := sweepEvent{T: now(), Ev: "sweep", N: n, Known: len(r.nodes), Pings: r.pings.Load(), Pongs: r.pongs.Load(),
-		DeadPings: r.deadPings.Load(), DeadPongs: r.deadPongs.Load(), Errs: make(map[string]int64, len(r.errs))}
+		DeadPings: r.deadPings.Load(), DeadPongs: r.deadPongs.Load(), Samples: r.samples.Load(), SampleErr: r.sampleErr.Load(), Errs: make(map[string]int64, len(r.errs))}
 	for k, v := range r.errs {
 		ev.Errs[k] = v
 	}
@@ -430,7 +456,7 @@ func (r *registry) sweep(n int, probe time.Duration, newTries int) {
 	r.mu.Unlock()
 	r.events.write(ev)
 	log.Info("sweep", "n", n, "known", ev.Known, "everUp", ev.EverUp, "up", ev.Up, "new", ev.New, "dead", ev.Dead, "late", ev.Late,
-		"pings", ev.Pings, "pongs", ev.Pongs, "deadPings", ev.DeadPings, "deadPongs", ev.DeadPongs, "errs", fmt.Sprint(ev.Errs))
+		"pings", ev.Pings, "pongs", ev.Pongs, "deadPings", ev.DeadPings, "deadPongs", ev.DeadPongs, "samples", ev.Samples, "sampleErrs", ev.SampleErr, "errs", fmt.Sprint(ev.Errs))
 }
 
 type probeConfig struct {
@@ -577,6 +603,128 @@ func (r *registry) probeLoop(disc *discover.UDPv5, stop <-chan struct{}, cfg pro
 				r.mu.Unlock()
 			}
 		}
+	}
+}
+
+type sampleConfig struct {
+	period    time.Duration
+	workers   int
+	distances int
+	full      bool
+}
+
+type replyEvent struct {
+	T     int64    `json:"t"`
+	Ev    string   `json:"ev"`
+	From  string   `json:"from"`
+	Dist  []uint   `json:"dist"`
+	Nodes []string `json:"nodes,omitempty"`
+	Err   string   `json:"err,omitempty"`
+}
+
+// sampleLoop sends a FINDNODE to every node that is up once per period, in
+// random order and spread evenly over the period, and logs each reply.
+func (r *registry) sampleLoop(disc *discover.UDPv5, stop <-chan struct{}, cfg sampleConfig) {
+	jobs := make(chan *enode.Node)
+	var wg sync.WaitGroup
+	for i := 0; i < cfg.workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for n := range jobs {
+				if cfg.full {
+					r.sampleTable(disc, n)
+				} else {
+					r.sampleNode(disc, n, cfg.distances)
+				}
+			}
+		}()
+	}
+	defer func() {
+		close(jobs)
+		wg.Wait()
+	}()
+	wait := func(t time.Time) bool {
+		select {
+		case <-time.After(time.Until(t)):
+			return true
+		case <-stop:
+			return false
+		}
+	}
+	for {
+		start := time.Now()
+		var nodes []*enode.Node
+		r.mu.Lock()
+		for _, st := range r.nodes {
+			if st.up {
+				nodes = append(nodes, st.node)
+			}
+		}
+		r.mu.Unlock()
+		rand.Shuffle(len(nodes), func(i, j int) { nodes[i], nodes[j] = nodes[j], nodes[i] })
+		gap := cfg.period / time.Duration(max(len(nodes), 1))
+		for i, n := range nodes {
+			if !wait(start.Add(time.Duration(i) * gap)) {
+				return
+			}
+			select {
+			case jobs <- n:
+			case <-stop:
+				return
+			}
+		}
+		if !wait(start.Add(cfg.period)) {
+			return
+		}
+	}
+}
+
+func (r *registry) sampleNode(disc *discover.UDPv5, n *enode.Node, k int) {
+	dists := make([]uint, 0, k)
+	for _, i := range rand.Perm(9)[:min(max(k, 1), 9)] {
+		dists = append(dists, uint(248+i))
+	}
+	nodes, err := r.findnode(disc, n, dists)
+	r.logReply(n, dists, nodes, err)
+}
+
+// sampleTable reads every bucket of n's table, one distance per request so
+// no reply can hit the result limit of 16, and stops at the first error.
+// Bucket 0 holds every entry at distance <= 240 and is returned whole for any
+// distance <= 240, but the client keeps only records at a requested distance,
+// so distances down to 224 are asked.
+func (r *registry) sampleTable(disc *discover.UDPv5, n *enode.Node) {
+	for d := uint(256); d >= 224; d-- {
+		nodes, err := r.findnode(disc, n, []uint{d})
+		r.logReply(n, []uint{d}, nodes, err)
+		if err != nil {
+			return
+		}
+	}
+}
+
+func (r *registry) findnode(disc *discover.UDPv5, n *enode.Node, dists []uint) ([]*enode.Node, error) {
+	r.samples.Add(1)
+	nodes, err := disc.Findnode(n, dists)
+	if err != nil {
+		r.sampleErr.Add(1)
+	}
+	return nodes, err
+}
+
+func (r *registry) logReply(n *enode.Node, dists []uint, nodes []*enode.Node, err error) {
+	ev := replyEvent{Ev: "reply", From: n.ID().String(), Dist: dists}
+	if err != nil {
+		ev.Err = errKind(err)
+	}
+	for _, nn := range nodes {
+		ev.Nodes = append(ev.Nodes, nn.ID().String())
+	}
+	ev.T = now()
+	r.events.write(ev)
+	for _, nn := range nodes {
+		r.observe(nn, "reply")
 	}
 }
 

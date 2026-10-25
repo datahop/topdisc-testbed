@@ -156,8 +156,8 @@ quota (L-1216C47A, 5,100 in us-east-1 on 2026-10-21) and the route-table
 route quota (L-93826ACB, 500) against the fleet, and the coordinator
 terminates the hosts and halts `max_hours` after boot. `down` copies the
 bucket's run archives to `runs/archives` before destroying. The `aws-25k`
-scenarios run on 50 hosts and an `m6a.4xlarge` coordinator for about $18 an
-hour, $55 a run.
+scenarios run on 50 hosts and an `r6a.8xlarge` coordinator (64 GB ran out
+aggregating 25k traces) for about $19.5 an hour, $60 a run.
 
 ## Hetzner Cloud
 

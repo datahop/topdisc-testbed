@@ -165,7 +165,7 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 	fmt.Printf("hosts: %d; nodes by region: %v\n", len(agents), byRegion)
 	ctl := hostControl{
 		start: func(idx int) error { return agents[hostOf[idx]].call("start", idx) },
-		kill:  func(idx int) bool { return agents[hostOf[idx]].call("kill", idx) == nil },
+		kill:  func(idx int) error { return agents[hostOf[idx]].call("kill", idx) },
 	}
 	defer func() {
 		for _, a := range agents {
@@ -232,6 +232,14 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 			}
 		}
 		fmt.Printf("traces missing: %d, by region %v; e.g. %s\n", len(failed), byHost, sample)
+		logDir := filepath.Join(runDir, "logs")
+		os.MkdirAll(logDir, 0o755)
+		n, why := fetchLogs(agents, hostOf, failed, logDir)
+		msg := fmt.Sprintf("logs: fetched %d/%d for the nodes without a trace into %s", n, len(failed), logDir)
+		if why != "" {
+			msg += "; e.g. " + why
+		}
+		fmt.Println(msg)
 	}
 	if cfg.Testbed.Traces.HostSamplePeriod > 0 {
 		hmDir := filepath.Join(runDir, "hostmetrics")
@@ -378,6 +386,33 @@ func (a agent) fetch(op string, idx int, dst string) error {
 	defer f.Close()
 	_, err = io.Copy(f, resp.Body)
 	return err
+}
+
+// fetchLogs pulls the node log of every node in failed into dir, one attempt
+// each. It returns how many arrived and one error, if any failed.
+func fetchLogs(agents []agent, hostOf []int, failed map[int]error, dir string) (int, string) {
+	idx := make([]int, 0, len(failed))
+	for i := range failed {
+		idx = append(idx, i)
+	}
+	sort.Ints(idx)
+	var got atomic.Int32
+	var mu sync.Mutex
+	var sample string
+	each(len(idx), func(k int) error {
+		i := idx[k]
+		if err := agents[hostOf[i]].fetch("log", i, filepath.Join(dir, fmt.Sprintf("node%d.log", i))); err != nil {
+			mu.Lock()
+			if sample == "" {
+				sample = fmt.Sprintf("node %d: %v", i, err)
+			}
+			mu.Unlock()
+			return nil
+		}
+		got.Add(1)
+		return nil
+	})
+	return int(got.Load()), sample
 }
 
 // each runs f over 0..n-1 with bounded concurrency; the first error wins.
