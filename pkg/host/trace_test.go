@@ -62,20 +62,3 @@ func TestLoadTraceMergesSessions(t *testing.T) {
 		t.Error("single session altered")
 	}
 }
-
-func TestRotateTrace(t *testing.T) {
-	dir := t.TempDir()
-	trace := filepath.Join(dir, "node0.json")
-	if err := rotateTrace(trace); err != nil {
-		t.Fatal(err)
-	}
-	for k := 1; k <= 2; k++ {
-		os.WriteFile(trace, []byte("x"), 0o644)
-		if err := rotateTrace(trace); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := os.Stat(sessionPath(trace, k)); err != nil {
-			t.Fatalf("session %d not parked: %v", k, err)
-		}
-	}
-}

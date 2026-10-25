@@ -71,3 +71,42 @@ func TestLoadLegacyBuild(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadGhosts(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "tables.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	local := "testbed:\n  backend: local\n"
+	for _, tc := range []struct {
+		body    string
+		wantErr string
+	}{
+		{"scenario:\n  ghosts:\n    share: 0.11\n" + local, ""},
+		{"scenario:\n  ghosts:\n    tables: tables.json\n" + local, ""},
+		{"scenario:\n  ghosts:\n    tables: " + filepath.Join(dir, "tables.json") + "\n" + local, ""},
+		{"scenario:\n  ghosts:\n    share: 0.11\n    tables: tables.json\n" + local, "exclusive"},
+		{"scenario:\n  ghosts:\n    share: 0.6\n" + local, "want 0..0.5"},
+		{"scenario:\n  ghosts:\n    tables: missing.json\n" + local, "ghosts.tables"},
+		{"scenario:\n  ghosts:\n    share: 0.11\n", "real backend"},
+		{"scenario:\n  population:\n    legacy_frac: 0.5\n  ghosts:\n    share: 0.11\n" + local, "legacy_build fork"},
+		{"scenario:\n  population:\n    legacy_frac: 1\n    legacy_bootnode: true\n    legacy_build: fork\n  ghosts:\n    share: 0.11\n" + local, ""},
+		{"scenario:\n  ghosts:\n    share: 0.11\n" + local + "  local:\n    base_port: 20500\n", "overlap the ghost ports"},
+		{"scenario:\n  ghosts:\n    share: 0.11\n" + local + "  local:\n    base_port: 15000\n", "overlap the ghost ports"},
+	} {
+		path := filepath.Join(dir, "s.yaml")
+		if err := os.WriteFile(path, []byte(tc.body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(path)
+		switch {
+		case tc.wantErr == "" && err != nil:
+			t.Errorf("%q: unexpected error %v", tc.body, err)
+		case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+			t.Errorf("%q: error %v, want %q", tc.body, err, tc.wantErr)
+		}
+	}
+	if Default().Scenario.Ghosts.On() {
+		t.Fatal("ghosts on by default")
+	}
+}

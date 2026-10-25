@@ -2,7 +2,10 @@ package host
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -50,7 +53,7 @@ func TestReapLogsOwnExit(t *testing.T) {
 	}
 }
 
-func TestKillLogsKill(t *testing.T) {
+func TestTerminateLogsKill(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "node.sh")
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
@@ -61,17 +64,17 @@ func TestKillLogsKill(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	if !r.Kill(2) {
-		t.Fatal("Kill(2) = false for a running node")
+	if !r.terminate(2) {
+		t.Fatal("terminate(2) = false for a running node")
 	}
 	if d := time.Since(start); d > 2*time.Second {
-		t.Errorf("Kill took %s", d)
+		t.Errorf("terminate took %s", d)
 	}
 	if got := nodeLog(t, r, 2); !strings.Contains(got, "[host] exited: signal: terminated at ") {
 		t.Errorf("node log %q", got)
 	}
-	if r.Kill(2) {
-		t.Error("second Kill(2) = true")
+	if r.terminate(2) {
+		t.Error("second terminate(2) = true")
 	}
 }
 
@@ -85,5 +88,38 @@ func TestSampleSkipsExited(t *testing.T) {
 	r.sample()
 	if s := r.Samples(); len(s) != 1 || len(s[0].Nodes) != 0 {
 		t.Errorf("samples %+v, want one with no nodes", s)
+	}
+}
+
+// Down and a churn Start go to the node's own status port; the node's answer
+// comes back as the error.
+func TestRunnerDownUpAndStartDispatch(t *testing.T) {
+	var calls []string
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		calls = append(calls, req.Method+" "+req.URL.Path)
+		if len(calls) == 3 {
+			http.Error(w, "already up", http.StatusConflict)
+		}
+	}))
+	r := newRunner(t, "/nonexistent")
+	r.init()
+	r.status[3] = node.Listener.Addr().String()
+	r.procs[3] = &proc{cmd: &exec.Cmd{}, done: make(chan struct{})}
+
+	if err := r.Down(3); err != nil {
+		t.Fatalf("Down: %v", err)
+	}
+	if err := r.Start(3); err != nil {
+		t.Fatalf("Start of a started node: %v", err)
+	}
+	if err := r.Up(3); err == nil || !strings.Contains(err.Error(), "already up") {
+		t.Errorf("Up on a 409: %v, want the node's answer", err)
+	}
+	if want := []string{"POST /down", "POST /up", "POST /up"}; fmt.Sprint(calls) != fmt.Sprint(want) {
+		t.Errorf("calls %v, want %v (no exec)", calls, want)
+	}
+	node.Close()
+	if err := r.Down(3); err == nil {
+		t.Error("Down to a closed node succeeded")
 	}
 }

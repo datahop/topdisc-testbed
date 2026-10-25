@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/datahop/topdisc-testbed/pkg/assign"
 	"github.com/datahop/topdisc-testbed/pkg/host"
@@ -30,6 +32,14 @@ type NodeTrace struct {
 	FirstCapableMs int64                       `json:"first_capable_ms"`
 	Ops            []map[string]any            `json:"ops"`
 	TopicLoad      map[string]any              `json:"topic_load"`
+	Sessions       []struct {
+		StartMs int64 `json:"start_ms"`
+		EndMs   int64 `json:"end_ms"`
+	} `json:"sessions"` // the node's online periods
+	GhostsAssigned int    `json:"ghosts_assigned"`
+	GhostsInTable  int    `json:"ghosts_in_table"` // last session's table
+	TableSize      int    `json:"table_size"`
+	Fork           string `json:"fork"` // go-ethereum module of a legacy node's binary
 }
 
 // Collect reads the per-node traces, prints the run summary and writes
@@ -63,10 +73,12 @@ func Collect(trDir, runDir string, as []assign.Assignment) error {
 	var lat []int
 	var legacyN, legacyLookups, legacyHits int
 	var legacyLat, capable []int
+	legacyForks := map[string]bool{}
 	oh := make([]map[string]any, 0, len(traces))
 	for _, t := range traces {
 		if t.Legacy {
 			legacyN++
+			legacyForks[t.Fork] = true
 			for _, l := range t.Lookups {
 				legacyLookups++
 				legacyLat = append(legacyLat, int(l.LatencyMs))
@@ -133,7 +145,12 @@ func Collect(trDir, runDir string, as []assign.Assignment) error {
 		fmt.Printf("lookups=%d hit-target=%d (%.1f%%) latency ms p50=%d p95=%d\n", lookups, hits, 100*float64(hits)/float64(lookups), pct(lat, 50), pct(lat, 95))
 	}
 	if legacyN > 0 {
-		fmt.Printf("legacy nodes=%d (stock discv5)", legacyN)
+		forks := make([]string, 0, len(legacyForks))
+		for f := range legacyForks {
+			forks = append(forks, f)
+		}
+		sort.Strings(forks)
+		fmt.Printf("legacy nodes=%d (discv5 %s)", legacyN, strings.Join(forks, ", "))
 		if legacyLookups > 0 {
 			fmt.Printf("; random-walk lookups=%d hit-target=%d (%.1f%%) latency ms p50=%d p95=%d", legacyLookups, legacyHits, 100*float64(legacyHits)/float64(legacyLookups), pct(legacyLat, 50), pct(legacyLat, 95))
 		}
@@ -156,12 +173,26 @@ func Collect(trDir, runDir string, as []assign.Assignment) error {
 	return nil
 }
 
-func planned(as []assign.Assignment) int {
-	n := 0
+// planned counts the churn calls drive can apply: a departure before StopAt
+// that is not an arrival, and a return before StopAt.
+func planned(as []assign.Assignment) (departs, rejoins int) {
+	searchAt, stopAt := time.UnixMilli(as[0].Phases.SearchAt), time.UnixMilli(as[0].Phases.StopAt)
 	for _, a := range as {
-		n += len(a.Churn)
+		for _, ev := range a.Churn {
+			down, up := churnTimes(searchAt, ev)
+			if !down.Before(stopAt) {
+				break
+			}
+			if ev.DownAt > 0 {
+				departs++
+			}
+			if !up.Before(stopAt) {
+				break
+			}
+			rejoins++
+		}
 	}
-	return n
+	return departs, rejoins
 }
 
 func sum(v []int) int {
