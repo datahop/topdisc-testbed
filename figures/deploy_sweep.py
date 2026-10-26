@@ -22,6 +22,7 @@ import os
 
 import numpy as np
 
+import bootnodes
 import pairfigs
 from pairfigs import Run, fmt_mb, fmt_s, load, pct
 from figures import SIZE_CLASSES
@@ -51,7 +52,7 @@ def med_inf(v):
     return float(np.median([x if x is not None else np.inf for x in v])) if v else float("nan")
 
 
-def stats_for(run, rs_all, nodes, typ, id_idx, capable, regs):
+def stats_for(run, rs_all, nodes, typ, id_idx, capable, regs, boot):
     """Every metric of one node type over the given searchers and nodes."""
     rs = [r for r in rs_all if r.get("target") and run.tgt(r)]
     s = {"nodes": len(nodes), "searchers": len(rs_all), "scorable": len(rs)}
@@ -67,8 +68,12 @@ def stats_for(run, rs_all, nodes, typ, id_idx, capable, regs):
         s["contacted"] = pct([r["searchStats"]["contacted"] for r in rs if r.get("searchStats")], 50)
         ops = [op.get("nodes", 0) for n in run.oh if n["idx"] in nodes for op in n.get("ops") or [] if op.get("msg") == "REGTOPIC/v5"]
         s["reg_nodes"] = pct(ops, 50)
-        load_v = [sum(n["byType"].get(t, {}).get("rxMsgs", 0) for t in LOAD_TYPES) for n in run.oh if n["idx"] in nodes and n.get("byType")]
+        load_of = {n["idx"]: sum(n["byType"].get(t, {}).get("rxMsgs", 0) for t in LOAD_TYPES) for n in run.oh if n["idx"] in nodes and n.get("byType")}
+        # the bootnode sits in every routing table: reported on its own row
+        load_v = [v for i, v in load_of.items() if i not in boot]
         s["load_p50"], s["load_p99"], s["load_max"] = pct(load_v, 50), pct(load_v, 99), (max(load_v) if load_v else float("nan"))
+        if boot & load_of.keys():
+            s["boot_load"] = sum(load_of[i] for i in boot & load_of.keys())
         lat = [(ns - regs["start"][rid]) / 1e9 for rid, ns in regs["first"].items() if id_idx.get(rid) in nodes and rid in regs["start"]]
         s["reg_p50"], s["reg_p90"] = pct(lat, 50), pct(lat, 90)
     else:
@@ -89,6 +94,7 @@ def load_run(share, rd, by_class):
         a = load(p)
         asg[a["idx"]] = a
     legacy_of = {i: bool(a.get("legacy")) for i, a in asg.items()}
+    boot = bootnodes.from_assignments(asg)
     topic_of = {i: topic_index(a["topics"][0]) for i, a in asg.items()}
     members = {}
     for t in topic_of.values():
@@ -111,7 +117,7 @@ def load_run(share, rd, by_class):
             if not nodes:
                 continue
             rs = [r for r in raw if r["nodeIdx"] in nodes]
-            per[typ] = stats_for(run, rs, nodes, typ, id_idx, capable, regs)
+            per[typ] = stats_for(run, rs, nodes, typ, id_idx, capable, regs, boot)
         if per:
             topics = {t for i, t in topic_of.items() if keep(i)}
             out["classes"][cname] = {"topics": len(topics), "types": per}
@@ -127,6 +133,13 @@ def t_cell(v):
     return fmt_s(v) if v != np.inf else "not reached by half"
 
 
+def boot_cell(s):
+    if not has(s, "boot_load"):
+        return "–"
+    m = s.get("load_p50")
+    return f"{s['boot_load']:,.0f}" + (f" ({s['boot_load'] / m:.1f}×)" if has(s, "load_p50") and 0 < m < np.inf else "")
+
+
 ROWS = [
     ("nodes", lambda s: f"{s['nodes']:,}"),
     ("searchers / scorable", lambda s: f"{s['searchers']:,} / {s['scorable']:,}"),
@@ -137,7 +150,8 @@ ROWS = [
     ("first TopDisc-capable peer, p50 / p90 (saw one)", lambda s: f"{fmt_s(s['capable_p50'])} / {fmt_s(s['capable_p90'])} ({100 * s['capable_n'] / max(s['nodes'], 1):.0f} %)"),
     ("registrars contacted per search, median (plain: FINDNODE per walk)", lambda s: f"{s['contacted']:,.0f}" if has(s, "contacted") else "–"),
     ("REGTOPIC nodes asked per registration, median", lambda s: f"{s['reg_nodes']:,.0f}" if has(s, "reg_nodes") else "–"),
-    ("REGTOPIC + TOPICQUERY received per registrar, median / p99 / max", lambda s: f"{s['load_p50']:,.0f} / {s['load_p99']:,.0f} / {s['load_max']:,.0f}" if has(s, "load_p50") else "–"),
+    ("REGTOPIC + TOPICQUERY received per registrar, median / p99 / max (bootnode left out)", lambda s: f"{s['load_p50']:,.0f} / {s['load_p99']:,.0f} / {s['load_max']:,.0f}" if has(s, "load_p50") else "–"),
+    ("REGTOPIC + TOPICQUERY received by the bootnode (× registrar median)", boot_cell),
     ("first registration latency, median / p90", lambda s: f"{fmt_s(s['reg_p50'])} / {fmt_s(s['reg_p90'])}" if has(s, "reg_p50") else "–"),
     ("sent per node, whole run, p50 / p95 (counter coverage)", lambda s: f"{fmt_mb(s['tx_p50'])} / {fmt_mb(s['tx_p95'])} ({100 * s['coverage']:.0f} %)" if s["coverage"] else "–"),
 ]
@@ -192,6 +206,7 @@ def plot(runs, out):
         ax.grid(alpha=0.3)
     ax = axes.flat[4]
     ax.plot(xs, [r["classes"]["all"]["types"].get("TopDisc", {}).get("load_p99", np.nan) for r in runs], "s--", color=COLORS["TopDisc"], label="TopDisc p99")
+    ax.plot(xs, [r["classes"]["all"]["types"].get("TopDisc", {}).get("boot_load", np.nan) for r in runs], "^:", color="0.4", label="bootnode (left out)")
     axes.flat[0].legend()
     ax.legend()
     fig.suptitle("Partial deployment: discovery and load against the TopDisc share")

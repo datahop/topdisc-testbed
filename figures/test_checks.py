@@ -18,6 +18,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import bootnodes  # noqa: E402
 import checks  # noqa: E402
 
 GOLDEN = os.path.join(HERE, "testdata")
@@ -552,6 +553,35 @@ class TestCheckLogic(unittest.TestCase):
         v = a3([0, 0, 0, 90])
         self.assertEqual((v["status"], v["evidence"]["busy"]), ("fail", 1))
         self.assertEqual(a3([0, 0, 0], legacy=(2,))["status"], "not-exercised")
+
+    def test_a3_bootnode(self):
+        """A3 leaves the bootnode out of the distribution and reports its load apart."""
+        run = checks.Run(self.rd)
+        tol = checks.argparser().parse_args([self.rd])
+        run.oh = [{"idx": i, "byType": {"TOPICQUERY/v5": {"rxMsgs": v}}} for i, v in enumerate([1220, 100, 120, 90, 300, 110])]
+        run.legacy = {}
+        run.bootnodes = {0}
+        v = checks.a3_load_bound(run, tol)
+        self.assertEqual((v["status"], v["evidence"]["median"], v["evidence"]["max"]), ("pass", 110, 300))
+        self.assertEqual(v["evidence"]["bootnodes"], [{"idx": 0, "rx": 1220, "multiple": 11.1}])
+        self.assertIn("bootnode 0 left out: 1220 queries, 11.1× the median", v["summary"])
+        for i in range(1, 6):  # only the bootnode served: not exercised, the bootnode still reported
+            run.oh[i]["byType"]["TOPICQUERY/v5"]["rxMsgs"] = 0
+        v = checks.a3_load_bound(run, tol)
+        self.assertEqual((v["status"], v["summary"]), ("not-exercised", "no TOPICQUERY traffic; bootnode 0 left out: 1220 queries"))
+        self.assertEqual(v["evidence"]["bootnodes"], [{"idx": 0, "rx": 1220, "multiple": None}])
+        run.legacy = {0: True}  # a plain bootnode is no registrar: nothing to report
+        run.oh[0]["byType"] = {}
+        self.assertEqual(checks.a3_load_bound(run, tol)["evidence"]["bootnodes"], [])
+
+    def test_bootnodes_from_assignments(self):
+        """The bootnode is every node's first bootnode; the bootstrap sample after it is not."""
+        def url(i):
+            return f"enode://{'ab' * 64}@10.0.0.{1 + i // 4}:{30300 + i}"
+        asg = {i: {"idx": i, "ip": f"10.0.0.{1 + i // 4}", "port": 30300 + i, "bootnodes": [url(3), url(i - 1)] if i != 3 else []}
+               for i in range(8)}
+        self.assertEqual(bootnodes.from_assignments(asg), {3})
+        self.assertEqual(bootnodes.from_assignments({}), {0})
 
     def test_plain_run(self):
         c = self.plain()

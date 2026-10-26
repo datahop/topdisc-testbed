@@ -28,6 +28,8 @@ import sys
 from array import array
 from collections import Counter, defaultdict
 
+import bootnodes
+
 AD_LIFETIME_MS = 900_000
 CACHE_SIZE = 5000
 REG_BUCKET_SIZE = 5
@@ -584,6 +586,7 @@ class Run:
             if n.get("id"):
                 self.id_idx.setdefault(n["id"], n["idx"])
         self.legacy = {i: a.get("legacy", False) for i, a in self.assign.items()}
+        self.bootnodes = bootnodes.from_assignments(self.assign)
         for i, t in self.traces.items():
             self.legacy[i] = t.get("legacy", False)
 
@@ -1298,16 +1301,22 @@ def a3_load_bound(run, tol):
     if not run.oh:
         return verdict("needs-data", "no oh.json")
     # registrars are the TopDisc nodes: in a mixed run the plain ones would pull the median to 0
-    q = sorted(n["byType"].get("TOPICQUERY/v5", {}).get("rxMsgs", 0) for n in run.oh if not run.legacy.get(n["idx"]))
-    if not q or q[-1] == 0:
-        return verdict("not-exercised", "no TOPICQUERY traffic")
-    med, mx = q[len(q) // 2], q[-1]
+    rx = {n["idx"]: n["byType"].get("TOPICQUERY/v5", {}).get("rxMsgs", 0) for n in run.oh if not run.legacy.get(n["idx"])}
+    # the bootnode sits in every routing table: its load is reported, not bounded
+    q = sorted(v for i, v in rx.items() if i not in run.bootnodes)
+    med, mx = (q[len(q) // 2], q[-1]) if q else (0, 0)
+    boot = [{"idx": i, "rx": rx[i], "multiple": round(rx[i] / med, 1) if med else None} for i in sorted(run.bootnodes) if i in rx]
+    note = "".join(f"; bootnode {b['idx']} left out: {b['rx']} queries" + (f", {b['multiple']}× the median" if b["multiple"] is not None else "")
+                   for b in boot if b["rx"])
+    if mx == 0:
+        return verdict("not-exercised", f"no TOPICQUERY traffic{note}", bootnodes=boot)
     if med == 0:
         busy = sum(1 for v in q if v)
-        return verdict("fail", f"TOPICQUERY concentrated: {busy} of {len(q)} registrars received any, the busiest {mx}, the median 0",
-                       max=mx, median=0, busy=busy, registrars=len(q), limit=tol.load_multiple)
-    return pf(mx > tol.load_multiple * med, f"busiest registrar at {mx / med:.1f}× the median ({mx} vs {med} queries)",
-              f"busiest registrar at {mx / med:.1f}× the median, above {tol.load_multiple}×", max=mx, median=med, limit=tol.load_multiple)
+        return verdict("fail", f"TOPICQUERY concentrated: {busy} of {len(q)} registrars received any, the busiest {mx}, the median 0{note}",
+                       max=mx, median=0, busy=busy, registrars=len(q), limit=tol.load_multiple, bootnodes=boot)
+    return pf(mx > tol.load_multiple * med, f"busiest registrar at {mx / med:.1f}× the median ({mx} vs {med} queries){note}",
+              f"busiest registrar at {mx / med:.1f}× the median, above {tol.load_multiple}×{note}", max=mx, median=med, limit=tol.load_multiple,
+              bootnodes=boot)
 
 
 def h1_no_drops(run, tol):

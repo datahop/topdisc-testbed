@@ -67,6 +67,11 @@ on a failure. Load and run-validity checks (request accounting, every query
 answered, registrar load within a multiple of the median, no packet drops,
 complete trace collection, hosts under load) sit in the same table.
 
+Registrar-load distributions (A3, `deploy_sweep.py`, `cp_06`, `cmp_11`, `oh_11`
+and the load tables) leave out the bootnode: every node bootstraps from node 0,
+so it sits in every routing table (12× the median TOPICQUERY in a 5k run). Its
+load is reported on its own line or row; the `bootstrap_sample` peers stay in.
+
 #### Differences and gaps
 
 - E1, W2, W3, W4, W6, R2, I1 and the exact per-reply counts of L5 read fields

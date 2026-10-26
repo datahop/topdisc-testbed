@@ -21,6 +21,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
+import bootnodes  # noqa: E402
 from figures import TOPIC_LINES, topic_groups  # noqa: E402
 
 DPI = 130
@@ -600,7 +601,7 @@ def _dist_stats(vals):
             "cv": float(v.std() / mean) if mean else 0.0}
 
 
-def plot_topic_load(nodes, metrics, out, label, groups=None):
+def plot_topic_load(nodes, metrics, out, label, groups=None, boot=frozenset()):
     """Load distribution per topic or topic pool, and its summary statistics.
 
     Registrar side, from each node's per-topic request counters: TOPICQUERY
@@ -610,7 +611,8 @@ def plot_topic_load(nodes, metrics, out, label, groups=None):
     its registration and search for its own topic sent and received. Writes
     load_summary.md with median, p95, p99, max and coefficient of variation,
     over all nodes for the registrar side and over the topic's members for
-    the requester side, per topic and per pool.
+    the requester side, per topic and per pool. The bootnodes, in every
+    routing table, are left out of the registrar side and get their own rows.
     """
     tmap = topic_index_map(metrics)
     if not nodes or not tmap or not any(n.get("topicLoad") or n.get("ops") for n in nodes):
@@ -619,13 +621,18 @@ def plot_topic_load(nodes, metrics, out, label, groups=None):
     reqs = {t: [] for t in tmap.values()}
     reply_kb = {t: [] for t in tmap.values()}
     member_kb = {t: [] for t in tmap.values()}
+    boot_load = {}  # bootnode idx -> (TOPICQUERY received, TOPICNODES kB sent), all topics
     for n in nodes:
         load = n.get("topicLoad") or {}
-        for hex_id, t in tmap.items():
-            tl = load.get(hex_id) or {}
-            rg, tq = tl.get("regtopic") or {}, tl.get("topicQuery") or {}
-            reqs[t].append(tq.get("rxMsgs", 0))
-            reply_kb[t].append(tq.get("txBytes", 0) / 1e3)
+        if n.get("idx") in boot:
+            tqs = [(load.get(h) or {}).get("topicQuery") or {} for h in tmap]
+            boot_load[n["idx"]] = (sum(tq.get("rxMsgs", 0) for tq in tqs), sum(tq.get("txBytes", 0) for tq in tqs) / 1e3)
+        else:
+            for hex_id, t in tmap.items():
+                tl = load.get(hex_id) or {}
+                rg, tq = tl.get("regtopic") or {}, tl.get("topicQuery") or {}
+                reqs[t].append(tq.get("rxMsgs", 0))
+                reply_kb[t].append(tq.get("txBytes", 0) / 1e3)
         t = node_topic.get(n.get("idx"))
         if t is not None and n.get("ops"):
             member_kb[t].append(sum(o.get("txBytes", 0) + o.get("rxBytes", 0) for o in n["ops"]) / 1e3)
@@ -643,12 +650,15 @@ def plot_topic_load(nodes, metrics, out, label, groups=None):
               ("TOPICNODES bytes sent per registrar", reply_kb, "kB", True),
               ("registration + lookup traffic per member", member_kb, "kB", False))
     fig, axes = plt.subplots(1, 3, figsize=(17, 4.8), constrained_layout=True)
-    for ax, (what, data, unit, per_node) in zip(axes, panels):
+    for k, (ax, (what, data, unit, per_node)) in enumerate(zip(axes, panels)):
         for name, ts, colour, lw in rows:
             v = np.sort([x for x in pool(data, ts, per_node) if x > 0])
             if v.size:
                 ax.plot(v, np.arange(1, v.size + 1) / v.size, linewidth=lw, color=colour,
                         label=f"{name} ({v.size} nodes, median {np.median(v):.0f})")
+        for i, b in sorted(boot_load.items()):
+            if per_node and b[k] > 0:
+                ax.axvline(b[k], color="0.3", ls=":", lw=1.2, label=f"bootnode {i}, all topics, left out: {b[k]:.0f}")
         ax.set_xscale("log")
         ax.set_xlabel(f"{what} ({unit})")
         ax.set_ylim(0, 1)
@@ -671,6 +681,9 @@ def plot_topic_load(nodes, metrics, out, label, groups=None):
             if st:
                 lines.append(f"| {what} | {t} | {unit} | {st['n']} | {st['median']:.1f} | {st['p95']:.1f} | "
                              f"{st['p99']:.1f} | {st['max']:.1f} | {st['cv']:.2f} |")
+    for k, (what, _, unit, _) in enumerate(panels[:2]):
+        for i, b in sorted(boot_load.items()):
+            lines.append(f"| {what} | bootnode {i}, all topics, left out above | {unit} | 1 | {b[k]:.1f} | – | – | – | – |")
     tot = _dist_stats([(n.get("txBytes", 0) + n.get("rxBytes", 0)) / 1e6 for n in nodes])
     if tot:
         lines.append(f"| total traffic per node | all | MB | {tot['n']} | {tot['median']:.1f} | {tot['p95']:.1f} | "
@@ -717,7 +730,7 @@ def main():
         plot_reg_vs_lookup_overhead(nodes, out, label, tpos)
         if metrics:
             plot_cost_per_lookup(nodes, metrics, out, label)
-            plot_topic_load(nodes, metrics, out, label, groups)
+            plot_topic_load(nodes, metrics, out, label, groups, bootnodes.of_run(os.path.dirname(os.path.abspath(args.overhead))))
     if metrics:
         plot_idspace_found_time(metrics, out, label, groups)
 

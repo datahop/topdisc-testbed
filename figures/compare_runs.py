@@ -19,6 +19,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
+import bootnodes  # noqa: E402
 from figures import topic_groups  # noqa: E402
 
 STYLES = ["-", "--", ":", "-."]
@@ -50,6 +51,7 @@ class Run:
         self.s = load(os.path.join(rd, "series.json"))
         self.oh = load(os.path.join(rd, "oh.json")) or []
         self.results = [r for r in self.m.get("results", []) if r.get("nodeId")]
+        self.boot = bootnodes.of_run(rd)
 
     def lookups(self):
         """Latency of lookups that reached F_lookup, and per-lookup contacts."""
@@ -302,9 +304,12 @@ def main():
     figs.append(("cmp_10_admission_and_cache", "Time for each registrant to get its first ad admitted, and total ads held across the network over the run."))
 
     # Load.
-    def registrar_load(r, key):
+    def registrar_load(r, key, boot=False):
+        """Per registrar, the bootnode left out (it is in every routing table); boot=True: the bootnodes only."""
         out = []
         for n in r.oh:
+            if (n.get("idx") in r.boot) != boot:
+                continue
             tl = n.get("topicLoad") or {}
             # Search side only: registration is the same on both sides of a search A/B.
             out.append(sum((l.get("topicQuery") or {}).get(key, 0) for l in tl.values()))
@@ -315,6 +320,9 @@ def main():
         q, b = registrar_load(r, "rxMsgs"), [v / 1e3 for v in registrar_load(r, "txBytes")]
         cdf(ax_q, q, ls=STYLES[i % 4], lw=1.8, label=f"{r.label} (median {pct(q, 50):.0f}, max {max(q) if q else 0:.0f})")
         cdf(ax_b, b, ls=STYLES[i % 4], lw=1.8, label=f"{r.label} (median {pct(b, 50):.0f} kB)")
+        for ax, v, unit in ((ax_q, registrar_load(r, "rxMsgs", True), ""), (ax_b, [x / 1e3 for x in registrar_load(r, "txBytes", True)], " kB")):
+            for x in v:
+                ax.axvline(x, ls=STYLES[i % 4], color="0.4", lw=1, label=f"{r.label} bootnode, left out ({x:.0f}{unit})")
     for ax, xl in ((ax_q, "TOPICQUERY requests received per registrar"), (ax_b, "TOPICNODES bytes sent per registrar (kB)")):
         ax.set_xscale("log")
         ax.set_xlabel(xl)
@@ -324,7 +332,7 @@ def main():
         ax.legend(fontsize=9, loc="lower right")
     fig.suptitle("Registrar load from searches: TOPICQUERY served and TOPICNODES bytes")
     save(fig, args.out, "cmp_11_registrar_load")
-    figs.append(("cmp_11_registrar_load", "Search requests (TOPICQUERY) each node received as a registrar, all topics, and the bytes of its TOPICNODES replies. Registration traffic is left out: it is the same on both sides of a search A/B."))
+    figs.append(("cmp_11_registrar_load", "Search requests (TOPICQUERY) each node received as a registrar, all topics, and the bytes of its TOPICNODES replies. Registration traffic is left out: it is the same on both sides of a search A/B. The bootnode, in every routing table, is drawn as a vertical line instead."))
 
     def by_types(r, types):
         return [sum((n.get("byType") or {}).get(t, {}).get("txBytes", 0) + (n.get("byType") or {}).get(t, {}).get("rxBytes", 0) for t in types) / 1e6 for n in r.oh]
@@ -436,8 +444,10 @@ def main():
         v = [(ns - start.get(rid, 0)) / 1e9 for regs in (r.m.get("registrationTimingNs") or {}).values() for rid, ns in regs.items()]
         return [x for x in v if x >= 0]
     row("time to first admission p50 (s)", lambda v: f"{v:.1f}", [pct(first_adm(r), 50) for r in runs])
-    row("search requests (TOPICQUERY) per registrar p50 / p99 / max", lambda v: f"{v[0]:.0f} / {v[1]:.0f} / {v[2]:.0f}",
+    row("search requests (TOPICQUERY) per registrar p50 / p99 / max (bootnode left out)", lambda v: f"{v[0]:.0f} / {v[1]:.0f} / {v[2]:.0f}",
         [(pct(q, 50), pct(q, 99), max(q) if q else float("nan")) for q in [registrar_load(r, "rxMsgs") for r in runs]])
+    row("search requests (TOPICQUERY) to the bootnode, left out above", lambda v: " / ".join(f"{x:.0f}" for x in v) or "–",
+        [registrar_load(r, "rxMsgs", True) for r in runs])
     row("fan-out p50 (registrars per registrant)", lambda v: f"{v:.0f}", [pct(r.fanout(), 50) for r in runs])
     row("quoted wait p50 (s)", lambda v: f"{v:.0f}", [pct(r.waits("quotedMs"), 50) for r in runs])
     row("total registration time p50 (s)", lambda v: f"{v:.0f}", [pct(r.waits("admittedMs"), 50) for r in runs])
