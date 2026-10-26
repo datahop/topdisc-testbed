@@ -496,11 +496,18 @@
    "group": "load",
    "assertion": "registrar load bound: busiest registrar within a multiple of the median",
    "status": "pass",
-   "summary": "busiest registrar at 1.8\u00d7 the median (70 vs 40 queries)",
+   "summary": "busiest registrar at 1.8\u00d7 the median (70 vs 40 queries); bootnode 0 left out: 40 queries, 1.0\u00d7 the median",
    "evidence": {
     "max": 70,
     "median": 40,
-    "limit": 10.0
+    "limit": 10.0,
+    "bootnodes": [
+     {
+      "idx": 0,
+      "rx": 40,
+      "multiple": 1.0
+     }
+    ]
    }
   },
   {

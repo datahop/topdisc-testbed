@@ -11,6 +11,7 @@ first sample after the search starts and the last full sample before it stops.
 Plain nodes report counters only when built on the fork (legacy_build: fork).
 """
 import collections
+import functools
 import json
 import glob
 import os
@@ -23,6 +24,7 @@ import matplotlib.ticker  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
+import bootnodes  # noqa: E402
 from figures import SIZE_CLASSES  # noqa: E402
 
 STYLES = ["-", "--", ":", "-."]
@@ -275,8 +277,17 @@ class Run:
             peak = np.maximum(peak, per)
         return (np.arange(nb) + 0.5) / nb, peak
 
+    @functools.cached_property
+    def boot(self):
+        return bootnodes.of_run(self.dir)
+
     def served(self, key, types):
-        return [sum((n.get("byType") or {}).get(t, {}).get(key, 0) for t in types) for n in self.oh]
+        """Load per node, the bootnode left out: it sits in every routing table."""
+        return [sum((n.get("byType") or {}).get(t, {}).get(key, 0) for t in types) for n in self.oh if n["idx"] not in self.boot]
+
+    def boot_served(self, key, types):
+        """[(idx, load)] of the bootnodes."""
+        return [(n["idx"], sum((n.get("byType") or {}).get(t, {}).get(key, 0) for t in types)) for n in self.oh if n["idx"] in self.boot]
 
     def node_totals(self, key):
         return [n.get(key, 0) for n in self.oh]
@@ -768,11 +779,16 @@ def serving_load(ctx):
     # so a busy searcher would look loaded.
     fig, (ax_m, ax_b) = plt.subplots(1, 2, figsize=(12, 4.2), constrained_layout=True)
     for r in rs:
-        for ax, v, unit in ((ax_m, r.served("rxMsgs", REQUESTS), ""), (ax_b, np.asarray(r.served("txBytes", REPLIES)) / 1e6, " MB")):
-            v = np.sort(np.asarray(v, dtype=float))
+        for ax, key, types, div, unit in ((ax_m, "rxMsgs", REQUESTS, 1, ""), (ax_b, "txBytes", REPLIES, 1e6, " MB")):
+            v = np.sort(np.asarray(r.served(key, types), dtype=float)) / div
             v = v[v > 0]
             if len(v):
                 cdf(ax, r, v, f"{r.label}: p50 {pct(v, 50):,.1f}{unit}, max {v[-1]:,.1f}{unit} ({v[-1] / pct(v, 50):.1f}× p50)")
+            for i, b in r.boot_served(key, types):
+                if b > 0:
+                    mult = f" ({b / div / pct(v, 50):.1f}× p50)" if len(v) else ""
+                    ax.axvline(b / div, ls=r.style, c=r.color, lw=0.9, alpha=0.6,
+                               label=f"{r.label}: bootnode {i}, left out, {b / div:,.1f}{unit}{mult}")
     ax_m.set_xlabel("requests received per node, whole run")
     ax_b.set_xlabel("reply MB sent per node, whole run")
     for ax in (ax_m, ax_b):
@@ -782,7 +798,8 @@ def serving_load(ctx):
         ax.legend(fontsize=7, loc="lower right")
     ctx.save(fig, "cp_06_serving_load",
              "Load each node carries for others over the whole run: requests received (FINDNODE, TOPICQUERY, REGTOPIC, PING) "
-             "and bytes of the replies it sent (NODES, TOPICNODES, REGCONFIRMATION, PONG).")
+             "and bytes of the replies it sent (NODES, TOPICNODES, REGCONFIRMATION, PONG). "
+             "The bootnode is in every routing table: it is left out of the CDFs and drawn as a vertical line.")
 
 
 # ------------------------------------------------------------ peers, churn
@@ -946,8 +963,10 @@ def load_table(ctx):
 
     L = head(ctx)
     L.append(row(["sent per node, whole run, p50 / p95"] + [cell(r, lambda r: " / ".join(fmt_mb(pct(r.node_totals("txBytes"), q) / 1e6) for q in (50, 95))) for r in ctx.runs]))
-    L.append(row(["requests served per node, whole run, p50 / max"] + [cell(r, lambda r: (lambda v: f"{pct(v, 50):,.0f} / {max(v):,.0f}")(r.served("rxMsgs", REQUESTS))) for r in ctx.runs]))
-    L.append(row(["reply bytes sent per node, whole run, p50 / max"] + [cell(r, lambda r: (lambda v: f"{fmt_mb(pct(v, 50) / 1e6)} / {fmt_mb(max(v) / 1e6)}")(r.served("txBytes", REPLIES))) for r in ctx.runs]))
+    L.append(row(["requests served per node, whole run, p50 / max (bootnode left out)"] + [cell(r, lambda r: (lambda v: f"{pct(v, 50):,.0f} / {max(v):,.0f}")(r.served("rxMsgs", REQUESTS))) for r in ctx.runs]))
+    L.append(row(["reply bytes sent per node, whole run, p50 / max (bootnode left out)"] + [cell(r, lambda r: (lambda v: f"{fmt_mb(pct(v, 50) / 1e6)} / {fmt_mb(max(v) / 1e6)}")(r.served("txBytes", REPLIES))) for r in ctx.runs]))
+    L.append(row(["bootnode: requests served / reply bytes sent, whole run"] + [cell(r, lambda r: ", ".join(
+        f"{q:,.0f} / {fmt_mb(b / 1e6)}" for (_, q), (_, b) in zip(r.boot_served("rxMsgs", REQUESTS), r.boot_served("txBytes", REPLIES))) or "–") for r in ctx.runs]))
     for r in ctx.runs:
         if r.traffic:
             by = r.run_by_category()
