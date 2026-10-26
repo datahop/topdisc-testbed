@@ -17,36 +17,43 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: testbed <scenario.yaml> | testbed reference | testbed fleet <scenario.yaml> | testbed preview <scenario.yaml> | testbed schedule <scenario.yaml>")
+		fmt.Fprintln(os.Stderr, `usage: testbed <spec> | testbed reference | testbed fleet|preview|schedule <spec> | testbed compose [-o FILE] <spec>
+  spec: scenario.yaml, or --workload W --profile P [--set key=value]... [--name N]`)
 		os.Exit(2)
 	}
 	if os.Args[1] == "reference" {
 		scenario.PrintReference()
 		return
 	}
-	if os.Args[1] == "preview" && len(os.Args) == 3 {
-		cfg, err := scenario.Load(os.Args[2])
-		if err != nil {
-			fatal(err)
-		}
-		if err := preview(cfg, filepath.Dir(os.Args[2])); err != nil {
+	if os.Args[1] == "compose" {
+		if err := compose(os.Args[2:]); err != nil {
 			fatal(err)
 		}
 		return
 	}
-	if os.Args[1] == "schedule" && len(os.Args) == 3 {
-		cfg, err := scenario.Load(os.Args[2])
+	if os.Args[1] == "preview" && len(os.Args) >= 3 {
+		cfg, err := scenario.ParseArgs(os.Args[2:])
 		if err != nil {
 			fatal(err)
 		}
-		if err := printSchedule(cfg, filepath.Dir(os.Args[2])); err != nil {
+		if err := preview(cfg, filepath.Dir(cfg.SourcePath)); err != nil {
 			fatal(err)
 		}
 		return
 	}
-	if os.Args[1] == "fleet" && len(os.Args) == 3 {
+	if os.Args[1] == "schedule" && len(os.Args) >= 3 {
+		cfg, err := scenario.ParseArgs(os.Args[2:])
+		if err != nil {
+			fatal(err)
+		}
+		if err := printSchedule(cfg, filepath.Dir(cfg.SourcePath)); err != nil {
+			fatal(err)
+		}
+		return
+	}
+	if os.Args[1] == "fleet" && len(os.Args) >= 3 {
 		// instance counts per region and the home region, for deploy/aws.sh
-		cfg, err := scenario.Load(os.Args[2])
+		cfg, err := scenario.ParseArgs(os.Args[2:])
 		if err != nil {
 			fatal(err)
 		}
@@ -72,13 +79,13 @@ func main() {
 		fmt.Println(string(b))
 		return
 	}
-	cfg, err := scenario.Load(os.Args[1])
+	cfg, err := scenario.ParseArgs(os.Args[1:])
 	if err != nil {
 		fatal(err)
 	}
 	switch cfg.Testbed.Backend {
 	case "simnet":
-		c := exec.Command("./simnet", os.Args[1])
+		c := exec.Command("./simnet", os.Args[1:]...)
 		c.Stdout, c.Stderr = os.Stdout, os.Stderr
 		if err := c.Run(); err != nil {
 			fatal(err)
@@ -90,6 +97,9 @@ func main() {
 		}
 		defer scenario.FlushLog()
 		fmt.Println("run directory:", runDir)
+		if spec, _, _ := scenario.ScanSpec(os.Args[1:]); spec.ComposeLine() != "" {
+			fmt.Println(spec.ComposeLine())
+		}
 		fmt.Println(cfg.ParamsLine())
 		run := coordinator.RunLocal
 		if cfg.Testbed.Backend == "cloud" {
@@ -101,6 +111,41 @@ func main() {
 	default:
 		fatal(fmt.Errorf("unknown backend %q", cfg.Testbed.Backend))
 	}
+}
+
+// compose prints the spec as one self-contained scenario file. With -o FILE it
+// writes FILE, prints how many arguments the spec took and ignores the rest,
+// so a driver can pass "<spec> [terraform args]" through unsplit.
+func compose(args []string) error {
+	var cfg scenario.Config
+	var err error
+	out, n := "", 0
+	if len(args) >= 2 && args[0] == "-o" {
+		out = args[1]
+		var spec scenario.Spec
+		if spec, n, err = scenario.ScanSpec(args[2:]); err != nil {
+			return err
+		}
+		cfg, err = spec.Load()
+	} else {
+		cfg, err = scenario.ParseArgs(args)
+	}
+	if err != nil {
+		return err
+	}
+	b, err := cfg.ComposedYAML()
+	if err != nil {
+		return err
+	}
+	if out == "" {
+		_, err = os.Stdout.Write(b)
+		return err
+	}
+	if err := os.WriteFile(out, b, 0o644); err != nil {
+		return err
+	}
+	fmt.Println(n)
+	return nil
 }
 
 func fatal(err error) {

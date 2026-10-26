@@ -1,16 +1,18 @@
 #!/bin/sh
 # AWS packed-host driver: the verbs of deploy/gcp.sh on EC2 (an instance per
 # testbed.aws_packed.vnodes_per_machine nodes, each node in its own netns), one zone, no peering.
-#   deploy/aws-packed.sh up <scenario> [tf args]  terraform apply sized from the scenario + build + push to the bucket;
+#   deploy/aws-packed.sh up <spec> [tf args]      terraform apply sized from the scenario + build + push to the bucket;
 #                                                 refuses if the fleet over MAX_HOURS (6) costs more than MAX_SPEND ($150)
 #                                                 or does not fit the region's on-demand vCPU and route quotas
 #   deploy/aws-packed.sh push                  rebuild and re-push the binaries only
-#   deploy/aws-packed.sh run scenarios/x.yaml  run it on the coordinator, wait, pull the results, then destroy everything
+#   deploy/aws-packed.sh run <spec>            run it on the coordinator, wait, pull the results, then destroy everything
 #                                              (up and run destroy on failure too; only a failed pull keeps the deployment; KEEP=1 keeps it always)
 #   deploy/aws-packed.sh check                 list what is still running
 #   deploy/aws-packed.sh pull                  fetch the latest run directory into runs/ (the coordinator saves every run to the bucket)
 #   deploy/aws-packed.sh ssh                   shell on the coordinator (SSM)
 #   deploy/aws-packed.sh down                  copy every saved run to runs/archives, then terraform destroy
+# <spec> is a scenario file or --workload W --profile P [--set key=value]... [--name N] (see README.md).
+# DRY_RUN=1 makes up stop after printing the fleet, before any AWS or terraform call.
 # Needs the aws CLI with credentials (AWS_PROFILE) and the session-manager-plugin for ssh.
 set -e
 cd "$(dirname "$0")/.."
@@ -121,15 +123,20 @@ fleet_file() { f=$(mktemp); ./testbed fleet "$1" > "$f"; echo "$f"; }
 
 case "$1" in
   up)
-    sc=$2; shift 2
+    shift
     go build -o testbed ./cmd/testbed
+    sc=$(mktemp scenarios/.composed.XXXXXX)
+    n=$(./testbed compose -o "$sc" "$@") || { rm -f "$sc"; exit 1; }
+    shift "$n"
     f=$(fleet_file "$sc")
+    rm -f "$sc"
     hosts=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["aws_packed_machines"])' "$f")
     wan=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["wan"])' "$f")
     g=$(python3 -c 'import json,sys; a=json.load(open(sys.argv[1]))["aws_packed"]; print(" ".join("-var %s=%s" % (k, a[k]) for k in ("region","zone","instance_type","coordinator_type")))' "$f")
     [ "$hosts" -gt 0 ] || { echo "not an AWS packed scenario: testbed.aws_packed.vnodes_per_machine is unset"; exit 1; }
     [ "$wan" = True ] || { echo "testbed.wan must be enabled: the nodes live in network namespaces"; exit 1; }
     echo "fleet: $hosts hosts; $g"
+    [ -z "$DRY_RUN" ] || { rm -f "$f"; exit 0; }
     cost_guard "$f" "$@"
     terraform -chdir=$TF init -input=false >/dev/null
     if terraform -chdir=$TF state list 2>/dev/null | grep -q 'aws_instance\.'; then echo "live deployment: quota guard skipped"; else quota_guard "$f"; fi
@@ -139,14 +146,18 @@ case "$1" in
     build_push ;;
   push) build_push ;;
   run)
+    shift
+    sc=$(mktemp scenarios/.composed.XXXXXX)
+    ./testbed compose "$@" > "$sc" || { rm -f "$sc"; exit 1; }
+    f=$(fleet_file "$sc")
     [ -n "$KEEP" ] || trap 'st=$?; if [ $st -eq 0 ] || [ -z "$PULL_FAILED" ]; then "$0" down; "$0" check; else echo "pull failed: deployment kept; fix, then deploy/aws-packed.sh pull && deploy/aws-packed.sh down"; fi' EXIT
-    f=$(fleet_file "$2")
     hosts=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["aws_packed_machines"])' "$f")
     per=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["aws_packed"]["vnodes_per_machine"])' "$f")
     rm -f "$f"
     b=$(tfout bucket)
-    aws s3 cp --only-show-errors --region "$(region)" "$2" "s3://$b/scenario.yaml"
-    aws s3 cp --recursive --only-show-errors --region "$(region)" "$(dirname "$2")/models" "s3://$b/models"
+    aws s3 cp --only-show-errors --region "$(region)" "$sc" "s3://$b/scenario.yaml"
+    aws s3 cp --recursive --only-show-errors --region "$(region)" "$(dirname "$sc")/models" "s3://$b/models"
+    rm -f "$sc"
     ssm_wait
     # The hosts boot at their own pace; list them until every one is there.
     for i in $(seq 1 30); do
@@ -199,5 +210,5 @@ case "$1" in
       terraform -chdir=$TF destroy -auto-approve -input=false -var "hosts=0" && break
       echo "down: destroy incomplete (try $i of 3); retrying"
     done ;;
-  *) sed -n 2,14p "$0"; exit 2 ;;
+  *) sed -n 2,16p "$0"; exit 2 ;;
 esac

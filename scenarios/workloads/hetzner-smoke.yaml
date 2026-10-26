@@ -1,0 +1,15 @@
+# Workload of hetzner-smoke.
+scenario:
+  population:
+    nodes: 400
+    topics: 5
+    seed: 1
+    bootstrap_sample: 5
+  phases:
+    bootstrap_wait: 60s
+    start_window: 2m
+    register_wait: 2m
+    search_stagger: 10ms
+    search_timeout: 5m
+  search:
+    model: continuous

@@ -4,9 +4,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/datahop/topdisc-testbed/pkg/assign"
-	"github.com/datahop/topdisc-testbed/pkg/churn"
-	"github.com/datahop/topdisc-testbed/pkg/scenario"
 	"log/slog"
 	"math/rand"
 	"os"
@@ -16,20 +13,24 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/datahop/topdisc-testbed/pkg/assign"
+	"github.com/datahop/topdisc-testbed/pkg/churn"
+	"github.com/datahop/topdisc-testbed/pkg/scenario"
+
 	"github.com/ethereum/go-ethereum/p2p/discover"
 	"github.com/marcopolo/simnet"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: simnet <config.yaml> | simnet reference")
+		fmt.Fprintln(os.Stderr, "usage: simnet <scenario.yaml> | simnet --workload W --profile P [--set key=value]... [--name N] | simnet reference")
 		os.Exit(2)
 	}
 	if os.Args[1] == "reference" {
 		scenario.PrintReference()
 		return
 	}
-	cfg, err := scenario.Load(os.Args[1])
+	cfg, err := scenario.ParseArgs(os.Args[1:])
 	if err != nil {
 		fatalf("%v", err)
 	}
@@ -38,6 +39,9 @@ func main() {
 		fatalf("%v", err)
 	}
 	fmt.Printf("run directory: %s\n", runDir)
+	if spec, _, _ := scenario.ScanSpec(os.Args[1:]); spec.ComposeLine() != "" {
+		fmt.Println(spec.ComposeLine())
+	}
 	churnDumpPath = filepath.Join(runDir, "churn.json")
 	if d, _ := time.ParseDuration(os.Getenv("SIMNET_HEAPPROF")); d > 0 {
 		go heapProfiles(runDir, d)
@@ -250,7 +254,7 @@ func main() {
 	var topicModel *churn.Model
 	if mp := cfg.Scenario.Population.TopicModel; mp != "" {
 		if !filepath.IsAbs(mp) {
-			mp = filepath.Join(filepath.Dir(os.Args[1]), mp)
+			mp = filepath.Join(filepath.Dir(cfg.SourcePath), mp)
 		}
 		var err error
 		if topicModel, err = churn.Load(mp); err != nil {
@@ -354,7 +358,7 @@ func main() {
 			scDone := make(chan struct{})
 			if mp := cfg.Scenario.SessionChurn.Model; mp != "" {
 				if !filepath.IsAbs(mp) {
-					mp = filepath.Join(filepath.Dir(os.Args[1]), mp)
+					mp = filepath.Join(filepath.Dir(cfg.SourcePath), mp)
 				}
 				m, err := churn.Load(mp)
 				if err != nil {

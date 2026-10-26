@@ -17,6 +17,7 @@ manual sequence below it.
 ```
 deploy/aws.sh up scenarios/aws-7k5-topdisc-cont.yaml -var spot=true   # fleet sized from scenario.network.regions; build; push to S3
 deploy/aws.sh run scenarios/aws-7k5-topdisc-cont.yaml
+DRY_RUN=1 deploy/aws.sh up --workload aws-smoke --profile aws   # compose and print the fleet only, no AWS call
 deploy/aws.sh ssh                    # tail -f /opt/topdisc/run.out
 deploy/aws.sh pull                   # run directory into runs/
 deploy/aws.sh down
@@ -96,6 +97,7 @@ gcloud services enable compute.googleapis.com iam.googleapis.com cloudresourcema
 deploy/gcp.sh up  scenarios/gcp-smoke.yaml    # terraform apply sized by `testbed fleet` (gcp_machines); build amd64; push to the bucket
 deploy/gcp.sh run scenarios/gcp-smoke.yaml    # runs on the coordinator, waits, pulls into runs/, destroys
 deploy/gcp.sh check
+DRY_RUN=1 PROJECT=x deploy/gcp.sh up --workload smoke --profile gcp-smoke --set population.nodes=400   # fleet only
 ```
 
 Host i is the VM `topdisc-host-i` and owns the node subnet
@@ -148,6 +150,7 @@ export AWS_PROFILE=datahop-testbed
 deploy/aws-packed.sh up  scenarios/aws-packed-smoke.yaml    # terraform apply sized by `testbed fleet` (aws_packed_machines); build amd64; push to the bucket
 deploy/aws-packed.sh run scenarios/aws-packed-smoke.yaml    # runs on the coordinator, waits, pulls into runs/, destroys
 deploy/aws-packed.sh check
+DRY_RUN=1 deploy/aws-packed.sh up --workload smoke --profile aws-packed-smoke -var host_disk_gb=20   # fleet only
 ```
 
 Spending: `up` prices the fleet (on-demand, us-east-1) and refuses one over
@@ -177,6 +180,7 @@ printf '%s' '<token>' > ~/.config/hcloud/token && chmod 600 ~/.config/hcloud/tok
 deploy/hetzner.sh up  scenarios/hetzner-smoke.yaml    # terraform apply sized by `testbed fleet` (hetzner_machines); build; push; agents; inventory
 deploy/hetzner.sh run scenarios/hetzner-smoke.yaml    # runs on the coordinator, waits, pulls into runs/, destroys
 deploy/hetzner.sh check                               # servers up and what they have cost so far
+DRY_RUN=1 deploy/hetzner.sh up --workload hetzner-smoke --profile hetzner-smoke   # fleet only
 ```
 
 Spending: `up` prices the fleet from the API (gross, hourly) and refuses one
@@ -200,6 +204,7 @@ pip install -r deploy/g5k/requirements.txt
 deploy/g5k/g5k.py up  scenarios/g5k-smoke.yaml   # OAR job + kadeploy + hostagent on every machine + inventory.json
 deploy/g5k/g5k.py run scenarios/g5k-smoke.yaml   # runs on the coordinator, waits, pulls into runs/, releases the job
 deploy/g5k/g5k.py check
+DRY_RUN=1 deploy/g5k/g5k.py up --workload g5k-smoke --profile g5k-gros-smoke   # build and print the fleet only, no EnOSlib
 ```
 
 Sizing, measured on one `gros` machine at Nancy with the crawl workload
@@ -241,8 +246,12 @@ calls them any more.
 ## Provisioner contract
 
 Every driver (`deploy/aws.sh`, `deploy/g5k/g5k.py`, a future one) provides
-`up <scenario>`, `run <scenario>`, `pull`, `down`, `check` with the same
-meaning, produces an `inventory.json` of `{hosts:[{index, ip, nodes, region,
+`up <spec>`, `run <spec>`, `pull`, `down`, `check` with the same
+meaning, where `<spec>` is a scenario file or `--workload W --profile P
+[--set key=value]... [--name N]` composed by `./testbed compose` into one file
+the coordinator runs as `scenario.yaml` (`run` composes with the local
+`./testbed`, which `up` rebuilds; after pulling new code, run `up` or `go build
+-o testbed ./cmd/testbed` first), produces an `inventory.json` of `{hosts:[{index, ip, nodes, region,
 port?}]}` with a hostagent reachable on every host, and leaves nothing running
 after `run` unless `KEEP=1`. The coordinator (`./testbed`, backend `cloud`)
 and the node binaries are the same everywhere; only provisioning differs.

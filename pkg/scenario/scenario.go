@@ -4,7 +4,6 @@ package scenario
 
 import (
 	"fmt"
-	"github.com/datahop/topdisc-testbed/pkg/wan"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,12 +12,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/datahop/topdisc-testbed/pkg/wan"
+
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
 	SourcePath string         `yaml:"-"`
 	Name       string         `yaml:"name"`
+	Overrides  []string       `yaml:"overrides,omitempty"`
 	Scenario   ScenarioConfig `yaml:"scenario"`
 	Testbed    TestbedConfig  `yaml:"testbed"`
 	Build      BuildInfo      `yaml:"build"`
@@ -493,46 +495,56 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return c, err
 	}
+	if stub, ok, err := loadStub(path, b); ok || err != nil {
+		return stub, err
+	}
 	dec := yaml.NewDecoder(strings.NewReader(string(b)))
 	dec.KnownFields(true)
 	if err := dec.Decode(&c); err != nil {
 		return c, fmt.Errorf("%s: %w", path, err)
 	}
 	c.SourcePath = path
+	if err := c.validate(path, filepath.Dir(path)); err != nil {
+		return c, err
+	}
+	return c, nil
+}
+
+func (c *Config) validate(path, dir string) error {
 	switch c.Scenario.Search.Model {
 	case "conn", "scheduled", "continuous":
 	default:
-		return c, fmt.Errorf("%s: search.model %q: want conn, scheduled or continuous", path, c.Scenario.Search.Model)
+		return fmt.Errorf("%s: search.model %q: want conn, scheduled or continuous", path, c.Scenario.Search.Model)
 	}
 	switch c.Scenario.Population.Addresses {
 	case "", "index":
 	case "crawl":
 		if c.Scenario.Population.TopicModel == "" {
-			return c, fmt.Errorf("%s: population.addresses crawl needs population.topic_model", path)
+			return fmt.Errorf("%s: population.addresses crawl needs population.topic_model", path)
 		}
 	default:
-		return c, fmt.Errorf("%s: population.addresses %q: want index or crawl", path, c.Scenario.Population.Addresses)
+		return fmt.Errorf("%s: population.addresses %q: want index or crawl", path, c.Scenario.Population.Addresses)
 	}
 	switch p := c.Scenario.Population; p.LegacyBuild {
 	case "", "stock":
 	case "fork":
 		// Mixed runs with the fork's plain build are not validated yet.
 		if p.LegacyFrac != 1 || !p.LegacyBootnode {
-			return c, fmt.Errorf("%s: population.legacy_build fork needs every node legacy: legacy_frac 1 and legacy_bootnode true", path)
+			return fmt.Errorf("%s: population.legacy_build fork needs every node legacy: legacy_frac 1 and legacy_bootnode true", path)
 		}
 	default:
-		return c, fmt.Errorf("%s: population.legacy_build %q: want stock or fork", path, p.LegacyBuild)
+		return fmt.Errorf("%s: population.legacy_build %q: want stock or fork", path, p.LegacyBuild)
 	}
-	if err := c.checkGhosts(filepath.Dir(path)); err != nil {
-		return c, fmt.Errorf("%s: %w", path, err)
+	if err := c.checkGhosts(dir); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
 	}
 	if c.Scenario.Search.Model != "conn" && c.Scenario.ConnModel.Enabled {
-		return c, fmt.Errorf("%s: search.model %s is lookup-only and never dials; remove conn_model or use search.model conn", path, c.Scenario.Search.Model)
+		return fmt.Errorf("%s: search.model %s is lookup-only and never dials; remove conn_model or use search.model conn", path, c.Scenario.Search.Model)
 	}
 	if c.Name == "" {
 		c.Name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	}
-	return c, nil
+	return nil
 }
 
 // GhostPortBase is the first UDP port ghost records advertise; they use
@@ -599,6 +611,9 @@ func (c Config) flatten() (keys []string, vals map[string]any) {
 			if sf.Type.Kind() == reflect.Struct {
 				walk(k, rv.Field(i))
 				continue
+			}
+			if sf.Type.Kind() == reflect.Slice {
+				continue // overrides: the figures parse PARAMS values as single tokens
 			}
 			keys = append(keys, k)
 			vals[k] = rv.Field(i).Interface()

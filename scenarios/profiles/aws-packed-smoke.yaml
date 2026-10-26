@@ -1,0 +1,21 @@
+# Backend profile of aws-packed-smoke.
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json          # written on the coordinator by inventory-aws-packed.sh
+    home_region: us-east-1
+    grace: 30s
+  aws_packed:
+    region: us-east-1
+    zone: us-east-1a
+    instance_type: m6a.2xlarge
+    coordinator_type: m6a.xlarge
+    vnodes_per_machine: 200
+  wan:
+    enabled: true
+    delay_min_ms: 4
+    delay_max_ms: 45
+    jitter_ms: 3
+    rate_kbps: 1000
+  traces:
+    host_sample_period: 30s

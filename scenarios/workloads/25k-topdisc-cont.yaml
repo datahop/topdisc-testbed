@@ -1,0 +1,31 @@
+# 25,000 nodes: TopDisc, one continuous search per node, no churn. Matrix workload written by tools/scenario_matrix.py.
+scenario:
+  population:
+    nodes: 25000
+    topics: 100
+    seed: 1
+    bootstrap_sample: 5
+    zipf_s: 1.07
+    topic_model: models/crawl-2026-09-18.json
+  network:
+    latency_ms: 30
+    bandwidth_mibps: 100
+    model: regions
+    regions:
+      us-east-1: 0.4
+      eu-central-1: 0.3
+      ap-southeast-1: 0.3
+    rtt_table: models/region-rtt.json
+  phases:
+    bootstrap_wait: 180s
+    start_window: 15m
+    register_wait: 15m
+    search_stagger: 10ms
+    search_timeout: 90m
+  topic:
+    ad_cache_size: 5000
+    search_yield_floor: 8
+  search:
+    model: continuous
+  conn_model:
+    enabled: false

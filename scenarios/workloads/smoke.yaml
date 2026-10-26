@@ -1,0 +1,19 @@
+# Workload of aws-packed-smoke, gcp-smoke.
+scenario:
+  population:
+    nodes: 600
+    topics: 5
+    seed: 1
+    bootstrap_sample: 5
+  network:
+    model: regions
+    regions: {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}
+    rtt_table: models/region-rtt.json
+  phases:
+    bootstrap_wait: 60s
+    start_window: 2m
+    register_wait: 2m
+    search_stagger: 10ms
+    search_timeout: 5m
+  search:
+    model: continuous

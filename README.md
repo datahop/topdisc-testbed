@@ -5,7 +5,7 @@ thousands of real discv5 nodes in one process over a simulated network, and
 turns the traces into figures.
 
 - `cmd/simnet` — the testbed binary: workloads, connection model, churn drivers
-- `scenarios/` — scenarios (YAML): a testbed-agnostic `scenario:` plus a `testbed:` section for how this harness runs it
+- `scenarios/` — scenarios (YAML): each `scenarios/<name>.yaml` is a stub naming a testbed-agnostic workload (`scenarios/workloads/`, the `scenario:` section) and a backend profile (`scenarios/profiles/`, the `testbed:` section for how this harness runs it)
 - `figures/` — trace processing and figure generation
 - `docs/TRACES.md` — every trace field and which figure it drives
 
@@ -30,7 +30,16 @@ go build -o simnet ./cmd/simnet
 ./simnet scenarios/simnet-smoke.yaml
 ```
 
-The binary takes exactly one argument, the config. It creates
+A run can also be composed on the command line from a workload, a profile
+and overrides of single `scenario:` values; the overrides are recorded in
+`run.yaml` as `overrides:`:
+
+```sh
+./simnet --workload simnet-smoke --profile simnet-smoke --set phases.search_timeout=1m
+./testbed compose --workload 25k-topdisc-cont --profile aws-packed --set topic.search_yield_floor=4   # the resolved file
+```
+
+The binary takes one argument, the config, or that composition. It creates
 `<name>-<timestamp>/`, writes the resolved `run.yaml` and `run.log` there,
 and puts the traces next to them. `./simnet reference` prints every
 parameter with its default and meaning.
@@ -71,7 +80,8 @@ needs.
 `local` and `cloud` accept `testbed.wan` (Linux only): each node gets its own
 network namespace with a netem qdisc, so pairs see WAN-like RTTs and a
 per-node rate cap instead of loopback. The evaluation matrix in `scenarios/`,
-written by `tools/scenario_matrix.py`, holds the reference scenarios: four
+written by `tools/scenario_matrix.py` as stubs over `workloads/` and
+`profiles/`, holds the reference scenarios: four
 backends (`g5k-25k`, `aws-7k5`, `simnet-7k5`, `local-200`) by two protocols
 (`topdisc`, `discv5`) by two lookup models (`cont`, `conn`), each with and
 without session churn, so any two differ in one thing;

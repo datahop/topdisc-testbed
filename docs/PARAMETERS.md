@@ -2,9 +2,10 @@
 
 The parameters of the Phase 3 experiment plan, what each one means, how it is
 expressed in a scenario file, and what the repo can do with it today. A
-scenario file (`scenarios/*.yaml`) has a backend-agnostic `scenario:` block
-and a `testbed:` block; the same `scenario:` block is meant to run unchanged
-on every backend. `./testbed reference` prints every key with its default.
+scenario (`scenarios/*.yaml`) names a backend-agnostic workload
+(`scenarios/workloads/`, a `scenario:` block) and a backend profile
+(`scenarios/profiles/`, a `testbed:` block); the same workload is meant to run
+unchanged on every profile. `./testbed reference` prints every key with its default.
 
 Backends: **simnet** (in-process discv5 nodes, simulated links, harness sees
 everything); **real** = local processes, AWS, Grid'5000 (one `p2p.Server`

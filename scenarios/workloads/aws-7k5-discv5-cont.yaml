@@ -1,0 +1,30 @@
+# 7,500 nodes: plain discv5 built on the fork, one continuous search per node, no churn. Matrix workload written by tools/scenario_matrix.py.
+scenario:
+  population:
+    nodes: 7500
+    topics: 100
+    seed: 1
+    bootstrap_sample: 5
+    zipf_s: 1.07
+    topic_model: models/crawl-2026-09-18.json
+    legacy_frac: 1
+    legacy_bootnode: true
+    legacy_build: fork
+  network:
+    regions:
+      us-east-1: 0.3334
+      eu-central-1: 0.3333
+      ap-southeast-1: 0.3333
+  phases:
+    bootstrap_wait: 3m
+    start_window: 15m
+    register_wait: 15m
+    search_stagger: 10ms
+    search_timeout: 90m
+  topic:
+    ad_cache_size: 5000
+    search_yield_floor: 8
+  search:
+    model: continuous
+  conn_model:
+    enabled: false

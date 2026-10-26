@@ -1,0 +1,22 @@
+# Backend profile of aws-5k-discv5-cont-churn-ghosts, aws-5k-topdisc-cont-churn, aws-5k-topdisc-cont-churn-ghosts.
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json
+    home_region: us-east-1
+    verbosity: 2
+    grace: 30s
+  aws_packed:
+    region: us-east-1
+    zone: us-east-1a
+    instance_type: m6a.2xlarge
+    coordinator_type: m6a.2xlarge
+    vnodes_per_machine: 500
+  wan:
+    enabled: true
+    delay_min_ms: 4
+    delay_max_ms: 45
+    jitter_ms: 3
+    rate_kbps: 1000
+  traces:
+    host_sample_period: 30s

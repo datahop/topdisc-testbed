@@ -1,25 +1,5 @@
 # local backend, 200 nodes on one machine: TopDisc, the connection model (searches feed the dialer, stop at full slots), no churn.
 # One of the matrix scenarios written by tools/scenario_matrix.py.
 name: local-200-topdisc-conn
-scenario:
-  population:
-    nodes: 200
-    topics: 5
-    seed: 1
-    bootstrap_sample: 5
-    zipf_s: 1.0
-  phases:
-    bootstrap_wait: 20s
-    start_window: 2m
-    register_wait: 30s
-    search_stagger: 10ms
-    search_timeout: 4m
-  topic:
-    ad_cache_size: 5000
-    search_yield_floor: 8
-  search:
-    model: conn
-  conn_model:
-    enabled: true
-testbed:
-  backend: local
+workload: 200-topdisc-conn
+profile: local

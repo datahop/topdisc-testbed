@@ -2,13 +2,18 @@
 """Grid'5000 driver: the same verbs as deploy/aws.sh, on kadeploy'd machines
 running hostagent directly (no Distem).
 
-  deploy/g5k/g5k.py up   scenarios/x.yaml   reserve + kadeploy machines, push and start
+  deploy/g5k/g5k.py up   <spec>             reserve + kadeploy machines, push and start
                                             hostagent on each, write inventory.json
-  deploy/g5k/g5k.py run  scenarios/x.yaml   run the scenario on the coordinator machine, wait,
+  deploy/g5k/g5k.py run  <spec>             run the scenario on the coordinator machine, wait,
                                             pull the run directory into runs/, then release (KEEP=1 keeps)
   deploy/g5k/g5k.py pull                    fetch the latest run directory from the coordinator
   deploy/g5k/g5k.py down                    release the OAR job
   deploy/g5k/g5k.py check                   my running OAR jobs on the site
+
+<spec> is a scenario file or --workload W --profile P [--set key=value]...
+[--name N]; it is composed into one file (scenarios/.composed-g5k.yaml) that
+the coordinator runs as scenario.yaml. DRY_RUN=1 makes `up` stop after
+printing the fleet, before EnOSlib is imported.
 
 Runs from a Grid'5000 frontend (no credentials needed) or from outside with
 ~/.python-grid5000.yaml. State (job id, node list) is kept in
@@ -32,7 +37,7 @@ namespace on that host's private bridge, no per-node real IP or container
 needed. No subnet reservation either -- hosts route each other's private
 /16s over the ordinary prod network hostagent already needs for SSH.
 """
-import json, os, pathlib, socket, subprocess, sys, time
+import json, os, pathlib, shlex, socket, subprocess, sys, time
 
 import yaml
 
@@ -83,6 +88,12 @@ def scenario(path):
         "queue": g5k.get("queue", "default"), "env": g5k.get("env", "debian11-x64-base"),
         "vnodes_per_machine": int(g5k.get("vnodes_per_machine", 250)),
     }
+
+
+def compose(args):
+    path = REPO / "scenarios" / ".composed-g5k.yaml"
+    sh(f"cd {REPO} && ./testbed compose {' '.join(shlex.quote(a) for a in args)} > {path}")
+    return str(path)
 
 
 def build():
@@ -155,10 +166,10 @@ def wait_healthy(hosts, need, timeout=60):
     return [h for h in hosts if h in ok]
 
 
-def up(path):
-    import enoslib as en
-    cfg, g = scenario(path)
+def up(args):
     build()
+    path = compose(args)
+    cfg, g = scenario(path)
     fleet = json.loads(sh(f"cd {REPO} && ./testbed fleet {path}", capture=True).stdout)
     machines = max(1, fleet["g5k_machines"])
     # Reserve a couple more than the run needs. On 2026-10-05 one machine of a
@@ -168,6 +179,9 @@ def up(path):
     spares = SPARES if SPARES is not None else max(1, round(machines * 0.04))
     print(f"fleet: {fleet['regions']} -> {machines} machines x {g['vnodes_per_machine']} vnodes "
           f"on {g['site']} (reserving {machines + spares})")
+    if os.environ.get("DRY_RUN"):
+        return
+    import enoslib as en
 
     conf = en.G5kConf.from_settings(job_name="topdisc", walltime=g["walltime"], job_type=["deploy"],
                                     env_name=g["env"], queue=g["queue"],
@@ -197,7 +211,7 @@ def up(path):
     # Written now rather than with the inventory so that `down` addresses the
     # right site whatever stops `up` from here on.
     try:
-        save_state({"site": g["site"], "cluster": g["cluster"], "env": g["env"], "scenario": path, "workdir": WORK})
+        save_state({"site": g["site"], "cluster": g["cluster"], "env": g["env"], "scenario": shlex.join(args), "workdir": WORK})
         deployed = [h.address for h in roles["pnode"]]
         broken = []
         for h in deployed:
@@ -255,7 +269,8 @@ def up(path):
                                for i, h in enumerate(pnodes)]}
         (HERE / "inventory.json").write_text(json.dumps(inventory, indent=1))
         sh(f"ssh root@{coordinator} 'mkdir -p {WORK}'")
-        sh(f"scp -q {REPO}/out/testbed {HERE}/inventory.json {path} root@{coordinator}:{WORK}/")
+        sh(f"scp -q {REPO}/out/testbed {HERE}/inventory.json root@{coordinator}:{WORK}/")
+        sh(f"scp -q {path} root@{coordinator}:{WORK}/scenario.yaml")
         sh(f"scp -q -r {REPO}/scenarios/models root@{coordinator}:{WORK}/")
         print(f"up: {len(pnodes)} machines x {per} nodes, coordinator {coordinator}, inventory {HERE}/inventory.json")
     except Unrunnable as e:
@@ -272,12 +287,12 @@ def up(path):
         raise
 
 
-def run(path):
+def run(args):
+    path = compose(args)
     st = load_state()
     c = st["coordinator"]
     work = st.get("workdir", WORK)
-    name = os.path.basename(path)
-    sh(f"scp -q {path} root@{c}:{work}/{name}")
+    sh(f"scp -q {path} root@{c}:{work}/scenario.yaml")
     free_gb = int(subprocess.run(f"ssh root@{c} 'df -BG --output=avail {work} | tail -1'",
                                  shell=True, text=True, capture_output=True).stdout.strip().rstrip("G") or 0)
     if free_gb < MIN_FREE_GB:
@@ -285,7 +300,7 @@ def run(path):
                  f"The traces of a 25k-node run do not fit on the root filesystem; "
                  f"re-run `up` with WORKDIR on a larger partition.")
     print(f"coordinator {work}: {free_gb} GB free")
-    sh(f"ssh root@{c} 'cd {work} && (nohup ./testbed {name} > run.out 2>&1; echo RUN-EXIT $? >> run.out) >/dev/null 2>&1 &'")
+    sh(f"ssh root@{c} 'cd {work} && (nohup ./testbed scenario.yaml > run.out 2>&1; echo RUN-EXIT $? >> run.out) >/dev/null 2>&1 &'")
     print("started on the coordinator; waiting")
     while True:
         out = subprocess.run(f"ssh root@{c} tail -c 4000 {work}/run.out", shell=True, text=True, capture_output=True).stdout
@@ -399,7 +414,7 @@ if __name__ == "__main__":
     if verb in ("up", "run"):
         if len(sys.argv) < 3:
             sys.exit(f"{verb} needs a scenario")
-        globals()[verb](sys.argv[2])
+        globals()[verb](sys.argv[2:])
     elif verb == "pull":
         if pull() is False:
             sys.exit(1)

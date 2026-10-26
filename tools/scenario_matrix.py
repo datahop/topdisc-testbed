@@ -4,14 +4,18 @@ models x churn or not, 64 scenarios named
 <backend>-<size>-<topdisc|discv5>-<cont|conn>[-churn].yaml. Every run uses
 the 2026-09-18 crawl as its topic and churn model, bootstrap sampling, and
 the same phases within a backend, so any two differ in one thing only.
+Each scenario is a stub naming a workload (scenarios/workloads/, the
+scenario: section) and a backend profile (scenarios/profiles/, the testbed:
+section); backends whose sections agree share the workload.
 Re-run after editing the tables below; the files it writes are tracked."""
 import os
 import yaml
 
 MODEL = "models/crawl-2026-09-18.json"
 BACKENDS = {
-    # size, population, network, phases, testbed section
+    # workload and profile names, size, population, network, phases, testbed section
     "g5k-25k": dict(
+        workload="g5k-25k", profile="g5k-gros",
         nodes=25000, topics=100,
         network={"latency_ms": 30, "bandwidth_mibps": 100, "model": "regions",
                  "regions": {"us-east-1": 0.4, "eu-central-1": 0.3, "ap-southeast-1": 0.3},
@@ -24,12 +28,14 @@ BACKENDS = {
                  "traces": {"host_sample_period": "30s"}},
         addresses="crawl"),
     "aws-7k5": dict(
+        workload="aws-7k5", profile="aws",
         nodes=7500, topics=100,
         network={"regions": {"us-east-1": 0.3334, "eu-central-1": 0.3333, "ap-southeast-1": 0.3333}},
         phases={"bootstrap_wait": "3m", "start_window": "15m", "register_wait": "15m", "search_stagger": "10ms", "search_timeout": "90m"},
         testbed={"backend": "cloud", "cloud": {"inventory": "inventory.json", "home_region": "us-east-1", "public_ips": False}},
         addresses=None),
     "gcp-15k": dict(
+        workload="15k", profile="gcp",
         nodes=15000, topics=100,
         network={"latency_ms": 30, "bandwidth_mibps": 100, "model": "regions",
                  "regions": {"us-east-1": 0.4, "eu-central-1": 0.3, "ap-southeast-1": 0.3},
@@ -44,6 +50,7 @@ BACKENDS = {
         # synthetic addresses: the VPC routes one /16 per host, not crawl /24s
         addresses=None),
     "gcp-5k5": dict(
+        workload="5k5", profile="gcp-500",
         nodes=5500, topics=20,
         network={"latency_ms": 30, "bandwidth_mibps": 100, "model": "regions",
                  "regions": {"us-east-1": 0.4, "eu-central-1": 0.3, "ap-southeast-1": 0.3},
@@ -58,6 +65,7 @@ BACKENDS = {
         # synthetic addresses: the VPC routes one /16 per host, not crawl /24s
         addresses=None),
     "hetzner-25k": dict(
+        workload="25k", profile="hetzner",
         nodes=25000, topics=100,
         network={"latency_ms": 30, "bandwidth_mibps": 100, "model": "regions",
                  "regions": {"us-east-1": 0.4, "eu-central-1": 0.3, "ap-southeast-1": 0.3},
@@ -71,6 +79,7 @@ BACKENDS = {
         # synthetic addresses: the VPC routes one /16 per host, not crawl /24s
         addresses=None),
     "aws-25k": dict(
+        workload="25k", profile="aws-packed",
         nodes=25000, topics=100,
         network={"latency_ms": 30, "bandwidth_mibps": 100, "model": "regions",
                  "regions": {"us-east-1": 0.4, "eu-central-1": 0.3, "ap-southeast-1": 0.3},
@@ -85,6 +94,7 @@ BACKENDS = {
         # synthetic addresses: the route table routes one /16 per host, not crawl /24s
         addresses=None),
     "simnet-7k5": dict(
+        workload="simnet-7k5", profile="simnet",
         nodes=7500, topics=100,
         network={"latency_ms": 30, "bandwidth_mibps": 1000},
         phases={"bootstrap_wait": "180s", "start_window": "15m", "register_wait": "15m", "search_stagger": "100ms", "search_timeout": "90m"},
@@ -93,6 +103,7 @@ BACKENDS = {
                             "overhead_series_period": "5m", "checkpoint_interval": "15m"}},
         addresses="crawl"),
     "local-200": dict(
+        workload="200", profile="local",
         nodes=200, topics=5,
         network=None,
         phases={"bootstrap_wait": "20s", "start_window": "2m", "register_wait": "30s", "search_stagger": "10ms", "search_timeout": "4m"},
@@ -131,25 +142,42 @@ def scenario(backend, proto, model, churn):
     sc["conn_model"] = {"enabled": model == "conn"}
     if churn:
         sc["session_churn"] = {"enabled": True, "model": MODEL, "window_real_hours": 24}
-    name = f"{backend}-{proto}-{model}" + ("-churn" if churn else "")
-    head = (f"# {DESC[backend]}: {'TopDisc' if proto == 'topdisc' else 'plain discv5 built on the fork'}, "
+    variant = f"{proto}-{model}" + ("-churn" if churn else "")
+    name = f"{backend}-{variant}"
+    what = (f"{'TopDisc' if proto == 'topdisc' else 'plain discv5 built on the fork'}, "
             f"{'one continuous search per node' if model == 'cont' else 'the connection model (searches feed the dialer, stop at full slots)'}, "
-            f"{'each node leaving and returning as its chain did in the crawl, one day over the run' if churn else 'no churn'}.\n"
+            f"{'each node leaving and returning as its chain did in the crawl, one day over the run' if churn else 'no churn'}")
+    head = (f"# {DESC[backend]}: {what}.\n"
             f"# One of the matrix scenarios written by tools/scenario_matrix.py.\n")
-    body = yaml.safe_dump({"name": name, "scenario": sc, "testbed": b["testbed"]}, sort_keys=False, width=120)
+    workload = f"{b['workload']}-{variant}"
+    stub = head + yaml.safe_dump({"name": name, "workload": workload, "profile": b["profile"]}, sort_keys=False)
+    wtext = (f"# {b['nodes']:,} nodes: {what}. Matrix workload written by tools/scenario_matrix.py.\n"
+             + yaml.safe_dump({"scenario": sc}, sort_keys=False, width=120))
+    ptext = (f"# {DESC[backend]}: backend profile of the {backend} matrix scenarios, written by tools/scenario_matrix.py.\n"
+             + yaml.safe_dump({"testbed": b["testbed"]}, sort_keys=False, width=120))
     # a bare hh:mm:ss is a YAML 1.1 sexagesimal number
-    return name, head + body.replace("walltime: 05:00:00", 'walltime: "05:00:00"')
+    ptext = ptext.replace("walltime: 05:00:00", 'walltime: "05:00:00"')
+    return name, stub, workload, wtext, ptext
+
+
+def write(path, text, written):
+    # backends that share a workload must agree on it byte for byte
+    assert written.setdefault(path, text) == text, f"{path}: backends disagree"
+    open(path, "w").write(text)
 
 
 def main():
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scenarios")
+    written = {}
     n = 0
     for backend in BACKENDS:
         for proto in ("topdisc", "discv5"):
             for model in ("cont", "conn"):
                 for churn in (False, True):
-                    name, text = scenario(backend, proto, model, churn)
-                    open(os.path.join(out, name + ".yaml"), "w").write(text)
+                    name, stub, workload, wtext, ptext = scenario(backend, proto, model, churn)
+                    write(os.path.join(out, name + ".yaml"), stub, written)
+                    write(os.path.join(out, "workloads", workload + ".yaml"), wtext, written)
+                    write(os.path.join(out, "profiles", BACKENDS[backend]["profile"] + ".yaml"), ptext, written)
                     n += 1
     print("wrote", n, "scenarios")
 

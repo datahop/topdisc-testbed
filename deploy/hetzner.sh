@@ -1,16 +1,18 @@
 #!/bin/sh
 # Hetzner Cloud driver: the verbs of deploy/gcp.sh on packed hosts (a server per
 # testbed.hetzner.vnodes_per_machine nodes, each node in its own netns).
-#   deploy/hetzner.sh up <scenario> [tf args]  terraform apply sized from the scenario + build + push the binaries over SSH
+#   deploy/hetzner.sh up <spec> [tf args]      terraform apply sized from the scenario + build + push the binaries over SSH
 #                                              + start the agents + write inventory.json; refuses if the fleet over
 #                                              MAX_HOURS (6) costs more than MAX_SPEND (EUR 100, gross prices from the API)
 #   deploy/hetzner.sh push                  rebuild, re-push and restart the agents only
-#   deploy/hetzner.sh run scenarios/x.yaml  run it on the coordinator, wait, pull the results, then destroy everything
+#   deploy/hetzner.sh run <spec>            run it on the coordinator, wait, pull the results, then destroy everything
 #                                           (up and run destroy on failure too; only a failed pull keeps the deployment; KEEP=1 keeps it always)
 #   deploy/hetzner.sh check                 list the project's servers
 #   deploy/hetzner.sh pull                  fetch the latest run directory from the coordinator into runs/
 #   deploy/hetzner.sh ssh                   shell on the coordinator
 #   deploy/hetzner.sh down                  terraform destroy
+# <spec> is a scenario file or --workload W --profile P [--set key=value]... [--name N] (see README.md).
+# DRY_RUN=1 makes up stop after printing the fleet, before any API or terraform call.
 # Needs the project token in ~/.config/hcloud/token (or HCLOUD_TOKEN) and an SSH key (SSH_KEY, default ~/.ssh/id_ed25519).
 # There is no scale-down timer here: a laptop that dies mid-run leaves the servers up until `down`.
 set -e
@@ -79,9 +81,13 @@ fleet_file() { f=$(mktemp); ./testbed fleet "$1" > "$f"; echo "$f"; }
 
 case "$1" in
   up)
-    sc=$2; shift 2
+    shift
     go build -o testbed ./cmd/testbed
+    sc=$(mktemp scenarios/.composed.XXXXXX)
+    n=$(./testbed compose -o "$sc" "$@") || { rm -f "$sc"; exit 1; }
+    shift "$n"
     f=$(fleet_file "$sc")
+    rm -f "$sc"
     hosts=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hetzner_machines"])' "$f")
     wan=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["wan"])' "$f")
     per=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hetzner"]["vnodes_per_machine"])' "$f")
@@ -89,6 +95,7 @@ case "$1" in
     [ "$hosts" -gt 0 ] || { echo "not a Hetzner scenario: testbed.hetzner.vnodes_per_machine is unset"; exit 1; }
     [ "$wan" = True ] || { echo "testbed.wan must be enabled: the nodes live in network namespaces"; exit 1; }
     echo "fleet: $hosts hosts; $g"
+    [ -z "$DRY_RUN" ] || { rm -f "$f"; exit 0; }
     cost_guard "$f"
     rm -f "$f"
     [ -n "$KEEP" ] || trap 'st=$?; [ $st -eq 0 ] || { echo "up failed; destroying"; "$0" down; "$0" check; }; exit $st' EXIT
@@ -99,15 +106,19 @@ case "$1" in
     inventory "$per" ;;
   push) build; push ;;
   run)
+    shift
+    sc=$(mktemp scenarios/.composed.XXXXXX)
+    ./testbed compose "$@" > "$sc" || { rm -f "$sc"; exit 1; }
+    f=$(fleet_file "$sc")
     [ -n "$KEEP" ] || trap 'st=$?; if [ $st -eq 0 ] || [ -z "$PULL_FAILED" ]; then "$0" down; "$0" check; else echo "pull failed: deployment kept; fix, then deploy/hetzner.sh pull && deploy/hetzner.sh down"; fi' EXIT
-    f=$(fleet_file "$2")
     per=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hetzner"]["vnodes_per_machine"])' "$f")
     rm -f "$f"
     inventory "$per"
     c=$(tfout coordinator_public_ip)
-    $SCP -q "$2" root@$c:/opt/topdisc/scenario.yaml
+    $SCP -q "$sc" root@$c:/opt/topdisc/scenario.yaml
     $SCP -q out/inventory.json root@$c:/opt/topdisc/inventory.json
-    $SCP -q -r "$(dirname "$2")/models" root@$c:/opt/topdisc/
+    $SCP -q -r "$(dirname "$sc")/models" root@$c:/opt/topdisc/
+    rm -f "$sc"
     # setsid -f: the forked run is detached from this SSH session, which
     # would otherwise stay open (and this driver stuck) until the run ends.
     cssh "cd /opt/topdisc && rm -f run.out && setsid -f sh -c './testbed scenario.yaml > run.out 2>&1; echo RUN-EXIT \$? >> run.out' > /dev/null 2>&1 < /dev/null"
@@ -162,5 +173,5 @@ PY
       terraform -chdir=$TF destroy -auto-approve -input=false -var "hosts=0" -var "ssh_public_key=$(cat $SSH_KEY.pub)" && break
       echo "down: destroy incomplete (try $i of 3); retrying"
     done ;;
-  *) sed -n 2,15p "$0"; exit 2 ;;
+  *) sed -n 2,17p "$0"; exit 2 ;;
 esac

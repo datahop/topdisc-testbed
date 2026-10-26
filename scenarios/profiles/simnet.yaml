@@ -1,0 +1,12 @@
+# simnet, 7,500 in-process nodes: backend profile of the simnet-7k5 matrix scenarios, written by tools/scenario_matrix.py.
+testbed:
+  simulator:
+    link_buf: 32768
+    router_buf: 32768
+    router_shards: 16
+  traces:
+    metrics: metrics.json
+    overhead: oh.json
+    overhead_series: series.json
+    overhead_series_period: 5m
+    checkpoint_interval: 15m

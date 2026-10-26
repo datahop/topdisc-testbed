@@ -1,0 +1,21 @@
+# Backend profile of gcp-smoke.
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json          # written on the coordinator by inventory-gcp.sh
+    home_region: us-east-1
+    grace: 30s
+  gcp:
+    region: us-central1
+    zone: us-central1-a
+    machine_type: n2-standard-8
+    coordinator_type: e2-standard-4
+    vnodes_per_machine: 200
+  wan:
+    enabled: true
+    delay_min_ms: 4
+    delay_max_ms: 45
+    jitter_ms: 3
+    rate_kbps: 1000
+  traces:
+    host_sample_period: 30s

@@ -1,0 +1,12 @@
+# Backend profile of simnet-smoke.
+testbed:
+  simulator:
+    link_buf: 8192
+    router_buf: 32768
+    router_shards: 16
+  traces:
+    metrics: metrics.json
+    overhead: oh.json
+    overhead_series: series.json
+    overhead_series_period: 30s
+    checkpoint_interval: 60s
