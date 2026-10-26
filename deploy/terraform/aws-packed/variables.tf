@@ -19,3 +19,11 @@ variable "max_hours" {
   description = "the coordinator terminates the hosts and halts this long after boot; 0 disables"
   default     = 6
 }
+variable "deploy" {
+  description = "deployment id, for parallel deployments: suffixes every name and tags everything topdisc-deploy=<id>; empty is the single un-ID'd deployment"
+  default     = ""
+  validation {
+    condition     = can(regex("^([a-z0-9][a-z0-9-]{0,19})?$", var.deploy)) && var.deploy != "default"
+    error_message = "deploy: 1 to 20 characters of a-z, 0-9 and -, starting with a letter or digit, not default (or empty)."
+  }
+}

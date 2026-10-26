@@ -24,20 +24,27 @@ data "aws_ami" "al2023" {
   }
 }
 
+locals {
+  sfx  = var.deploy == "" ? "" : "-${var.deploy}"
+  name = "topdisc-packed${local.sfx}"
+  inst = "topdisc${local.sfx}"
+  tags = var.deploy == "" ? {} : { topdisc-deploy = var.deploy }
+}
+
 resource "aws_vpc" "tb" {
   cidr_block = var.subnet
-  tags       = { Name = "topdisc-packed" }
+  tags       = merge(local.tags, { Name = local.name })
 }
 resource "aws_internet_gateway" "tb" {
   vpc_id = aws_vpc.tb.id
-  tags   = { Name = "topdisc-packed" }
+  tags   = merge(local.tags, { Name = local.name })
 }
 resource "aws_subnet" "hosts" {
   vpc_id                  = aws_vpc.tb.id
   cidr_block              = var.subnet
   availability_zone       = var.zone
   map_public_ip_on_launch = true
-  tags                    = { Name = "topdisc-packed" }
+  tags                    = merge(local.tags, { Name = local.name })
 }
 resource "aws_route_table" "tb" {
   vpc_id = aws_vpc.tb.id
@@ -45,7 +52,7 @@ resource "aws_route_table" "tb" {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.tb.id
   }
-  tags = { Name = "topdisc-packed" }
+  tags = merge(local.tags, { Name = local.name })
 }
 resource "aws_route_table_association" "hosts" {
   subnet_id      = aws_subnet.hosts.id
@@ -58,7 +65,7 @@ resource "aws_route" "host" {
   network_interface_id   = aws_instance.host[count.index].primary_network_interface_id
 }
 resource "aws_security_group" "tb" {
-  name   = "topdisc-packed"
+  name   = local.name
   vpc_id = aws_vpc.tb.id
   ingress {
     protocol    = "-1"
@@ -72,25 +79,29 @@ resource "aws_security_group" "tb" {
     to_port     = 0
     cidr_blocks = ["0.0.0.0/0"]
   }
+  tags = local.tags
 }
 
 # Binaries in, run archives out. Destroyed with the deployment:
 # aws-packed.sh down copies the archives first.
 resource "aws_s3_bucket" "tb" {
-  bucket_prefix = "topdisc-packed-"
+  bucket_prefix = "${local.name}-"
   force_destroy = true
+  tags          = local.tags
 }
 
 locals {
   assume = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "ec2.amazonaws.com" }, Action = "sts:AssumeRole" }] })
 }
 resource "aws_iam_role" "host" {
-  name               = "topdisc-packed-host"
+  name               = "${local.name}-host"
   assume_role_policy = local.assume
+  tags               = local.tags
 }
 resource "aws_iam_role" "coordinator" {
-  name               = "topdisc-packed-coordinator"
+  name               = "${local.name}-coordinator"
   assume_role_policy = local.assume
+  tags               = local.tags
 }
 resource "aws_iam_role_policy_attachment" "ssm" {
   for_each   = { host = aws_iam_role.host.name, coordinator = aws_iam_role.coordinator.name }
@@ -114,21 +125,23 @@ resource "aws_iam_role_policy" "coordinator" {
     { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject"], Resource = "${aws_s3_bucket.tb.arn}/*" },
     { Effect = "Allow", Action = ["s3:ListBucket"], Resource = aws_s3_bucket.tb.arn },
     { Effect = "Allow", Action = ["ec2:DescribeInstances"], Resource = "*" },
-    { Effect = "Allow", Action = ["ec2:TerminateInstances"], Resource = "*", Condition = { StringEquals = { "ec2:ResourceTag/topdisc" = "host" } } },
+    { Effect = "Allow", Action = ["ec2:TerminateInstances"], Resource = "*", Condition = { StringEquals = merge({ "ec2:ResourceTag/topdisc" = "host" }, { for k, v in local.tags : "ec2:ResourceTag/${k}" => v }) } },
   ] })
 }
 resource "aws_iam_instance_profile" "host" {
-  name = "topdisc-packed-host"
+  name = "${local.name}-host"
   role = aws_iam_role.host.name
+  tags = local.tags
 }
 resource "aws_iam_instance_profile" "coordinator" {
-  name = "topdisc-packed-coordinator"
+  name = "${local.name}-coordinator"
   role = aws_iam_role.coordinator.name
+  tags = local.tags
 }
 
 locals {
   init = { for role in ["host", "coordinator"] : role => templatefile("${path.module}/../../aws-packed-init.sh.tftpl", {
-    role = role, bucket = aws_s3_bucket.tb.id, region = var.region, max_hours = var.max_hours
+    role = role, bucket = aws_s3_bucket.tb.id, region = var.region, max_hours = var.max_hours, deploy = var.deploy
   }) }
 }
 
@@ -149,7 +162,7 @@ resource "aws_instance" "host" {
   metadata_options {
     http_tokens = "required"
   }
-  tags       = { Name = "topdisc-host-${count.index}", topdisc = "host" }
+  tags       = merge(local.tags, { Name = "${local.inst}-host-${count.index}", topdisc = "host" })
   depends_on = [aws_iam_role_policy.host, aws_iam_role_policy_attachment.ssm]
 }
 
@@ -168,6 +181,6 @@ resource "aws_instance" "coordinator" {
   metadata_options {
     http_tokens = "required"
   }
-  tags       = { Name = "topdisc-coordinator", topdisc = "coordinator" }
+  tags       = merge(local.tags, { Name = "${local.inst}-coordinator", topdisc = "coordinator" })
   depends_on = [aws_iam_role_policy.coordinator, aws_iam_role_policy_attachment.ssm]
 }

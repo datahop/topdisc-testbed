@@ -13,6 +13,7 @@ scenarios/models/*.json.gz
 /hostagent
 /local-run/
 /out/
+/out-*/
 /runs/
 /simnet
 /simnet-vanilla
