@@ -12,8 +12,8 @@ variable "instance_type" { default = "m6a.2xlarge" }
 variable "coordinator_type" { default = "m6a.xlarge" }
 variable "host_disk_gb" { default = 20 }
 variable "coordinator_disk_gb" {
-  description = "holds every trace while the coordinator aggregates (about 2 MB per node)"
-  default     = 100
+  description = "holds every trace and metrics.json while the coordinator aggregates (about 4 MB per node)"
+  default     = 300
 }
 variable "max_hours" {
   description = "the coordinator terminates the hosts and halts this long after boot; 0 disables"
