@@ -1,0 +1,22 @@
+# Google Cloud, 5,500 nodes on 11 packed VMs (500 each) with star-model WAN delays, the 96-vCPU quota: backend profile of the gcp-5k5 matrix scenarios, written by tools/scenario_matrix.py.
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json
+    home_region: us-east-1
+    verbosity: 2
+    grace: 30s
+  gcp:
+    region: us-central1
+    zone: us-central1-a
+    machine_type: n2-standard-8
+    coordinator_type: e2-standard-8
+    vnodes_per_machine: 500
+  wan:
+    enabled: true
+    delay_min_ms: 4
+    delay_max_ms: 45
+    jitter_ms: 3
+    rate_kbps: 1000
+  traces:
+    host_sample_period: 30s

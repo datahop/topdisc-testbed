@@ -4,35 +4,5 @@
 # by DialRatio 3 -> 16 out / 34 in.
 #   go build -o simnet ./cmd/simnet && ./simnet scenarios/simnet-smoke.yaml
 name: simnet-smoke
-scenario:
-  population:
-    nodes: 500
-    topics: 1
-    seed: 1
-  network:
-    latency_ms: 30
-    bandwidth_mibps: 1000
-  phases:
-    bootstrap_wait: 45s
-    register_wait: 90s
-    register_stagger: 5ms
-    search_stagger: 2ms
-    search_timeout: 3m
-  topic:
-    ad_cache_size: 5000
-  conn_model:
-    enabled: true
-    max_peers: 50
-    dial_ratio: 3
-    redial_wait: 35s
-testbed:
-  simulator:
-    link_buf: 8192
-    router_buf: 32768
-    router_shards: 16
-  traces:
-    metrics: metrics.json
-    overhead: oh.json
-    overhead_series: series.json
-    overhead_series_period: 30s
-    checkpoint_interval: 60s
+workload: simnet-smoke
+profile: simnet-smoke

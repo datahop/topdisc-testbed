@@ -1,0 +1,7 @@
+# AWS, 7,500 nodes in three regions, private addresses: backend profile of the aws-7k5 matrix scenarios, written by tools/scenario_matrix.py.
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json
+    home_region: us-east-1
+    public_ips: false

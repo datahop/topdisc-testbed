@@ -1,31 +1,5 @@
 # local backend, 40 nodes: TopDisc with session churn and unreachable (ghost) records pinned in every table, mainnet's mean share.
 # Hand-written, not part of the matrix: exercises ghost pinning across /up rejoins.
 name: local-40-topdisc-ghosts
-scenario:
-  population:
-    nodes: 40
-    topics: 5
-    seed: 1
-    topic_model: models/crawl-2026-09-18.json
-    bootstrap_sample: 5
-  phases:
-    bootstrap_wait: 20s
-    start_window: 20s
-    register_wait: 30s
-    search_stagger: 10ms
-    search_timeout: 2m
-  topic:
-    ad_cache_size: 5000
-    search_yield_floor: 8
-  search:
-    model: continuous
-  conn_model:
-    enabled: false
-  session_churn:
-    enabled: true
-    model: models/crawl-2026-09-18.json
-    window_real_hours: 24
-  ghosts:
-    share: 0.11
-testbed:
-  backend: local
+workload: 40-topdisc-ghosts
+profile: local

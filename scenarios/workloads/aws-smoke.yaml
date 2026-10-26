@@ -1,0 +1,12 @@
+# Workload of aws-smoke.
+scenario:
+  population:
+    nodes: 5
+    topics: 1
+    seed: 1
+  phases:
+    bootstrap_wait: 15s
+    register_stagger: 20ms
+    register_wait: 30s
+    search_stagger: 10ms
+    search_timeout: 30s

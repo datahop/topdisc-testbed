@@ -1,0 +1,13 @@
+# Backend profile of g5k-smoke.
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json          # g5k.py copies it next to the scenario on the coordinator
+    home_region: us-east-1
+  g5k:
+    site: nancy
+    cluster: gros
+    vnodes_per_machine: 5
+  wan:
+    enabled: true
+    rate_kbps: 1000

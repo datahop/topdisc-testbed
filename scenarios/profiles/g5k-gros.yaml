@@ -1,0 +1,22 @@
+# Grid'5000, 25,000 nodes on 50 gros machines with region RTTs: backend profile of the g5k-25k matrix scenarios, written by tools/scenario_matrix.py.
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json
+    home_region: us-east-1
+    verbosity: 2
+    grace: 30s
+  g5k:
+    site: nancy
+    cluster: gros
+    env: debian11-x64-base
+    vnodes_per_machine: 500
+    walltime: "05:00:00"
+  wan:
+    enabled: true
+    delay_min_ms: 4
+    delay_max_ms: 45
+    jitter_ms: 3
+    rate_kbps: 1000
+  traces:
+    host_sample_period: 30s

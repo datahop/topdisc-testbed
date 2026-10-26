@@ -1,17 +1,19 @@
 #!/bin/sh
 # Google Cloud driver: the verbs of deploy/aws.sh on packed hosts (a VM per
 # testbed.gcp.vnodes_per_machine nodes, each node in its own netns, as on Grid'5000).
-#   deploy/gcp.sh up <scenario> [tf args]  terraform apply sized from the scenario + build + push to the bucket;
+#   deploy/gcp.sh up <spec> [tf args]      terraform apply sized from the scenario + build + push to the bucket;
 #                                          refuses if the fleet over MAX_HOURS (6) costs more than MAX_SPEND ($100)
 #                                          or does not fit the project's CPU quotas (e.g. -var zone=us-central1-f
 #                                          -var machine_type=n1-standard-8 when the scenario's type is stocked out)
 #   deploy/gcp.sh push                  rebuild and re-push the binaries only
-#   deploy/gcp.sh run scenarios/x.yaml  run it on the coordinator, wait, pull the results, then destroy everything
+#   deploy/gcp.sh run <spec>            run it on the coordinator, wait, pull the results, then destroy everything
 #                                       (up and run destroy on failure too; only a failed pull keeps the deployment; KEEP=1 keeps it always)
 #   deploy/gcp.sh check                 list what is still running
 #   deploy/gcp.sh pull                  fetch the latest run directory into runs/ (the coordinator saves every run to the bucket)
 #   deploy/gcp.sh ssh                   shell on the coordinator (IAP)
 #   deploy/gcp.sh down                  copy every saved run to runs/archives, then terraform destroy
+# <spec> is a scenario file or --workload W --profile P [--set key=value]... [--name N] (see README.md).
+# DRY_RUN=1 makes up stop after printing the fleet, before any gcloud or terraform call (with PROJECT set).
 # Needs gcloud logged in with a default project (or PROJECT=...) and application-default credentials for terraform.
 set -e
 cd "$(dirname "$0")/.."
@@ -98,15 +100,20 @@ fleet_file() { f=$(mktemp); ./testbed fleet "$1" > "$f"; echo "$f"; }
 
 case "$1" in
   up)
-    sc=$2; shift 2
+    shift
     go build -o testbed ./cmd/testbed
+    sc=$(mktemp scenarios/.composed.XXXXXX)
+    n=$(./testbed compose -o "$sc" "$@") || { rm -f "$sc"; exit 1; }
+    shift "$n"
     f=$(fleet_file "$sc")
+    rm -f "$sc"
     hosts=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["gcp_machines"])' "$f")
     wan=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["wan"])' "$f")
     g=$(python3 -c 'import json,sys; g=json.load(open(sys.argv[1]))["gcp"]; print(" ".join("-var %s=%s" % (k, g[k]) for k in ("region","zone","machine_type","coordinator_type")))' "$f")
     [ "$hosts" -gt 0 ] || { echo "not a GCP scenario: testbed.gcp.vnodes_per_machine is unset"; exit 1; }
     [ "$wan" = True ] || { echo "testbed.wan must be enabled: the nodes live in network namespaces"; exit 1; }
     echo "fleet: $hosts hosts; $g"
+    [ -z "$DRY_RUN" ] || { rm -f "$f"; exit 0; }
     cost_guard "$f" "$@"
     terraform -chdir=$TF init -input=false >/dev/null
     if terraform -chdir=$TF state list 2>/dev/null | grep -q 'google_compute_instance\.'; then echo "live deployment: quota guard skipped"; else quota_guard "$f"; fi
@@ -116,14 +123,18 @@ case "$1" in
     build_push ;;
   push) build_push ;;
   run)
+    shift
+    sc=$(mktemp scenarios/.composed.XXXXXX)
+    ./testbed compose "$@" > "$sc" || { rm -f "$sc"; exit 1; }
+    f=$(fleet_file "$sc")
     [ -n "$KEEP" ] || trap 'st=$?; if [ $st -eq 0 ] || [ -z "$PULL_FAILED" ]; then "$0" down; "$0" check; else echo "pull failed: deployment kept; fix, then deploy/gcp.sh pull && deploy/gcp.sh down"; fi' EXIT
-    f=$(fleet_file "$2")
     hosts=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["gcp_machines"])' "$f")
     per=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["gcp"]["vnodes_per_machine"])' "$f")
     rm -f "$f"
     coordinator_wait
-    gscp "$2" "$(tfout coordinator):/opt/topdisc/scenario.yaml"
-    gscp --recurse "$(dirname "$2")/models" "$(tfout coordinator):/opt/topdisc/"
+    gscp "$sc" "$(tfout coordinator):/opt/topdisc/scenario.yaml"
+    gscp --recurse "$(dirname "$sc")/models" "$(tfout coordinator):/opt/topdisc/"
+    rm -f "$sc"
     # The hosts boot at their own pace; list them until every one is there.
     for i in $(seq 1 30); do
       out=$(gssh "cd /opt/topdisc && ./inventory-gcp.sh $per && rm -f run.out" 2>&1) && echo "$out" | grep -q "^$hosts hosts" && break
@@ -175,5 +186,5 @@ case "$1" in
       terraform -chdir=$TF destroy -auto-approve -input=false -var "project=$PROJECT" -var "hosts=0" && break
       echo "down: destroy incomplete (try $i of 3); retrying"
     done ;;
-  *) sed -n 2,14p "$0"; exit 2 ;;
+  *) sed -n 2,16p "$0"; exit 2 ;;
 esac

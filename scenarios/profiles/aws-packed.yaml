@@ -1,0 +1,22 @@
+# AWS, 25,000 nodes on 50 packed instances (500 each) in one zone with star-model WAN delays: backend profile of the aws-25k matrix scenarios, written by tools/scenario_matrix.py.
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json
+    home_region: us-east-1
+    verbosity: 2
+    grace: 30s
+  aws_packed:
+    region: us-east-1
+    zone: us-east-1a
+    instance_type: m6a.2xlarge
+    coordinator_type: r6a.8xlarge
+    vnodes_per_machine: 500
+  wan:
+    enabled: true
+    delay_min_ms: 4
+    delay_max_ms: 45
+    jitter_ms: 3
+    rate_kbps: 1000
+  traces:
+    host_sample_period: 30s

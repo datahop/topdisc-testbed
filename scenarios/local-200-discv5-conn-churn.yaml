@@ -1,32 +1,5 @@
 # local backend, 200 nodes on one machine: plain discv5 built on the fork, the connection model (searches feed the dialer, stop at full slots), each node leaving and returning as its chain did in the crawl, one day over the run.
 # One of the matrix scenarios written by tools/scenario_matrix.py.
 name: local-200-discv5-conn-churn
-scenario:
-  population:
-    nodes: 200
-    topics: 5
-    seed: 1
-    bootstrap_sample: 5
-    zipf_s: 1.0
-    legacy_frac: 1
-    legacy_bootnode: true
-    legacy_build: fork
-  phases:
-    bootstrap_wait: 20s
-    start_window: 2m
-    register_wait: 30s
-    search_stagger: 10ms
-    search_timeout: 4m
-  topic:
-    ad_cache_size: 5000
-    search_yield_floor: 8
-  search:
-    model: conn
-  conn_model:
-    enabled: true
-  session_churn:
-    enabled: true
-    model: models/crawl-2026-09-18.json
-    window_real_hours: 24
-testbed:
-  backend: local
+workload: 200-discv5-conn-churn
+profile: local

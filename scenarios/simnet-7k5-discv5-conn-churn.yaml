@@ -1,46 +1,5 @@
 # simnet, 7,500 in-process nodes: plain discv5 built on the fork, the connection model (searches feed the dialer, stop at full slots), each node leaving and returning as its chain did in the crawl, one day over the run.
 # One of the matrix scenarios written by tools/scenario_matrix.py.
 name: simnet-7k5-discv5-conn-churn
-scenario:
-  population:
-    nodes: 7500
-    topics: 100
-    seed: 1
-    bootstrap_sample: 5
-    zipf_s: 1.07
-    topic_model: models/crawl-2026-09-18.json
-    addresses: crawl
-    legacy_frac: 1
-    legacy_bootnode: true
-    legacy_build: fork
-  network:
-    latency_ms: 30
-    bandwidth_mibps: 1000
-  phases:
-    bootstrap_wait: 180s
-    start_window: 15m
-    register_wait: 15m
-    search_stagger: 100ms
-    search_timeout: 90m
-  topic:
-    ad_cache_size: 5000
-    search_yield_floor: 8
-  search:
-    model: conn
-  conn_model:
-    enabled: true
-  session_churn:
-    enabled: true
-    model: models/crawl-2026-09-18.json
-    window_real_hours: 24
-testbed:
-  simulator:
-    link_buf: 32768
-    router_buf: 32768
-    router_shards: 16
-  traces:
-    metrics: metrics.json
-    overhead: oh.json
-    overhead_series: series.json
-    overhead_series_period: 5m
-    checkpoint_interval: 15m
+workload: simnet-7k5-discv5-conn-churn
+profile: simnet

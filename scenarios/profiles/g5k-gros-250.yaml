@@ -1,0 +1,14 @@
+# Backend profile of g5k-crawl-5k-discv5, g5k-crawl-5k-mixed.
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory.json          # g5k.py copies it next to the scenario on the coordinator
+    home_region: us-east-1
+  g5k:
+    site: nancy
+    cluster: gros
+    vnodes_per_machine: 250
+    walltime: "03:00:00"
+  wan:
+    enabled: true
+    rate_kbps: 1000

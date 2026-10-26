@@ -1,54 +1,5 @@
 # Google Cloud, 15,000 nodes on 75 packed VMs with star-model WAN delays: TopDisc, the connection model (searches feed the dialer, stop at full slots), no churn.
 # One of the matrix scenarios written by tools/scenario_matrix.py.
 name: gcp-15k-topdisc-conn
-scenario:
-  population:
-    nodes: 15000
-    topics: 100
-    seed: 1
-    bootstrap_sample: 5
-    zipf_s: 1.07
-    topic_model: models/crawl-2026-09-18.json
-  network:
-    latency_ms: 30
-    bandwidth_mibps: 100
-    model: regions
-    regions:
-      us-east-1: 0.4
-      eu-central-1: 0.3
-      ap-southeast-1: 0.3
-    rtt_table: models/region-rtt.json
-  phases:
-    bootstrap_wait: 180s
-    start_window: 15m
-    register_wait: 15m
-    search_stagger: 10ms
-    search_timeout: 90m
-  topic:
-    ad_cache_size: 5000
-    search_yield_floor: 8
-  search:
-    model: conn
-  conn_model:
-    enabled: true
-testbed:
-  backend: cloud
-  cloud:
-    inventory: inventory.json
-    home_region: us-east-1
-    verbosity: 2
-    grace: 30s
-  gcp:
-    region: us-central1
-    zone: us-central1-a
-    machine_type: n2-standard-8
-    coordinator_type: e2-standard-8
-    vnodes_per_machine: 200
-  wan:
-    enabled: true
-    delay_min_ms: 4
-    delay_max_ms: 45
-    jitter_ms: 3
-    rate_kbps: 1000
-  traces:
-    host_sample_period: 30s
+workload: 15k-topdisc-conn
+profile: gcp

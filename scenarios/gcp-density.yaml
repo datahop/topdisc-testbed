@@ -2,41 +2,5 @@
 # no UDP drops, 20 GB free of 32; CPU-bound (7 of 8 cores, load 85) for 3 min when the 1,000
 # searches start within 10 s. At matrix stagger the burst spreads, so 500 per 8-vCPU host holds.
 name: gcp-density
-scenario:
-  population:
-    nodes: 1000
-    topics: 5
-    seed: 1
-    bootstrap_sample: 5
-  network:
-    model: regions
-    regions: {us-east-1: 0.4, eu-central-1: 0.3, ap-southeast-1: 0.3}
-    rtt_table: models/region-rtt.json
-  phases:
-    bootstrap_wait: 60s
-    start_window: 3m
-    register_wait: 2m
-    search_stagger: 10ms
-    search_timeout: 5m
-  search:
-    model: continuous
-testbed:
-  backend: cloud
-  cloud:
-    inventory: inventory.json          # written on the coordinator by inventory-gcp.sh
-    home_region: us-east-1
-    grace: 30s
-  gcp:
-    region: us-central1
-    zone: us-central1-a
-    machine_type: n2-standard-8
-    coordinator_type: e2-standard-4
-    vnodes_per_machine: 500
-  wan:
-    enabled: true
-    delay_min_ms: 4
-    delay_max_ms: 45
-    jitter_ms: 3
-    rate_kbps: 1000
-  traces:
-    host_sample_period: 30s
+workload: density
+profile: gcp-density

@@ -23,3 +23,4 @@ scenarios/models/*.json.gz
 figs/
 scratch-*
 /legacy/node-legacy
+scenarios/.composed*

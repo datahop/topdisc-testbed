@@ -1,0 +1,3 @@
+# local backend, 200 nodes on one machine: backend profile of the local-200 matrix scenarios, written by tools/scenario_matrix.py.
+testbed:
+  backend: local

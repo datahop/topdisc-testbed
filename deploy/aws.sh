@@ -1,11 +1,11 @@
 #!/bin/sh
 # AWS driver: build the binaries, provision, push, run, collect, tear down.
-#   deploy/aws.sh up <scenario> [tf args]  terraform apply sized from the scenario + build + push to S3 (e.g. -var spot=true)
+#   deploy/aws.sh up <spec> [tf args]      terraform apply sized from the scenario + build + push to S3 (e.g. -var spot=true)
 #                                          refuses if the fleet's cost ceiling over MAX_HOURS (6) > MAX_SPEND ($200);
 #                                          the ceiling prices every node on the dearest instance type the
 #                                          autoscaling group may fall back to, plus volumes and a traffic allowance
 #   deploy/aws.sh push                  rebuild and re-push the binaries only
-#   deploy/aws.sh run scenarios/x.yaml  run it on the coordinator, wait, pull the results, then destroy everything
+#   deploy/aws.sh run <spec>            run it on the coordinator, wait, pull the results, then destroy everything
 #                                       up and run destroy on any failure or interrupt too (a failed run is pulled first);
 #                                       only a failed pull keeps the deployment; KEEP=1 keeps it always.
 #                                       Once the fleet is up it is priced as launched: a fleet short or more than
@@ -15,6 +15,8 @@
 #   deploy/aws.sh pull                  fetch the latest run directory into runs/ (the coordinator saves every run to the bucket)
 #   deploy/aws.sh ssh                   shell on the coordinator (SSM)
 #   deploy/aws.sh down                  copy every saved run to runs/archives, then terraform destroy
+# <spec> is a scenario file or --workload W --profile P [--set key=value]... [--name N] (see README.md).
+# DRY_RUN=1 makes up stop after printing the fleet, before any AWS or terraform call.
 set -e
 cd "$(dirname "$0")/.."
 TF="deploy/terraform/aws"
@@ -143,14 +145,20 @@ ssm_run() {
 
 case "$1" in
   up)
-    [ -n "$KEEP" ] || trap 'st=$?; [ $st -eq 0 ] || { echo "up failed; destroying"; "$0" down; "$0" check; }; exit $st' EXIT
-    sc=$2; shift 2
+    shift
     go build -o testbed ./cmd/testbed
+    sc=$(mktemp scenarios/.composed.XXXXXX)
+    n=$(./testbed compose -o "$sc" "$@") || { rm -f "$sc"; exit 1; }
+    shift "$n"
     fleet=$(./testbed fleet "$sc")
+    rm -f "$sc"
     regions=$(echo "$fleet" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["regions"]))')
     home=$(echo "$fleet" | python3 -c 'import json,sys; print(json.load(sys.stdin)["home_region"])')
     pub=$(echo "$fleet" | python3 -c 'import json,sys; print(str(json.load(sys.stdin).get("public_ips", False)).lower())')
     echo "fleet: $regions, home $home, public IPs $pub"
+    [ -z "$DRY_RUN" ] || exit 0
+    # armed after the spec is read: a typo in it must not destroy a live fleet
+    [ -n "$KEEP" ] || trap 'st=$?; [ $st -eq 0 ] || { echo "up failed; destroying"; "$0" down; "$0" check; }; exit $st' EXIT
     # The coordinator holds every trace while it aggregates: 7,500 nodes
     # overflowed 8 GB. Size it by the fleet unless the args say otherwise.
     case "$*" in *coordinator_type=*) ;; *)
@@ -169,14 +177,18 @@ case "$1" in
     # Destroy at the end unless KEEP=1. A run that failed is pulled for its
     # logs and destroyed; only a failed pull keeps the deployment so the
     # results can still be fetched by hand (deploy/aws.sh pull / ssh).
+    shift
+    sc=$(mktemp scenarios/.composed.XXXXXX)
+    go run ./cmd/testbed compose "$@" > "$sc" || { rm -f "$sc"; exit 1; }
     [ -n "$KEEP" ] || trap 'st=$?; if [ $st -eq 0 ] || [ -z "$PULL_FAILED" ]; then "$0" down; "$0" check; else echo "pull failed: deployment kept; fix, then deploy/aws.sh pull && deploy/aws.sh down"; fi' EXIT
-    aws s3 cp "$2" "s3://$(tfout binaries_bucket)/scenario.yaml"
+    aws s3 cp "$sc" "s3://$(tfout binaries_bucket)/scenario.yaml"
     # the scenario's models (topic and churn fits) live next to it
-    aws s3 cp --recursive --only-show-errors "$(dirname "$2")/models" "s3://$(tfout binaries_bucket)/models"
+    aws s3 cp --recursive --only-show-errors "$(dirname "$sc")/models" "s3://$(tfout binaries_bucket)/models"
     ssm_wait
     # Autoscaling groups fill over several minutes: list the fleet until it holds
     # every node of the scenario (25 min at most), so the run does not start short.
-    fleet=$(go run ./cmd/testbed fleet "$2")
+    fleet=$(go run ./cmd/testbed fleet "$sc")
+    rm -f "$sc"
     regions=$(echo "$fleet" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["regions"]))')
     home=$(echo "$fleet" | python3 -c 'import json,sys; print(json.load(sys.stdin)["home_region"])')
     want=$(echo "$regions" | python3 -c 'import json,sys; print(sum(json.load(sys.stdin).values()))')

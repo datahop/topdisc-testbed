@@ -1,19 +1,5 @@
 # AWS driver check: 5 instances in one region, a couple of minutes, a few cents.
 #   deploy/aws.sh up scenarios/aws-smoke.yaml && deploy/aws.sh run scenarios/aws-smoke.yaml
 name: aws-smoke
-scenario:
-  population:
-    nodes: 5
-    topics: 1
-    seed: 1
-  phases:
-    bootstrap_wait: 15s
-    register_stagger: 20ms
-    register_wait: 30s
-    search_stagger: 10ms
-    search_timeout: 30s
-testbed:
-  backend: cloud
-  cloud:
-    inventory: inventory.json
-    home_region: us-east-1
+workload: aws-smoke
+profile: aws
