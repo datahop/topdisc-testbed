@@ -1325,13 +1325,113 @@ def a3_load_bound(run, tol):
               bootnodes=boot)
 
 
+def increase(samples, value):
+    """Rise of a cumulative counter over the samples where value() reads it (None: not measured there).
+    A fall between two readings is a reset: the later value is all rise."""
+    tot, prev = 0, None
+    for smp in samples:
+        v = value(smp)
+        if v is None:
+            continue
+        if prev is not None:
+            tot += v - prev if v >= prev else v
+        prev = v
+    return tot
+
+
+def netns_measured(h):
+    """Whether each sample of host h read every node namespace."""
+    top = max((smp.get("netns_sampled", 0) for smp in h), default=0)
+    return [smp.get("netns") is not None and 0 < smp.get("netns_sampled", 0) == (smp.get("netns_expected") or top) for smp in h]
+
+
+def ena_host(h):
+    """An ENA host read its counters at least once, or still failed to at its last sample. One whose
+    failures stopped without a reading found it has no ENA device."""
+    return any(smp.get("ena_iface") for smp in h) or bool(h[-1].get("ena_error"))
+
+
+ENA_ALLOWANCES = ("pps", "bw_in", "bw_out", "conntrack", "linklocal")
+
+
+def host_drops(run):
+    """Drops by where they happened, over the counters the samples carry; None for runs that carry none
+    beyond the root namespace's UDP errors."""
+    hosts = [h for h in run.host if h]
+    has = {
+        "netns": [any(smp.get("netns") is not None or smp.get("netns_expected") for smp in h) for h in hosts],
+        "ARP": [any(isinstance(smp.get("arp"), dict) for smp in h) for h in hosts],
+        "ENA": [ena_host(h) for h in hosts],
+    }
+    if not any(any(v) for v in has.values()):
+        return None
+    cats, info, gaps = {}, {}, {}
+
+    def covered(h, ok):
+        """Whether the run's whole window was measured on h: the first and last samples read."""
+        return len(h) >= 2 and ok[0] and ok[-1]
+
+    def gap(src, n):
+        if n:
+            gaps[src] = gaps.get(src, 0) + n
+
+    empty = sum(1 for h in run.host if not h)
+    if any(has["netns"]):
+        ns = [(h, netns_measured(h)) for h, x in zip(hosts, has["netns"]) if x]
+        gap("netns", sum(1 for x in has["netns"] if not x) + empty + sum(1 for h, ok in ns if not covered(h, ok)))
+
+        def d(k):
+            return sum(increase([smp for smp, m in zip(h, ok) if m], lambda smp: smp["netns"].get(k, 0)) for h, ok in ns)
+        cats["netem"] = d("qdisc_drops")
+        cats["namespace UDP receive buffer"] = d("ns_udp_rcvbuf_errors")
+        info.update(netns_hosts=len(ns),
+                    # netem's drops count as send errors too; sndbuf beyond them is a full socket buffer
+                    ns_udp_sndbuf_errors=d("ns_udp_sndbuf_errors"), ns_udp_in_errors=d("ns_udp_in_errors"),
+                    # rx_dropped also counts frames no protocol took, so it is reported, not failed on
+                    veth_dropped=d("veth_rx_dropped") + d("veth_tx_dropped"),
+                    max_backlog_bytes=max((smp.get("netns_max_backlog_bytes", 0) for h, ok in ns for smp, m in zip(h, ok) if m), default=0))
+    if any(has["ARP"]):
+        arp = [h for h, x in zip(hosts, has["ARP"]) if x]
+        gap("ARP", sum(1 for x in has["ARP"] if not x) + empty
+            + sum(1 for h in arp if not covered(h, [isinstance(smp.get("arp"), dict) for smp in h])))
+        cats["ARP"] = sum(increase(h, lambda smp, k=k: smp["arp"].get(k, 0) if isinstance(smp.get("arp"), dict) else None)
+                          for h in arp for k in ("unresolved_discards", "table_fulls"))
+    if any(has["ENA"]):
+        ena = [h for h, x in zip(hosts, has["ENA"]) if x]
+        gap("ENA", empty + sum(1 for h in ena if not covered(h, [bool(smp.get("ena_iface")) for smp in h])))
+        per = {a: sum(increase(h, lambda smp, a=a: smp.get(f"ena_{a}_allowance_exceeded", 0) if smp.get("ena_iface") else None) for h in ena)
+               for a in ENA_ALLOWANCES}
+        cats["ENA allowance"] = sum(per.values())
+        info.update(ena_hosts=len(ena), ena_allowance=per)
+    cats["host UDP receive buffer"] = sum(increase(h, lambda smp: smp.get("udp_rcvbuf_errors")) for h in hosts)
+    return cats, info, gaps
+
+
 def h1_no_drops(run, tol):
     if run.host:
-        drops = 0
-        for h in run.host:
-            if h:
-                drops += max(0, h[-1].get("udp_rcvbuf_errors", 0) - h[0].get("udp_rcvbuf_errors", 0))
-        return pf(drops, f"no UDP receive-buffer drops on {len(run.host)} hosts", f"{drops} UDP receive-buffer drops", drops=drops, hosts=len(run.host))
+        hd = host_drops(run)
+        if hd is None:
+            drops = 0
+            for h in run.host:
+                if h:
+                    drops += max(0, h[-1].get("udp_rcvbuf_errors", 0) - h[0].get("udp_rcvbuf_errors", 0))
+            return pf(drops, f"no UDP receive-buffer drops on {len(run.host)} hosts", f"{drops} UDP receive-buffer drops", drops=drops, hosts=len(run.host))
+        cats, info, gaps = hd
+        total = sum(cats.values())
+        per = info.get("ena_allowance", {})
+        part = lambda c, n: f"{c} {n}" + (" (" + ", ".join(f"{a} {x}" for a, x in per.items() if x) + ")" if c == "ENA allowance" and n else "")
+        by = ", ".join(part(c, n) for c, n in cats.items())
+        if "netns_hosts" in info:
+            rate = int(run.params.get("testbed.wan.rate_kbps") or 0)
+            by += f"; veth {info['veth_dropped']}; longest egress queue {info['max_backlog_bytes'] // 1000} kB" + (
+                f" ({info['max_backlog_bytes'] * 8 / (rate * 1000):.1f} s at {rate} kbit/s)" if rate else "")
+        missing = ", ".join(f"{src} on {n} hosts" for src, n in gaps.items())
+        ev = dict(drops=total, hosts=len(run.host), by_category=cats, coverage_gaps=gaps, **info)
+        if total:
+            return verdict("fail", f"{total} packet drops: {by}" + (f"; not measured throughout: {missing}" if gaps else ""), **ev)
+        if gaps:
+            return verdict("needs-data", f"insufficient coverage, not measured throughout: {missing}; no drops where measured: {by}", **ev)
+        return verdict("pass", f"no packet drops on {len(run.host)} hosts: {by}", **ev)
     log = os.path.join(run.rd, "run.log")
     if os.path.exists(log):
         txt = open(log, errors="replace").read()

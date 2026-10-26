@@ -204,20 +204,13 @@ func sum(v []int) int {
 }
 
 // hostSummary prints what the host monitor saw: node CPU and RSS at the busiest
-// sample, and whether any host dropped UDP datagrams, which invalidates a run
-// the way simnet's link drops do.
+// sample, and where hosts dropped packets, which invalidates a run the way
+// simnet's link drops do.
 func hostSummary(hosts [][]host.Sample) {
 	var cpu, rss []int
-	drops, dropHosts, samples := int64(0), 0, 0
+	samples := 0
 	for _, hs := range hosts {
-		if len(hs) == 0 {
-			continue
-		}
 		samples += len(hs)
-		if d := hs[len(hs)-1].UDPRcvbufErrors - hs[0].UDPRcvbufErrors; d > 0 {
-			drops += d
-			dropHosts++
-		}
 		for _, s := range hs {
 			for _, n := range s.Nodes {
 				cpu, rss = append(cpu, int(n.CPUPct)), append(rss, int(n.RSSMB))
@@ -237,9 +230,203 @@ func hostSummary(hosts [][]host.Sample) {
 	}
 	fmt.Printf("hostmetrics: %d samples over %d hosts; node cpu%% p50=%d p95=%d max=%d; rss MB p50=%d p95=%d max=%d; ",
 		samples, len(hosts), pct(cpu, 50), pct(cpu, 95), pct(cpu, 100), pct(rss, 50), pct(rss, 95), pct(rss, 100))
-	if drops > 0 {
-		fmt.Printf("UDP receive-buffer drops: %d on %d hosts (host saturation; treat timings with care)\n", drops, dropHosts)
-	} else {
-		fmt.Println("no UDP receive-buffer drops")
+	fmt.Println(dropLine(hostDrops(hosts)))
+}
+
+// dropCount is one category of host drops.
+type dropCount struct {
+	What  string
+	N     int64
+	Hosts int // with any
+}
+
+// hostDrops applies figures/checks.py's host_drops rules (H1), which
+// figures/testdata/h1-cases.json pins for both: a counter's rise is summed
+// between the samples that measured it, a fall being a reset after which the
+// new value is all rise; a host whose first or last sample did not measure a
+// source, that lacks a source other hosts have, or that sent no samples, is a
+// coverage gap for it. Categories come in a fixed order; gaps by source.
+func hostDrops(hosts [][]host.Sample) (cats []dropCount, gaps map[string]int) {
+	var live [][]host.Sample
+	empty := 0
+	for _, hs := range hosts {
+		if len(hs) == 0 {
+			empty++
+		} else {
+			live = append(live, hs)
+		}
 	}
+	any := func(hs []host.Sample, f func(host.Sample) bool) bool {
+		for _, s := range hs {
+			if f(s) {
+				return true
+			}
+		}
+		return false
+	}
+	measured := func(hs []host.Sample, f func(host.Sample) bool) []bool {
+		ok := make([]bool, len(hs))
+		for i, s := range hs {
+			ok[i] = f(s)
+		}
+		return ok
+	}
+	covered := func(ok []bool) bool { return len(ok) >= 2 && ok[0] && ok[len(ok)-1] }
+	increase := func(hs []host.Sample, ok []bool, v func(host.Sample) int64) int64 {
+		var tot, prev int64
+		seen := false
+		for i, s := range hs {
+			if !ok[i] {
+				continue
+			}
+			x := v(s)
+			if seen {
+				if x >= prev {
+					tot += x - prev
+				} else {
+					tot += x
+				}
+			}
+			prev, seen = x, true
+		}
+		return tot
+	}
+	gaps = map[string]int{}
+	gap := func(src string, n int) {
+		if n > 0 {
+			gaps[src] += n
+		}
+	}
+	hasNetns := func(s host.Sample) bool { return s.Netns != nil || s.NetnsExpected > 0 }
+	hasARP := func(s host.Sample) bool { return s.ARP != nil }
+	enaHost := func(hs []host.Sample) bool {
+		return any(hs, func(s host.Sample) bool { return s.ENAIface != "" }) || hs[len(hs)-1].ENAError != ""
+	}
+	var netnsHosts, arpHosts, enaHosts, noNetns, noARP int
+	for _, hs := range live {
+		if any(hs, hasNetns) {
+			netnsHosts++
+		} else {
+			noNetns++
+		}
+		if any(hs, hasARP) {
+			arpHosts++
+		} else {
+			noARP++
+		}
+		if enaHost(hs) {
+			enaHosts++
+		}
+	}
+	if netnsHosts > 0 {
+		var qdisc, rcvbuf int64
+		gap("netns", noNetns+empty)
+		for _, hs := range live {
+			if !any(hs, hasNetns) {
+				continue
+			}
+			top := 0
+			for _, s := range hs {
+				top = max(top, s.NetnsSampled)
+			}
+			ok := measured(hs, func(s host.Sample) bool {
+				want := s.NetnsExpected
+				if want == 0 {
+					want = top
+				}
+				return s.Netns != nil && s.NetnsSampled > 0 && s.NetnsSampled == want
+			})
+			if !covered(ok) {
+				gap("netns", 1)
+			}
+			qdisc += increase(hs, ok, func(s host.Sample) int64 { return s.Netns.QdiscDrops })
+			rcvbuf += increase(hs, ok, func(s host.Sample) int64 { return s.Netns.UDPRcvbufErrors })
+		}
+		cats = append(cats, dropCount{What: "netem", N: qdisc}, dropCount{What: "namespace UDP receive buffer", N: rcvbuf})
+	}
+	if arpHosts > 0 {
+		var arp int64
+		gap("ARP", noARP+empty)
+		for _, hs := range live {
+			if !any(hs, hasARP) {
+				continue
+			}
+			ok := measured(hs, hasARP)
+			if !covered(ok) {
+				gap("ARP", 1)
+			}
+			arp += increase(hs, ok, func(s host.Sample) int64 { return s.ARP.UnresolvedDiscards })
+			arp += increase(hs, ok, func(s host.Sample) int64 { return s.ARP.TableFulls })
+		}
+		cats = append(cats, dropCount{What: "ARP", N: arp})
+	}
+	if enaHosts > 0 {
+		var ena int64
+		gap("ENA", empty)
+		for _, hs := range live {
+			if !enaHost(hs) {
+				continue
+			}
+			ok := measured(hs, func(s host.Sample) bool { return s.ENAIface != "" })
+			if !covered(ok) {
+				gap("ENA", 1)
+			}
+			for _, v := range []func(host.Sample) int64{
+				func(s host.Sample) int64 { return s.PPSAllowanceExceeded },
+				func(s host.Sample) int64 { return s.BWInAllowanceExceeded },
+				func(s host.Sample) int64 { return s.BWOutAllowanceExceeded },
+				func(s host.Sample) int64 { return s.ConntrackAllowanceExceeded },
+				func(s host.Sample) int64 { return s.LinklocalAllowanceExceeded },
+			} {
+				ena += increase(hs, ok, v)
+			}
+		}
+		cats = append(cats, dropCount{What: "ENA allowance", N: ena})
+	}
+	udp := dropCount{What: "host UDP receive buffer"}
+	for _, hs := range live {
+		if n := increase(hs, measured(hs, func(host.Sample) bool { return true }), func(s host.Sample) int64 { return s.UDPRcvbufErrors }); n > 0 {
+			udp.N += n
+			udp.Hosts++
+		}
+	}
+	return append(cats, udp), gaps
+}
+
+// dropLine is hostSummary's verdict on drops: the root namespace's line for a
+// run without the newer counters, otherwise every category and what went
+// unmeasured.
+func dropLine(cats []dropCount, gaps map[string]int) string {
+	if len(cats) == 1 {
+		if n := cats[0].N; n > 0 {
+			return fmt.Sprintf("UDP receive-buffer drops: %d on %d hosts (host saturation; treat timings with care)", n, cats[0].Hosts)
+		}
+		return "no UDP receive-buffer drops"
+	}
+	var total int64
+	parts := make([]string, len(cats))
+	for i, c := range cats {
+		total += c.N
+		parts[i] = fmt.Sprintf("%s %d", c.What, c.N)
+	}
+	line := "no packet drops: "
+	if total > 0 {
+		line = fmt.Sprintf("%d packet drops (treat timings with care): ", total)
+	}
+	line += strings.Join(parts, ", ")
+	if len(gaps) > 0 {
+		srcs := make([]string, 0, len(gaps))
+		for src := range gaps {
+			srcs = append(srcs, src)
+		}
+		sort.Strings(srcs)
+		for i, src := range srcs {
+			srcs[i] = fmt.Sprintf("%s on %d hosts", src, gaps[src])
+		}
+		line += "; not measured throughout: " + strings.Join(srcs, ", ")
+		if total == 0 {
+			line = "insufficient coverage, " + line
+		}
+	}
+	return line
 }

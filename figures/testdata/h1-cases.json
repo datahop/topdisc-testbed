@@ -1,0 +1,582 @@
+{
+ "_comment": "H1's host drop rules, shared by figures/test_checks.py (host_drops) and pkg/coordinator (hostDrops). Expected values are written by hand.",
+ "cases": [
+  {
+   "name": "every source measured throughout",
+   "hosts": [
+    [
+     {
+      "at_ms": 1800000000000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "ena_iface": "ens5",
+      "ena_pps_allowance_exceeded": 100,
+      "netns": {
+       "qdisc_drops": 0,
+       "ns_udp_rcvbuf_errors": 0
+      },
+      "netns_sampled": 500,
+      "netns_expected": 500,
+      "arp": {
+       "entries": 9,
+       "unresolved_discards": 0,
+       "table_fulls": 0,
+       "forced_gc_runs": 0
+      }
+     },
+     {
+      "at_ms": 1800000030000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 2,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "ena_iface": "ens5",
+      "ena_pps_allowance_exceeded": 111,
+      "netns": {
+       "qdisc_drops": 40,
+       "ns_udp_rcvbuf_errors": 7
+      },
+      "netns_sampled": 500,
+      "netns_expected": 500,
+      "arp": {
+       "entries": 9,
+       "unresolved_discards": 5,
+       "table_fulls": 0,
+       "forced_gc_runs": 0
+      }
+     }
+    ]
+   ],
+   "by_category": {
+    "netem": 40,
+    "namespace UDP receive buffer": 7,
+    "ARP": 5,
+    "ENA allowance": 11,
+    "host UDP receive buffer": 2
+   },
+   "coverage_gaps": {}
+  },
+  {
+   "name": "0, 100, then a sample that read no namespace: the 100 stands",
+   "hosts": [
+    [
+     {
+      "at_ms": 1800000000000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "netns": {
+       "qdisc_drops": 0
+      },
+      "netns_sampled": 500,
+      "netns_expected": 500
+     },
+     {
+      "at_ms": 1800000030000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "netns": {
+       "qdisc_drops": 100
+      },
+      "netns_sampled": 500,
+      "netns_expected": 500
+     },
+     {
+      "at_ms": 1800000060000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "netns_expected": 500
+     }
+    ]
+   ],
+   "by_category": {
+    "netem": 100,
+    "namespace UDP receive buffer": 0,
+    "host UDP receive buffer": 0
+   },
+   "coverage_gaps": {
+    "netns": 1
+   }
+  },
+  {
+   "name": "a sample that read 499 of 500 namespaces is no comparison point",
+   "hosts": [
+    [
+     {
+      "at_ms": 1800000000000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "netns": {
+       "qdisc_drops": 0
+      },
+      "netns_sampled": 500,
+      "netns_expected": 500
+     },
+     {
+      "at_ms": 1800000030000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "netns": {
+       "qdisc_drops": 100
+      },
+      "netns_sampled": 500,
+      "netns_expected": 500
+     },
+     {
+      "at_ms": 1800000060000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "netns": {
+       "qdisc_drops": 60
+      },
+      "netns_sampled": 499,
+      "netns_expected": 500
+     },
+     {
+      "at_ms": 1800000090000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "netns": {
+       "qdisc_drops": 100
+      },
+      "netns_sampled": 500,
+      "netns_expected": 500
+     }
+    ]
+   ],
+   "by_category": {
+    "netem": 100,
+    "namespace UDP receive buffer": 0,
+    "host UDP receive buffer": 0
+   },
+   "coverage_gaps": {}
+  },
+  {
+   "name": "a fall is a reset: 50, 80, 5, 9 rose 30 + 5 + 4",
+   "hosts": [
+    [
+     {
+      "at_ms": 1800000000000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 10,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "netns": {
+       "qdisc_drops": 50
+      },
+      "netns_sampled": 500,
+      "netns_expected": 500
+     },
+     {
+      "at_ms": 1800000030000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 3,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "netns": {
+       "qdisc_drops": 80
+      },
+      "netns_sampled": 500,
+      "netns_expected": 500
+     },
+     {
+      "at_ms": 1800000060000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 3,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "netns": {
+       "qdisc_drops": 5
+      },
+      "netns_sampled": 500,
+      "netns_expected": 500
+     },
+     {
+      "at_ms": 1800000090000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 4,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "netns": {
+       "qdisc_drops": 9
+      },
+      "netns_sampled": 500,
+      "netns_expected": 500
+     }
+    ]
+   ],
+   "by_category": {
+    "netem": 39,
+    "namespace UDP receive buffer": 0,
+    "host UDP receive buffer": 4
+   },
+   "coverage_gaps": {}
+  },
+  {
+   "name": "no namespace read in any sample",
+   "hosts": [
+    [
+     {
+      "at_ms": 1800000000000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "netns_expected": 500
+     },
+     {
+      "at_ms": 1800000030000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "netns_expected": 500
+     },
+     {
+      "at_ms": 1800000060000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "netns_expected": 500
+     }
+    ]
+   ],
+   "by_category": {
+    "netem": 0,
+    "namespace UDP receive buffer": 0,
+    "host UDP receive buffer": 0
+   },
+   "coverage_gaps": {
+    "netns": 1
+   }
+  },
+  {
+   "name": "a host that sent no samples, beside one that did",
+   "hosts": [
+    [
+     {
+      "at_ms": 1800000000000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "netns": {},
+      "netns_sampled": 500,
+      "netns_expected": 500,
+      "arp": {
+       "entries": 9,
+       "unresolved_discards": 0,
+       "table_fulls": 0,
+       "forced_gc_runs": 0
+      }
+     },
+     {
+      "at_ms": 1800000030000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "netns": {},
+      "netns_sampled": 500,
+      "netns_expected": 500,
+      "arp": {
+       "entries": 9,
+       "unresolved_discards": 0,
+       "table_fulls": 0,
+       "forced_gc_runs": 0
+      }
+     },
+     {
+      "at_ms": 1800000060000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "netns": {},
+      "netns_sampled": 500,
+      "netns_expected": 500,
+      "arp": {
+       "entries": 9,
+       "unresolved_discards": 0,
+       "table_fulls": 0,
+       "forced_gc_runs": 0
+      }
+     }
+    ],
+    []
+   ],
+   "by_category": {
+    "netem": 0,
+    "namespace UDP receive buffer": 0,
+    "ARP": 0,
+    "host UDP receive buffer": 0
+   },
+   "coverage_gaps": {
+    "netns": 1,
+    "ARP": 1
+   }
+  },
+  {
+   "name": "ENA read only from the second sample still counts",
+   "hosts": [
+    [
+     {
+      "at_ms": 1800000000000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "ena_error": "no default route"
+     },
+     {
+      "at_ms": 1800000030000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "ena_iface": "ens5",
+      "ena_pps_allowance_exceeded": 10
+     },
+     {
+      "at_ms": 1800000060000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "ena_iface": "ens5",
+      "ena_pps_allowance_exceeded": 20
+     }
+    ]
+   ],
+   "by_category": {
+    "ENA allowance": 10,
+    "host UDP receive buffer": 0
+   },
+   "coverage_gaps": {
+    "ENA": 1
+   }
+  },
+  {
+   "name": "an ENA device without allowance counters: not measured, not zero",
+   "hosts": [
+    [
+     {
+      "at_ms": 1800000000000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "ena_error": "ens5: allowance counters unavailable"
+     },
+     {
+      "at_ms": 1800000030000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "ena_error": "ens5: allowance counters unavailable"
+     },
+     {
+      "at_ms": 1800000060000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "ena_error": "ens5: allowance counters unavailable"
+     }
+    ]
+   ],
+   "by_category": {
+    "ENA allowance": 0,
+    "host UDP receive buffer": 0
+   },
+   "coverage_gaps": {
+    "ENA": 1
+   }
+  },
+  {
+   "name": "failures that stopped without a reading: no ENA device",
+   "hosts": [
+    [
+     {
+      "at_ms": 1800000000000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "ena_error": "no default route",
+      "arp": {
+       "entries": 9,
+       "unresolved_discards": 0,
+       "table_fulls": 0,
+       "forced_gc_runs": 0
+      }
+     },
+     {
+      "at_ms": 1800000030000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "arp": {
+       "entries": 9,
+       "unresolved_discards": 0,
+       "table_fulls": 0,
+       "forced_gc_runs": 0
+      }
+     }
+    ]
+   ],
+   "by_category": {
+    "ARP": 0,
+    "host UDP receive buffer": 0
+   },
+   "coverage_gaps": {}
+  },
+  {
+   "name": "ARP counts on hosts without namespace counters, and a host without ARP is a gap",
+   "hosts": [
+    [
+     {
+      "at_ms": 1800000000000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "arp": {
+       "entries": 9,
+       "unresolved_discards": 0,
+       "table_fulls": 0,
+       "forced_gc_runs": 0
+      }
+     },
+     {
+      "at_ms": 1800000030000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "arp": {
+       "entries": 9,
+       "unresolved_discards": 100,
+       "table_fulls": 0,
+       "forced_gc_runs": 0
+      }
+     }
+    ],
+    [
+     {
+      "at_ms": 1800000000000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": []
+     },
+     {
+      "at_ms": 1800000030000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": []
+     }
+    ]
+   ],
+   "by_category": {
+    "ARP": 100,
+    "host UDP receive buffer": 0
+   },
+   "coverage_gaps": {
+    "ARP": 1
+   }
+  },
+  {
+   "name": "a WAN monitor that could not enter its two namespaces: expected, never sampled",
+   "hosts": [
+    [
+     {
+      "at_ms": 1800000000000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "netns_expected": 2
+     },
+     {
+      "at_ms": 1800000030000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "netns_expected": 2
+     },
+     {
+      "at_ms": 1800000060000,
+      "load1": 1.0,
+      "mem_avail_mb": 900,
+      "udp_rcvbuf_errors": 0,
+      "udp_in_errors": 0,
+      "nodes": [],
+      "netns_expected": 2
+     }
+    ]
+   ],
+   "by_category": {
+    "netem": 0,
+    "namespace UDP receive buffer": 0,
+    "host UDP receive buffer": 0
+   },
+   "coverage_gaps": {
+    "netns": 1
+   }
+  }
+ ]
+}
