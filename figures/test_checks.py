@@ -583,6 +583,30 @@ class TestCheckLogic(unittest.TestCase):
         self.assertEqual(bootnodes.from_assignments(asg), {3})
         self.assertEqual(bootnodes.from_assignments({}), {0})
 
+    def test_l3_plain_searchers_skipped(self):
+        """A plain searcher's stale result is a routing-table entry, not an ad: L3 scores TopDisc searchers only."""
+        for i in range(5):
+            t = read(os.path.join(self.rd, f"traces/node{i}.json"))
+            for lk in t["lookups"]:
+                lk["found"] = [r for r in lk["found"] if r["id"] != nid(4)]
+            write(self.rd, f"traces/node{i}.json", t)
+        t = read(os.path.join(self.rd, "traces/node5.json"))
+        t["lookups"][0]["found"] = [{"id": nid(4), "at_ms": 500_000}, {"id": nid(1), "at_ms": 600_000}]
+        write(self.rd, "traces/node5.json", t)
+        tol = checks.argparser().parse_args([self.rd])
+        v = checks.l3_no_expired(checks.Run(self.rd), tol)
+        self.assertEqual(v["status"], "pass")
+        self.assertEqual(v["evidence"]["plain_results_skipped"], 2)
+        self.assertIn("; 2 results of plain searchers skipped", v["summary"])
+        run = checks.Run(self.rd)
+        run.legacy[5] = False  # the same results from a TopDisc searcher are stale
+        v = checks.l3_no_expired(run, tol)
+        self.assertEqual(v["status"], "fail")
+        self.assertEqual([o[:2] for o in v["evidence"]["offenders"]], [(5, 4), (5, 1)])
+        self.assertNotIn("plain_results_skipped", v["evidence"])
+        run.legacy = {i: True for i in run.legacy}
+        self.assertEqual(checks.l3_no_expired(run, tol)["summary"], "no TopDisc searchers in the run")
+
     def test_plain_run(self):
         c = self.plain()
         self.assertEqual((c["L3"]["status"], c["L3"]["summary"]), ("not-exercised", "every node runs plain discv5"))
