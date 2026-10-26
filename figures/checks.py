@@ -1117,9 +1117,15 @@ def l3_no_expired(run, tol):
         if not dead:
             return verdict("needs-data", "no dead-result snapshot in metrics.json")
         return verdict("needs-data", "simnet dead-result series is aggregated; per-result age not kept")
-    stale, n, cleared, unknown = [], 0, Counter(), 0
+    if run.legacy and all(run.legacy.values()):
+        return verdict("not-exercised", "no TopDisc searchers in the run")
+    stale, n, cleared, unknown, plain = [], 0, Counter(), 0, 0
     limit = run.ad_lifetime + tol.snapshot_ms + tol.skew_ms
     for i, _, rid, at in lookup_results(run):
+        # a plain searcher's results are routing-table entries, which carry no ad lifetime
+        if run.legacy.get(i):
+            plain += 1
+            continue
         n += 1
         j = run.id_idx.get(rid)
         if run.untraced(j):
@@ -1130,10 +1136,10 @@ def l3_no_expired(run, tol):
             stale.append((i, j, d // 1000))
         else:
             cleared[run.cleared(j, at, limit)] += 1
-    note = unknown_note(unknown, "results") + trace_note(cleared)
+    note = unknown_note(unknown, "results") + trace_note(cleared) + (f"; {plain} results of plain searchers skipped" if plain else "")
     return pf(stale, f"no result for a node down longer than a lifetime ({n} results)" + note, f"{len(stale)} results of long-expired nodes" + note,
               offenders=stale[:10], results=n, unknown_ids=unknown, schedule_down_trace_up=cleared["up"], schedule_down_trace_shorter=cleared["shorter"],
-              churn_base=run.churn_base_note)
+              churn_base=run.churn_base_note, **({"plain_results_skipped": plain} if plain else {}))
 
 
 def l4_termination(run, tol):
