@@ -39,7 +39,7 @@ The large one; hundreds of MB at 10k nodes.
 
 | Field | Contents | Figures |
 |---|---|---|
-| `perTopic[]` | per topic: `topic`, `numSearchers`, `target`, `fullRecall`, `meanRecall`, `meanUniqueCount`, `meanFoundDup`, `hitTimeout` | 8 |
+| `perTopic[]` | per topic: `topic`, `numSearchers`, `target` (members − 1, whatever the searcher types), `registrants` (TopDisc members), `fullRecall`, `meanRecall`, `meanUniqueCount`, `meanFoundDup`, `hitTimeout` | 8 |
 | `results[]` | one record per searcher (below) | 2, 3, 4, 14, 15 |
 | `registrationCoverage.byTopic{}` | `byRegistrant` (registrars holding each ad) and `byHost` (ads held per host) | 10, 11, 12, 14 |
 | `registrationTimingNs{}` | topic hex → registrant → ns to first *remote* admission | 9, 13, 15 |
@@ -52,7 +52,8 @@ Per-searcher record in `results[]`:
 
 | Field | Meaning |
 |---|---|
-| `nodeIdx`, `nodeId`, `topic`, `target` | who searched, for what, and how many registrants existed |
+| `nodeIdx`, `nodeId`, `topic`, `target` | who searched, for what, and how many providers existed: TopDisc members for a TopDisc searcher, every member for a plain one |
+| `legacy` | the searcher is plain discv5 (absent for TopDisc searchers and in older metrics) |
 | `uniqueRegistrant`, `foundRegistrantIds[]` | distinct registrants found (the set) |
 | `uniqueFoundAtMs[]`, `uniqueFoundIds[]` | index-aligned: when each distinct registrant was first seen, and which |
 | `searchStartMs` | this searcher's offset from the run's common epoch (registration start) |
@@ -239,6 +240,13 @@ From fork tag `v1.17.2-testbed.18` (plain build: `v1.17.2-discv5-testbed.1`) on,
 its last snapshot, as many ghosts as its assignment carries; a trace without the
 ghost fields fails) and G2 (some timeouts at ghosts, never more own-ghost
 than ghost timeouts); both are not-exercised without ghosts.
+
+`first_capable_ms` (node trace, `nodes.json`, both binaries): ms from the
+session start until the node's discv5 table first held a record with `ng` that
+is neither a ghost nor one of the node's bootstrap records, checked every
+second; earliest over sessions, -1 if never. Earlier testbed versions set it on
+the first RLPx peer with `ng`, so lookup-only runs and the plain fork build
+report -1 there.
 
 ## Sessions under churn
 

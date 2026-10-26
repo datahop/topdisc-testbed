@@ -104,6 +104,7 @@ type node struct {
 	id         enode.ID
 	svc        svcEntry
 	bootnodes  []*enode.Node
+	bootIDs    map[enode.ID]struct{}
 	ghosts     []*enode.Node // pinned in every session's table (fork build)
 	ghostIDs   map[enode.ID]struct{}
 	lookupOnly bool
@@ -160,7 +161,7 @@ func newSession(started time.Time) *session {
 }
 
 func newNode(asg assignment, key *ecdsa.PrivateKey) *node {
-	return &node{asg: asg, key: key, id: enode.PubkeyToIDV4(&key.PublicKey), svc: svcOf(asg.Topics[0]), firstCapableMs: -1, ghostIDs: map[enode.ID]struct{}{},
+	return &node{asg: asg, key: key, id: enode.PubkeyToIDV4(&key.PublicKey), svc: svcOf(asg.Topics[0]), firstCapableMs: -1, bootIDs: map[enode.ID]struct{}{}, ghostIDs: map[enode.ID]struct{}{},
 		lookupOnly: asg.Search.Model == "continuous" || asg.Search.Model == "scheduled"}
 }
 
@@ -251,8 +252,9 @@ func (n *node) up() error {
 	n.mu.Lock()
 	n.cur = s
 	n.mu.Unlock()
-	s.wg.Add(2)
+	s.wg.Add(3)
 	go n.watchPeers(s, events)
+	go n.watchCapable(s)
 	go n.search(s)
 	if a.SampleMs > 0 && forkBuild {
 		s.wg.Add(1)
@@ -409,14 +411,10 @@ func (n *node) watchPeers(s *session, events chan *p2p.PeerEvent) {
 			s.lostAt = append(s.lostAt, time.Now())
 			n.mu.Unlock()
 		case p2p.PeerEventTypeAdd:
-			outbound, capable := 0, false
+			outbound := 0
 			for _, p := range s.srv.Peers() {
 				if !p.Inbound() {
 					outbound++
-				}
-				var c capableEntry
-				if p.ID() == ev.Peer && p.Node().Load(&c) == nil {
-					capable = true
 				}
 			}
 			n.mu.Lock()
@@ -427,14 +425,44 @@ func (n *node) watchPeers(s *session, events chan *p2p.PeerEvent) {
 			if !n.lookupOnly && s.connFullMs < 0 && !s.connStart.IsZero() && outbound >= s.srv.MaxDialedConns() {
 				s.connFullMs = time.Since(s.connStart).Milliseconds()
 			}
-			// A fork build never sets firstCapableMs: every peer in its
-			// runs is plain.
-			if s.firstCapableMs < 0 && !forkBuild && capable {
-				s.firstCapableMs = time.Since(s.started).Milliseconds()
-			}
 			n.mu.Unlock()
 		}
 	}
+}
+
+// watchCapable records when the session's table first holds a
+// TopDisc-capable record that is neither a ghost nor a bootnode.
+func (n *node) watchCapable(s *session) {
+	defer s.wg.Done()
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-t.C:
+		}
+		if n.hasCapable(s.srv.DiscoveryV5().AllNodes()) {
+			n.mu.Lock()
+			s.firstCapableMs = time.Since(s.started).Milliseconds()
+			n.mu.Unlock()
+			return
+		}
+	}
+}
+
+// hasCapable skips every ghost record, also those other nodes pinned and
+// passed on: ghosts carry "ng".
+func (n *node) hasCapable(nodes []*enode.Node) bool {
+	for _, nd := range nodes {
+		_, boot := n.bootIDs[nd.ID()]
+		var c capableEntry
+		var g ghostEntry
+		if !boot && nd.Load(&g) != nil && nd.Load(&c) == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // snapshotLive reads what only a running server can tell: its peers and table.

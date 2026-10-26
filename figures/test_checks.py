@@ -537,6 +537,22 @@ class TestCheckLogic(unittest.TestCase):
         self.assertEqual(v["evidence"]["missing"], [3])
         self.assertEqual(v["evidence"]["offenders"], [(4, 1, 2, 2), (5, 1, 1, 3)])
 
+    def test_a3_topdisc_registrars(self):
+        """A3 takes the load distribution over the TopDisc nodes only and tells absent traffic from concentrated traffic."""
+        run = checks.Run(self.rd)
+        tol = checks.argparser().parse_args([self.rd])
+
+        def a3(rx, legacy=()):
+            run.oh = [{"idx": i, "byType": {"TOPICQUERY/v5": {"rxMsgs": v}} if i not in legacy else {}} for i, v in enumerate(rx)]
+            run.legacy = {i: i in legacy for i in range(len(rx))}
+            return checks.a3_load_bound(run, tol)
+
+        v = a3([40, 70, 0, 0, 0, 0], legacy=(2, 3, 4, 5))  # low share: the plain majority does not set the median
+        self.assertEqual((v["status"], v["evidence"]["median"], v["evidence"]["max"]), ("pass", 70, 70))
+        v = a3([0, 0, 0, 90])
+        self.assertEqual((v["status"], v["evidence"]["busy"]), ("fail", 1))
+        self.assertEqual(a3([0, 0, 0], legacy=(2,))["status"], "not-exercised")
+
     def test_plain_run(self):
         c = self.plain()
         self.assertEqual((c["L3"]["status"], c["L3"]["summary"]), ("not-exercised", "every node runs plain discv5"))

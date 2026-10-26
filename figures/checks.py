@@ -247,8 +247,10 @@ def slim_node(i, t, lim):
     s["stop"] = derive(lambda: smp[-1]["at_ms"] if smp else None)
     s["up"] = derive(lambda: up_intervals(t, lim))
     s["first_record"] = derive(lambda: first_record(t))
-    s["cache"] = derive(lambda: (max(x["cache_held"] for x in smp), smp[0]["cache_cap"]) if smp else None)
-    s["cache_peak"] = derive(lambda: max((x["cache_held"] for x in t.get("samples", [])), default=None))
+    # the fork's plain build samples counters only, no cache
+    reg = smp if not t.get("legacy") else None
+    s["cache"] = derive(lambda: (max(x["cache_held"] for x in reg), reg[0]["cache_cap"]) if reg else None)
+    s["cache_peak"] = derive(lambda: max((x["cache_held"] for x in reg or []), default=None))
     s["sampled_buckets"] = derive(lambda: bool((t.get("samples") or [{}])[0].get("reg_buckets")))
     if t.get("reg_buckets_final"):
         s["idle"] = derive(lambda: idle_buckets(i, t, lim))
@@ -1264,8 +1266,8 @@ def accounting(run, tol, types, what):
     loss = unexplained / all_tx if all_tx else 0
     limit = tol.loss_churn if run.has_churn() else tol.loss
     what += " (churn: requests to departed nodes are lost by design)" if run.has_churn() else ""
-    if any(run.legacy.values()):
-        # legacy nodes count no traffic, so only the topic requests balance and only up to the session setups
+    if any(not n.get("byType") for n in run.oh if run.legacy.get(n["idx"])):
+        # stock legacy nodes count no traffic, so only the topic requests balance and only up to the session setups
         return pf(tx < rx or tx - rx > setups + ghosts_t, f"{what}: {tx} sent, {rx} received, difference within the {setups} session setups{by} (legacy nodes count no traffic)",
                   f"{what}: {tx} sent, {rx} received, difference not within the {setups} session setups{by}", sent=tx, received=rx, session_setups=setups, **gev)
     return pf(abs(loss) > limit or (tx - rx > setups + ghosts_t and not run.has_churn()),
@@ -1295,10 +1297,15 @@ def a2_every_query_answered(run, tol):
 def a3_load_bound(run, tol):
     if not run.oh:
         return verdict("needs-data", "no oh.json")
-    q = sorted(n["byType"].get("TOPICQUERY/v5", {}).get("rxMsgs", 0) for n in run.oh)
-    if not q or q[len(q) // 2] == 0:
+    # registrars are the TopDisc nodes: in a mixed run the plain ones would pull the median to 0
+    q = sorted(n["byType"].get("TOPICQUERY/v5", {}).get("rxMsgs", 0) for n in run.oh if not run.legacy.get(n["idx"]))
+    if not q or q[-1] == 0:
         return verdict("not-exercised", "no TOPICQUERY traffic")
     med, mx = q[len(q) // 2], q[-1]
+    if med == 0:
+        busy = sum(1 for v in q if v)
+        return verdict("fail", f"TOPICQUERY concentrated: {busy} of {len(q)} registrars received any, the busiest {mx}, the median 0",
+                       max=mx, median=0, busy=busy, registrars=len(q), limit=tol.load_multiple)
     return pf(mx > tol.load_multiple * med, f"busiest registrar at {mx / med:.1f}× the median ({mx} vs {med} queries)",
               f"busiest registrar at {mx / med:.1f}× the median, above {tol.load_multiple}×", max=mx, median=med, limit=tol.load_multiple)
 

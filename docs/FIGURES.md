@@ -222,21 +222,21 @@ from the sessions file at the result's timestamp.
 
 | Plan plot | simnet | real |
 |---|---|---|
-| Startup to first TopDisc-capable peer via legacy Discv5, vs deployment % | ✗ | ◐ `first_capable_ms` recorded |
-| Start of registration to first successful registration, vs deployment % | ✗ | ✗ |
-| Fraction of available advertisers discovered, vs deployment % | ✗ | ✗ |
-| Lookup latency, vs deployment % | ✗ | ✗ |
-| Registrars contacted per registration and per lookup, vs deployment % | ✗ | ✗ |
-| Messages/bytes per lookup, vs deployment % | ✗ | ✗ |
-| Per-node load, vs deployment % | ✗ | ✗ |
-| Separate results for small, medium and popular services | ✗ | ✗ |
+| Startup to first TopDisc-capable peer via legacy Discv5, vs deployment % | ✗ | ✓ `first_capable_ms`, `deploy_sweep.py` |
+| Start of registration to first successful registration, vs deployment % | ✗ | ✓ `deploy_sweep.py` |
+| Fraction of available advertisers discovered, vs deployment % | ✗ | ✓ `deploy_sweep.py`, per node type |
+| Lookup latency, vs deployment % | ✗ | ✓ `deploy_sweep.py` (time to first, 50 %, 90 %) |
+| Registrars contacted per registration and per lookup, vs deployment % | ✗ | ✓ `deploy_sweep.py` |
+| Messages/bytes per lookup, vs deployment % | ✗ | ◐ `deploy_sweep.py`: bytes per node over the run, by type |
+| Per-node load, vs deployment % | ✗ | ✓ `deploy_sweep.py` (REGTOPIC + TOPICQUERY per registrar) |
+| Separate results for small, medium and popular services | ✗ | ✓ `deploy_sweep.py --by-class` |
 
 #### Differences and gaps
 
-- No sweep script over `population.legacy_frac`; every per-run figure exists
-  for a single deployment level.
-- Registrars contacted per registration: nodes export distinct nodes per
-  registration operation (`ops`), but no figure uses it.
+- `deploy_sweep.py --out DIR [--by-class] SHARE=RUN_DIR ...` puts runs at
+  several TopDisc shares on one axis, every metric split by node type; the
+  per-run figures stay single-level.
+- Bytes are per node over the whole run, not per lookup (see §3).
 - Popularity bins: #113.
 
 ## §5 Standalone registrar overhead, §6 Admission-control security

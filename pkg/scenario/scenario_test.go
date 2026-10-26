@@ -58,8 +58,8 @@ func TestLoadLegacyBuild(t *testing.T) {
 	}{
 		{"scenario:\n  population:\n" + all + "    legacy_build: fork\n", ""},
 		{"scenario:\n  population:\n    legacy_frac: 0.5\n    legacy_build: stock\n", ""},
-		{"scenario:\n  population:\n    legacy_frac: 1\n    legacy_build: fork\n", "every node legacy"},
-		{"scenario:\n  population:\n    legacy_frac: 0.5\n    legacy_bootnode: true\n    legacy_build: fork\n", "every node legacy"},
+		{"scenario:\n  population:\n    legacy_frac: 1\n    legacy_build: fork\n", ""},
+		{"scenario:\n  population:\n    legacy_frac: 0.5\n    legacy_bootnode: true\n    legacy_build: fork\n", ""},
 		{"scenario:\n  population:\n" + all + "    legacy_build: upstream\n", "want stock or fork"},
 	} {
 		err := loadYAML(t, tc.body)
@@ -91,6 +91,7 @@ func TestLoadGhosts(t *testing.T) {
 		{"scenario:\n  ghosts:\n    share: 0.11\n", "real backend"},
 		{"scenario:\n  population:\n    legacy_frac: 0.5\n  ghosts:\n    share: 0.11\n" + local, "legacy_build fork"},
 		{"scenario:\n  population:\n    legacy_frac: 1\n    legacy_bootnode: true\n    legacy_build: fork\n  ghosts:\n    share: 0.11\n" + local, ""},
+		{"scenario:\n  population:\n    legacy_frac: 0.5\n    legacy_build: fork\n  ghosts:\n    share: 0.11\n" + local, ""},
 		{"scenario:\n  ghosts:\n    share: 0.11\n" + local + "  local:\n    base_port: 20500\n", "overlap the ghost ports"},
 		{"scenario:\n  ghosts:\n    share: 0.11\n" + local + "  local:\n    base_port: 15000\n", "overlap the ghost ports"},
 	} {

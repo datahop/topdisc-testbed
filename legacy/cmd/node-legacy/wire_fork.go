@@ -9,8 +9,8 @@ import (
 
 // forkBuild is true when built against the fork's discv5 instrumentation branch
 // (go.fork.mod): upstream master's discv5 plus the per-message counters and
-// pinned entries cmd/node also has; the ENR carries no "ng". Use it only where
-// every node is plain.
+// pinned entries cmd/node also has; the ENR carries no "ng". In a mixed run it
+// is the plain half next to TopDisc nodes.
 const forkBuild = true
 
 type wireCounter = discover.WireCounter

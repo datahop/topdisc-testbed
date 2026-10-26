@@ -13,7 +13,9 @@ import (
 	"github.com/datahop/topdisc-testbed/pkg/workload"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/p2p/discover"
+	"github.com/ethereum/go-ethereum/p2p/discover/topicindex"
 	"github.com/ethereum/go-ethereum/p2p/enode"
+	"github.com/ethereum/go-ethereum/p2p/enr"
 )
 
 var (
@@ -192,4 +194,39 @@ func TestTraceGhosts(t *testing.T) {
 	check("second session up")
 	n.fold(s2, time.UnixMilli(4000))
 	check("both sessions closed")
+}
+
+func capableNode(t *testing.T, entries ...enr.Entry) *enode.Node {
+	key, _ := crypto.GenerateKey()
+	var r enr.Record
+	r.Set(topicindex.TopicDiscoveryVersion)
+	for _, e := range entries {
+		r.Set(e)
+	}
+	if err := enode.SignV4(&r, key); err != nil {
+		t.Fatal(err)
+	}
+	nd, err := enode.New(enode.ValidSchemes, &r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return nd
+}
+
+// Ghosts and bootnodes carry "ng" but do not count as a first capable peer,
+// also a ghost another node pinned and passed on.
+func TestHasCapable(t *testing.T) {
+	key, _ := crypto.GenerateKey()
+	n := newNode(assign.Assignment{}, key)
+	own, foreign, boot, peer := capableNode(t, discover.TestbedGhostMark), capableNode(t, discover.TestbedGhostMark), capableNode(t), capableNode(t)
+	n.ghostIDs[own.ID()] = struct{}{}
+	n.bootIDs[boot.ID()] = struct{}{}
+	for _, nd := range []*enode.Node{own, foreign, boot} {
+		if n.hasCapable([]*enode.Node{nd}) {
+			t.Fatalf("%v counted as capable", nd.ID())
+		}
+	}
+	if !n.hasCapable([]*enode.Node{own, foreign, boot, peer}) {
+		t.Fatal("capable peer not counted")
+	}
 }

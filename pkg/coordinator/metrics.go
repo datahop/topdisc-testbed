@@ -141,6 +141,7 @@ type rawSample struct {
 type searchResult struct {
 	NodeIdx             int      `json:"nodeIdx"`
 	NodeID              string   `json:"nodeId"`
+	Legacy              bool     `json:"legacy,omitempty"` // plain discv5 searcher, scored against providers
 	Topic               int      `json:"topic"`
 	Target              int      `json:"target"`
 	TargetOnline        int      `json:"targetOnline"`                // of Target, up at the end of the search
@@ -178,7 +179,8 @@ type searchResult struct {
 type topicReport struct {
 	Topic           int     `json:"topic"`
 	NumSearchers    int     `json:"numSearchers"`
-	Target          int     `json:"target"`
+	Target          int     `json:"target"`      // topic members - 1, whatever the searcher types
+	Registrants     int     `json:"registrants"` // TopDisc members
 	FullRecall      int     `json:"fullRecall"`
 	MeanRecall      float64 `json:"meanRecall"`
 	MeanFoundDup    float64 `json:"meanFoundDup"`
@@ -452,7 +454,7 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 			if prov[t.ID] {
 				target--
 			}
-			r := searchResult{NodeIdx: a.Idx, NodeID: short(t.ID), Topic: topicIds[th], Target: target,
+			r := searchResult{NodeIdx: a.Idx, NodeID: short(t.ID), Legacy: t.Legacy, Topic: topicIds[th], Target: target,
 				SearchStartMs: t.SearchAtMs - epochMs, TimeToFirstNs: -1,
 				NewFoundAtMs: []int64{}, FoundRegistrantIDs: []string{}, UniqueFoundAtMs: []int64{}, UniqueFoundIDs: []string{},
 				LookupLatencyMs: []int64{}, LookupResults: []int{}}
@@ -676,7 +678,7 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 	findCounts := []findCountStats{}
 	for _, k := range topics {
 		rs := byTopic[k]
-		rep := topicReport{Topic: k, NumSearchers: len(rs), Target: rs[0].Target}
+		rep := topicReport{Topic: k, NumSearchers: len(rs), Target: len(providers[hexOf[k]]) - 1, Registrants: len(registrants[hexOf[k]])}
 		var sumRecall, sumUnique float64
 		n := 0
 		for _, r := range rs {

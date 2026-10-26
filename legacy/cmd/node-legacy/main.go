@@ -106,6 +106,12 @@ func (c *capableEntry) DecodeRLP(s *rlp.Stream) error {
 	return err
 }
 
+// ghostEntry reads the "ghost" ENR key the testbed sets on every ghost record
+// (the fork's discover.TestbedGhost, which the stock build lacks).
+type ghostEntry uint
+
+func (ghostEntry) ENRKey() string { return "ghost" }
+
 // found is a provider first seen at AtMs after the search started.
 type found struct {
 	ID   string `json:"id"`
@@ -148,6 +154,7 @@ func main() {
 				os.Exit(2)
 			}
 			n.bootnodes = append(n.bootnodes, bn)
+			n.bootIDs[bn.ID()] = struct{}{}
 		}
 	}
 	if n.ghosts, err = parseGhosts(asg.Ghosts); err != nil {
