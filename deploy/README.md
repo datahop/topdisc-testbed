@@ -156,7 +156,9 @@ DRY_RUN=1 deploy/aws-packed.sh up --workload smoke --profile aws-packed-smoke -v
 Spending: `up` prices the fleet (on-demand, us-east-1) and refuses one over
 `MAX_SPEND` ($150) for `MAX_HOURS` (6), checks the region's on-demand vCPU
 quota (L-1216C47A, 5,100 in us-east-1 on 2026-10-21) and the route-table
-route quota (L-93826ACB, 500) against the fleet, and the coordinator
+route quota (L-93826ACB, 500) against the fleet, refuses when the region
+has no free VPC (L-F678F1CE, default 5, the default VPC counts) or internet
+gateway (L-A4707A72, default 5) for the deployment, and the coordinator
 terminates the hosts and halts `max_hours` after boot. `down` copies the
 bucket's run archives to `runs/archives` before destroying. The `aws-25k`
 scenarios run on 50 hosts and an `r6a.8xlarge` coordinator (64 GB ran out

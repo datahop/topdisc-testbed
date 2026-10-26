@@ -3,7 +3,7 @@
 # testbed.aws_packed.vnodes_per_machine nodes, each node in its own netns), one zone, no peering.
 #   deploy/aws-packed.sh up <spec> [tf args]      terraform apply sized from the scenario + build + push to the bucket;
 #                                                 refuses if the fleet over MAX_HOURS (6) costs more than MAX_SPEND ($150)
-#                                                 or does not fit the region's on-demand vCPU and route quotas
+#                                                 or does not fit the region's on-demand vCPU, route, VPC and IGW quotas
 #   deploy/aws-packed.sh push                  rebuild and re-push the binaries only
 #   deploy/aws-packed.sh run <spec>            run it on the coordinator, wait, pull the results, then destroy everything
 #                                              (up and run destroy on failure too; only a failed pull keeps the deployment; KEEP=1 keeps it always)
@@ -73,7 +73,9 @@ PY
 }
 # The region's on-demand vCPU quota (standard families) and the route table's
 # route quota must hold the fleet, on top of what already runs there; a fleet
-# over quota comes up short and the inventory then refuses it. An un-ID'd
+# over quota comes up short and the inventory then refuses it. Each deployment
+# also needs a free VPC and internet gateway in the region (the default VPC
+# counts), or apply fails at CreateVpc halfway through. An un-ID'd
 # deployment's coordinator lists and terminates every topdisc host in the
 # region, so ID'd and un-ID'd fleets never exist side by side; that check runs
 # for a live deployment too, which skips the quota ($2 set).
@@ -111,6 +113,10 @@ print("quota vCPUs: need %d, %d free in %s" % (need, have, r))
 routes = quota("L-93826ACB", "vpc")
 if routes < hosts + 2: sys.exit("refusing: %d hosts need %d routes per route table, quota is %d (L-93826ACB)" % (hosts, hosts + 2, routes))
 print("quota routes: need %d, %d allowed" % (hosts + 2, routes))
+for what, code, call, key in (("VPC", "L-F678F1CE", "describe-vpcs", "Vpcs"), ("IGW", "L-A4707A72", "describe-internet-gateways", "InternetGateways")):
+    used, q = len(aws("ec2", call)[key]), quota(code, "vpc")
+    if used >= q: sys.exit("refusing: need 1 %s, %d of %d in use in %s (quota %s); wait for a deployment to finish or request an increase" % (what, used, q, r, code))
+    print("quota %ss: %d of %d in use" % (what, used, q))
 PY
 }
 # Runs a command on the coordinator through SSM and prints its output. The
