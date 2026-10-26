@@ -373,6 +373,125 @@ class TestCheckLogic(unittest.TestCase):
                 t["legacy"] = True
                 write(self.rd, f"{d}/{f}", t)
 
+    def h1(self, *hosts, rate=None):
+        """H1 over the given host sample lists, replacing the fixture's hostmetrics."""
+        d = os.path.join(self.rd, "hostmetrics")
+        for f in os.listdir(d):
+            os.remove(os.path.join(d, f))
+        for i, h in enumerate(hosts):
+            write(self.rd, f"hostmetrics/host{i}.json", h)
+        if rate:
+            log = os.path.join(self.rd, "run.log")
+            txt = open(log).read().replace("PARAMS: ", f"PARAMS: testbed.wan.rate_kbps={rate} ")
+            with open(log, "w") as f:
+                f.write(txt)
+        return checks.h1_no_drops(checks.Run(self.rd), checks.argparser().parse_args([self.rd]))
+
+    @staticmethod
+    def smp(k, netns=None, sampled=500, arp=None, **kw):
+        s = {"at_ms": T0 + k, "udp_rcvbuf_errors": 0, "nodes": [], **kw}
+        if netns is not None:
+            s.update(netns=netns, netns_sampled=sampled, netns_expected=500)
+        if arp is not None:
+            s["arp"] = {"entries": 9, "unresolved_discards": arp, "table_fulls": 0, "forced_gc_runs": 0}
+        return s
+
+    def test_h1_shared_cases(self):
+        """The host drop rules pkg/coordinator's console summary applies too (figures/testdata/h1-cases.json)."""
+        for case in read(os.path.join(GOLDEN, "h1-cases.json"))["cases"]:
+            with self.subTest(case["name"]):
+                d = os.path.join(self.rd, "hostmetrics")
+                for f in os.listdir(d):
+                    os.remove(os.path.join(d, f))
+                for i, h in enumerate(case["hosts"]):
+                    write(self.rd, f"hostmetrics/host{i}.json", h)
+                cats, _, gaps = checks.host_drops(checks.Run(self.rd))
+                self.assertEqual((cats, gaps), (case["by_category"], case["coverage_gaps"]))
+                self.assertEqual(list(cats), list(case["by_category"]))  # and in the same order
+
+    def test_h1_netns_categories(self):
+        """Namespace, ARP and ENA counters split H1's drops by where they happened."""
+        host = [self.smp(k, netns={"qdisc_drops": 40 * k, "ns_udp_rcvbuf_errors": 7 * k, "ns_udp_sndbuf_errors": 41 * k, "veth_rx_dropped": 3 * k},
+                         arp=5 * k, netns_max_backlog_bytes=250_000 * k, udp_rcvbuf_errors=2 * k,
+                         ena_iface="ens5", ena_pps_allowance_exceeded=100 + 11 * k, ena_conntrack_allowance_exceeded=1) for k in range(2)]
+        v = self.h1(host, rate=1000)
+        self.assertEqual(v["status"], "fail")
+        self.assertEqual(v["evidence"]["by_category"],
+                         {"netem": 40, "namespace UDP receive buffer": 7, "ARP": 5, "ENA allowance": 11, "host UDP receive buffer": 2})
+        self.assertEqual(v["evidence"]["drops"], 65)
+        self.assertEqual((v["evidence"]["veth_dropped"], v["evidence"]["ns_udp_sndbuf_errors"]), (3, 41))
+        self.assertEqual(v["evidence"]["ena_allowance"], {"pps": 11, "bw_in": 0, "bw_out": 0, "conntrack": 0, "linklocal": 0})
+        self.assertEqual(v["evidence"]["coverage_gaps"], {})
+        self.assertIn("ENA allowance 11 (pps 11), host UDP receive buffer 2", v["summary"])
+        self.assertIn("longest egress queue 250 kB (2.0 s at 1000 kbit/s)", v["summary"])
+
+    def test_h1_clean_run_passes(self):
+        host = [self.smp(k, netns={"qdisc_drops": 3}, arp=1, ena_iface="ens5", ena_pps_allowance_exceeded=8) for k in range(3)]
+        v = self.h1(host, host)
+        self.assertEqual(v["status"], "pass", v["summary"])
+
+    def test_h1_failed_read_is_not_a_reset(self):
+        """Totals 0, 100, then a sample that read no namespace: the 100 stands, and the gap is reported."""
+        host = [self.smp(0, netns={"qdisc_drops": 0}), self.smp(1, netns={"qdisc_drops": 100}),
+                self.smp(2, netns={"qdisc_drops": 0}, sampled=0)]
+        v = self.h1(host)
+        self.assertEqual((v["status"], v["evidence"]["by_category"]["netem"]), ("fail", 100))
+        self.assertEqual(v["evidence"]["coverage_gaps"], {"netns": 1})
+        self.assertIn("not measured throughout: netns on 1 hosts", v["summary"])
+        # a sample that read only some namespaces is no comparison point either
+        host[2] = self.smp(2, netns={"qdisc_drops": 60}, sampled=499)
+        self.assertEqual(self.h1(host)["evidence"]["by_category"]["netem"], 100)
+
+    def test_h1_unmeasured_is_not_a_pass(self):
+        """No namespace read in any sample: no evidence of zero drops."""
+        v = self.h1([self.smp(k, netns={}, sampled=0) for k in range(3)])
+        self.assertEqual(v["status"], "needs-data")
+        self.assertTrue(v["summary"].startswith("insufficient coverage, not measured throughout: netns on 1 hosts"), v["summary"])
+        # nor is a host that sent no samples, beside one that did
+        v = self.h1([self.smp(k, netns={}) for k in range(3)], [])
+        self.assertEqual((v["status"], v["evidence"]["coverage_gaps"]), ("needs-data", {"netns": 1}))
+
+    def test_h1_unread_wan_monitor(self):
+        """Namespaces expected but never entered (a non-root monitor): needs-data, not a pass."""
+        v = self.h1([{"at_ms": T0 + k, "udp_rcvbuf_errors": 0, "nodes": [], "netns_expected": 2} for k in range(3)])
+        self.assertEqual((v["status"], v["evidence"]["coverage_gaps"]), ("needs-data", {"netns": 1}))
+        self.assertIn("not measured throughout: netns on 1 hosts", v["summary"])
+
+    def test_h1_counter_reset(self):
+        """A fall is a reset: 50 -> 80 -> 5 -> 9 rose 30 + 5 + 4."""
+        v = self.h1([self.smp(k, netns={"qdisc_drops": q}) for k, q in enumerate((50, 80, 5, 9))])
+        self.assertEqual(v["evidence"]["by_category"]["netem"], 39)
+
+    def test_h1_ena(self):
+        """A growing allowance counter fails H1, a flat one passes; a host that read ENA late still counts."""
+        for grow, status in ((0, "pass"), (3, "fail")):
+            v = self.h1([{"at_ms": T0 + k, "udp_rcvbuf_errors": 0, "ena_iface": "ens5", "ena_bw_out_allowance_exceeded": 7 + grow * k, "nodes": []}
+                         for k in range(2)])
+            self.assertEqual(v["status"], status)
+            self.assertEqual(v["evidence"]["by_category"], {"ENA allowance": grow, "host UDP receive buffer": 0})
+        self.assertEqual(v["summary"], "3 packet drops: ENA allowance 3 (bw_out 3), host UDP receive buffer 0")
+        late = [self.smp(0, ena_error="no default route"), self.smp(1, ena_iface="ens5", ena_pps_allowance_exceeded=10),
+                self.smp(2, ena_iface="ens5", ena_pps_allowance_exceeded=20)]
+        v = self.h1(late)
+        self.assertEqual((v["status"], v["evidence"]["ena_allowance"]["pps"], v["evidence"]["coverage_gaps"]), ("fail", 10, {"ENA": 1}))
+        # still failing at the end: ENA unavailable, so not a pass
+        v = self.h1([self.smp(k, ena_error="ens5: ethtool 0x1d: no such device") for k in range(2)])
+        self.assertEqual((v["status"], v["evidence"]["coverage_gaps"]), ("needs-data", {"ENA": 1}))
+        # failures that stopped without a reading: the host has no ENA device
+        v = self.h1([self.smp(0, ena_error="no default route", arp=0), self.smp(1, arp=0)])
+        self.assertEqual((v["status"], v["evidence"]["by_category"]), ("pass", {"ARP": 0, "host UDP receive buffer": 0}))
+
+    def test_h1_arp_without_netns(self):
+        """ARP drops count on hosts without namespace counters."""
+        v = self.h1([self.smp(k, arp=100 * k) for k in range(2)])
+        self.assertEqual((v["status"], v["evidence"]["by_category"]), ("fail", {"ARP": 100, "host UDP receive buffer": 0}))
+
+    def test_h1_old_runs_unchanged(self):
+        """A run whose samples predate the namespace counters keeps H1's root-namespace verdict."""
+        run = checks.Run(self.rd)
+        v = checks.h1_no_drops(run, checks.argparser().parse_args([self.rd]))
+        self.assertEqual((v["status"], v["summary"], v["evidence"]), ("fail", "6 UDP receive-buffer drops", {"drops": 6, "hosts": 2}))
+
     def test_churn_from_node0_search_start(self):
         run = checks.Run(self.rd)
         self.assertEqual(run.offline_intervals(4), [(T0 + 10_000, T0 + 1_000_000)])
