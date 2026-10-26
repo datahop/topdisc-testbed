@@ -9,7 +9,8 @@ set -e
 per=${1:?nodes per host}
 T=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
 me=$(curl -s -H "X-aws-ec2-metadata-token: $T" http://169.254.169.254/latest/meta-data/local-ipv4)
-aws ec2 describe-instances --region "$(cat /opt/topdisc/region)" --filters Name=tag:topdisc,Values=host Name=instance-state-name,Values=running \
+d=$(cat /opt/topdisc/deploy 2>/dev/null || true)
+aws ec2 describe-instances --region "$(cat /opt/topdisc/region)" --filters Name=tag:topdisc,Values=host ${d:+Name=tag:topdisc-deploy,Values=$d} Name=instance-state-name,Values=running \
   --query 'Reservations[].Instances[].[Tags[?Key==`Name`].Value|[0],PrivateIpAddress]' --output text |
 python3 -c '
 import json,sys

@@ -25,6 +25,9 @@ LIMITS
 mkdir -p /opt/topdisc && chmod 1777 /opt/topdisc && rm -f /opt/topdisc/ready
 echo "${bucket}" > /opt/topdisc/bucket
 echo "${region}" > /opt/topdisc/region
+%{ if deploy != "" ~}
+echo "${deploy}" > /opt/topdisc/deploy
+%{ endif ~}
 until aws s3 cp --only-show-errors --region "${region}" "s3://${bucket}/topdisc-linux-amd64.tgz" /opt/topdisc/binaries.tgz; do sleep 15; done
 tar xzf /opt/topdisc/binaries.tgz -C /opt/topdisc
 %{ if role == "host" ~}
@@ -64,7 +67,7 @@ cat > /opt/topdisc/scale-down.sh <<'DOWN'
 # instance's volume) costs little; `deploy/aws-packed.sh down` removes it.
 /opt/topdisc/save-runs.sh >> /opt/topdisc/scale-down.log 2>&1
 r=$(cat /opt/topdisc/region)
-ids=$(aws ec2 describe-instances --region "$r" --filters Name=tag:topdisc,Values=host Name=instance-state-name,Values=running,pending,stopped --query 'Reservations[].Instances[].InstanceId' --output text)
+ids=$(aws ec2 describe-instances --region "$r" --filters Name=tag:topdisc,Values=host%{ if deploy != "" } Name=tag:topdisc-deploy,Values=${deploy}%{ endif } Name=instance-state-name,Values=running,pending,stopped --query 'Reservations[].Instances[].InstanceId' --output text)
 [ -z "$ids" ] || aws ec2 terminate-instances --region "$r" --instance-ids $ids >> /opt/topdisc/scale-down.log 2>&1 || true
 echo "fleet stopped at $(date -u)" >> /opt/topdisc/scale-down.log
 shutdown -h now

@@ -161,6 +161,42 @@ terminates the hosts and halts `max_hours` after boot. `down` copies the
 bucket's run archives to `runs/archives` before destroying. The `aws-25k`
 scenarios run on 50 hosts and an `r6a.8xlarge` coordinator (64 GB ran out
 aggregating 25k traces) for about $19.5 an hour, $60 a run.
+`terraform -chdir=deploy/terraform/aws-packed test` checks the resource
+names and tags offline (mock provider, no credentials).
+
+Parallel deployments: `DEPLOY=<id>` (1 to 20 characters of a-z, 0-9 and
+`-`, starting with a letter or digit, not `default`) makes every verb act
+on deployment `<id>` alone. Its state is terraform workspace `d-<id>`
+(`deploy/terraform/aws-packed/terraform.tfstate.d/d-<id>`, left empty after
+`down` and reused by the next `up`), its resources are named
+`topdisc-packed-<id>-*` (instances `topdisc-<id>-host-N`) and tagged
+`topdisc-deploy=<id>`, its binaries build in `out-<id>`, and its coordinator
+lists and, at `max_hours`, terminates only its own hosts. `check` with an id
+lists that deployment and its bucket; without one it lists every topdisc
+instance, with a `topdisc-deploy` column. An un-ID'd deployment assumes it
+is alone in the region, so `up` with an id refuses while an un-ID'd fleet
+exists (pending to stopped) and `up` without one refuses while an ID'd
+fleet exists, also when re-running `up` on a live deployment: parallel
+deployments need an id on every one. `MAX_SPEND` and `max_hours` apply to
+each deployment separately; N chains spend up to N caps. The quota guard of
+two `up`s started together sees neither fleet, so stagger them by a minute,
+and run
+`terraform -chdir=deploy/terraform/aws-packed init` once before the first
+parallel pair in a fresh checkout (two first-ever `init`s racing corrupt
+`.terraform`). Terraform run by hand needs both `TF_WORKSPACE=d-<id>` and
+`TF_VAR_deploy=<id>` exported; with only one it plans to rename everything.
+Runs of the same scenario are told apart by their timestamp (`--name N` to
+name them). A chain guards on its own id:
+
+```
+export AWS_PROFILE=datahop-testbed DEPLOY=a5k-21
+live() { aws ec2 describe-instances --region us-east-1 --filters Name=tag:topdisc-deploy,Values=$DEPLOY Name=instance-state-name,Values=pending,running,stopping,stopped --query 'length(Reservations[].Instances[])' --output text; }
+[ "$(live)" = 0 ] || { echo "ABORT: $DEPLOY live"; exit 1; }
+deploy/aws-packed.sh up scenarios/$s.yaml && deploy/aws-packed.sh run scenarios/$s.yaml
+```
+
+A chain without an id keeps its `tag-key=topdisc` guard, which also aborts
+while any ID'd deployment is live, as it should.
 
 ## Hetzner Cloud
 
