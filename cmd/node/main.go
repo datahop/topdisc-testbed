@@ -77,6 +77,7 @@ func main() {
 				os.Exit(2)
 			}
 			n.bootnodes = append(n.bootnodes, bn)
+			n.bootIDs[bn.ID()] = struct{}{}
 		}
 	}
 	for _, s := range asg.Ghosts {

@@ -363,7 +363,7 @@ var paramDocs = []paramDoc{
 	{"scenario.population.seed", "RNG seed for every random draw; 0 = time"},
 	{"scenario.population.legacy_frac", "fraction of nodes that are legacy discv5: they never register and find the providers of their service by DHT random walks (simnet drops the topic-discovery ENR flag; real backends run stock upstream geth, legacy_binary); real backends draw the same fraction within every service"},
 	{"scenario.population.legacy_bootnode", "let node 0 (the bootnode) be drawn legacy too; default keeps it TopDisc-capable, since a fresh stock bootnode serves no nodes until it has revalidated its table (~20 nodes/min)"},
-	{"scenario.population.legacy_build", "real backends: what the legacy nodes run. stock (default): upstream geth, legacy_binary. fork: the same program built on the fork's discv5 instrumentation branch (plain_binary: upstream discv5 plus the testbed counters and pinned entries, no topic code), so it records per-message wire counters like a TopDisc node; fork keeps the all-legacy rule (legacy_frac 1, legacy_bootnode true) until a mixed run is validated"},
+	{"scenario.population.legacy_build", "real backends: what the legacy nodes run. stock (default): upstream geth, legacy_binary. fork: the same program built on the fork's discv5 instrumentation branch (plain_binary: upstream discv5 plus the testbed counters and pinned entries, no topic code), so it records per-message wire counters like a TopDisc node and pins ghosts; ghosts with legacy nodes need fork"},
 	{"scenario.population.vanilla_frac", "fraction running stock upstream geth (needs -tags vanilla)"},
 	{"scenario.network.latency_ms", "simnet: per-pair one-way latency, ms (cloud: given by regions)"},
 	{"scenario.network.bandwidth_mibps", "simnet: per-direction link bandwidth (cloud: given by the instance type)"},
@@ -526,12 +526,7 @@ func (c *Config) validate(path, dir string) error {
 		return fmt.Errorf("%s: population.addresses %q: want index or crawl", path, c.Scenario.Population.Addresses)
 	}
 	switch p := c.Scenario.Population; p.LegacyBuild {
-	case "", "stock":
-	case "fork":
-		// Mixed runs with the fork's plain build are not validated yet.
-		if p.LegacyFrac != 1 || !p.LegacyBootnode {
-			return fmt.Errorf("%s: population.legacy_build fork needs every node legacy: legacy_frac 1 and legacy_bootnode true", path)
-		}
+	case "", "stock", "fork":
 	default:
 		return fmt.Errorf("%s: population.legacy_build %q: want stock or fork", path, p.LegacyBuild)
 	}

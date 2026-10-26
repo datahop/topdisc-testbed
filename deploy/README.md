@@ -198,6 +198,29 @@ deploy/aws-packed.sh up scenarios/$s.yaml && deploy/aws-packed.sh run scenarios/
 A chain without an id keeps its `tag-key=topdisc` guard, which also aborts
 while any ID'd deployment is live, as it should.
 
+Partial-deployment sweep (TopDisc share 25/50/75 % on
+`5k-mixed-cont-churn-ghosts`, plus the 100 % reference), four deployments in
+parallel, each chain pulling its run and destroying its own fleet:
+
+```
+export AWS_PROFILE=datahop-testbed && mkdir -p logs
+terraform -chdir=deploy/terraform/aws-packed init -input=false        # once, before parallel ups
+for s in 25 50 75; do
+  f=$(python3 -c "print(1-$s/100)")
+  spec="--workload 5k-mixed-cont-churn-ghosts --profile aws-packed-5k --set population.legacy_frac=$f --name aws-5k-mixed$s-cont-churn-ghosts"
+  ( export DEPLOY=mix$s
+    live() { aws ec2 describe-instances --region us-east-1 --filters Name=tag:topdisc-deploy,Values=$DEPLOY Name=instance-state-name,Values=pending,running,stopping,stopped --query 'length(Reservations[].Instances[])' --output text; }
+    [ "$(live)" = 0 ] || { echo "ABORT: $DEPLOY live"; exit 1; }
+    deploy/aws-packed.sh up $spec && deploy/aws-packed.sh run $spec ) > logs/mix$s.log 2>&1 &
+  sleep 90                                                            # quota guard race between ups
+done
+( export DEPLOY=mix100; sleep 90
+  deploy/aws-packed.sh up scenarios/aws-5k-topdisc-cont-churn-ghosts.yaml && deploy/aws-packed.sh run scenarios/aws-5k-topdisc-cont-churn-ghosts.yaml ) > logs/mix100.log 2>&1 &
+```
+
+Then `python3 figures/deploy_sweep.py --out figs/deploy-5k --by-class
+0=<all-plain run> 25=<run> 50=<run> 75=<run> 100=<run>` (docs/FIGURES.md §4).
+
 ## Hetzner Cloud
 
 `deploy/hetzner.sh` is the Google Cloud layout on Hetzner servers: a server

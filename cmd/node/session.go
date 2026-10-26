@@ -122,6 +122,7 @@ type node struct {
 	topicName  string
 	topic      topicindex.TopicID
 	bootnodes  []*enode.Node
+	bootIDs    map[enode.ID]struct{}
 	ghosts     []*enode.Node // pinned in every session's table
 	ghostIDs   map[enode.ID]struct{}
 	lookupOnly bool
@@ -194,7 +195,7 @@ func newSession(started time.Time) *session {
 }
 
 func newNode(asg assign.Assignment, key *ecdsa.PrivateKey) *node {
-	return &node{asg: asg, key: key, id: enode.PubkeyToIDV4(&key.PublicKey), firstCapableMs: -1, ghostIDs: map[enode.ID]struct{}{},
+	return &node{asg: asg, key: key, id: enode.PubkeyToIDV4(&key.PublicKey), firstCapableMs: -1, bootIDs: map[enode.ID]struct{}{}, ghostIDs: map[enode.ID]struct{}{},
 		lookupOnly: asg.Search.Model == "continuous" || asg.Search.Model == "scheduled"}
 }
 
@@ -409,7 +410,8 @@ func (n *node) phases(s *session) {
 // probes from outside; here the registrar reports it. The advertiser side:
 // when each registration bucket first held its target number of ads, when the
 // whole table first was complete (every bucket full or out of candidates), and
-// the last table state.
+// the last table state. Also when the table first held a TopDisc-capable
+// record that is neither a ghost nor a bootnode.
 func (n *node) watchAds(s *session) {
 	defer s.wg.Done()
 	t := time.NewTicker(time.Second)
@@ -420,6 +422,11 @@ func (n *node) watchAds(s *session) {
 		case <-s.ctx.Done():
 			return
 		case <-t.C:
+		}
+		if s.firstCapableMs < 0 && n.hasCapable(d.AllNodes()) { // only written here
+			n.mu.Lock()
+			s.firstCapableMs = time.Since(s.started).Milliseconds()
+			n.mu.Unlock()
 		}
 		if bs := d.TopicRegistrationBuckets(n.topic); bs != nil {
 			now := time.Now().UnixMilli()
@@ -536,13 +543,10 @@ func (n *node) watchPeers(s *session, events chan *p2p.PeerEvent) {
 			n.mu.Unlock()
 		} else if ev.Type == p2p.PeerEventTypeAdd {
 			peers := s.srv.Peers()
-			outbound, capable := 0, false
+			outbound := 0
 			for _, p := range peers {
 				if !p.Inbound() {
 					outbound++
-				}
-				if p.ID() == ev.Peer && topicindex.SupportsTopicDiscovery(p.Node()) {
-					capable = true
 				}
 			}
 			n.mu.Lock()
@@ -553,12 +557,21 @@ func (n *node) watchPeers(s *session, events chan *p2p.PeerEvent) {
 			if !n.lookupOnly && s.connFullMs < 0 && !s.connStart.IsZero() && outbound >= s.srv.MaxDialedConns() {
 				s.connFullMs = time.Since(s.connStart).Milliseconds()
 			}
-			if s.firstCapableMs < 0 && capable {
-				s.firstCapableMs = time.Since(s.started).Milliseconds()
-			}
 			n.mu.Unlock()
 		}
 	}
+}
+
+// hasCapable skips every ghost record, also those other nodes pinned and
+// passed on: ghosts carry "ng".
+func (n *node) hasCapable(nodes []*enode.Node) bool {
+	for _, nd := range nodes {
+		_, boot := n.bootIDs[nd.ID()]
+		if !boot && !discover.IsTestbedGhost(nd) && topicindex.SupportsTopicDiscovery(nd) {
+			return true
+		}
+	}
+	return false
 }
 
 // snapshotLive reads what only a running server can tell: peers, held ads and

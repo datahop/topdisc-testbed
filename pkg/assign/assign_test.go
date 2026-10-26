@@ -2,6 +2,7 @@ package assign
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"strings"
 	"testing"
@@ -97,7 +98,8 @@ func TestBootnodeNeverChurns(t *testing.T) {
 }
 
 // legacy_build fork marks every legacy node, the bootnode included, for the
-// fork-built binary; the stock build marks none.
+// fork-built binary; the stock build marks none. A mixed run draws the share
+// within every service and keeps the bootnode TopDisc.
 func TestLegacyFork(t *testing.T) {
 	cfg := scenario.Default()
 	cfg.Scenario.Population.Nodes = 50
@@ -114,6 +116,40 @@ func TestLegacyFork(t *testing.T) {
 			if !a.Legacy || a.LegacyFork != (build == "fork") {
 				t.Fatalf("%s: node %d legacy=%v legacy_fork=%v", build, a.Idx, a.Legacy, a.LegacyFork)
 			}
+		}
+	}
+
+	// Mixed: half of every service, the bootnode kept TopDisc.
+	cfg.Scenario.Population.Nodes = 200
+	cfg.Scenario.Population.Topics = 5
+	cfg.Scenario.Population.LegacyFrac = 0.5
+	cfg.Scenario.Population.LegacyBootnode = false
+	cfg.Scenario.Population.LegacyBuild = "fork"
+	as, err := Generate(cfg, hosts, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if as[0].Legacy {
+		t.Fatal("mixed: bootnode drawn legacy")
+	}
+	members, legacy := map[string]int{}, map[string]int{}
+	for _, a := range as {
+		members[a.Topics[0]]++
+		if a.Legacy {
+			legacy[a.Topics[0]]++
+			if !a.LegacyFork {
+				t.Fatalf("mixed: legacy node %d not on the fork build", a.Idx)
+			}
+		}
+	}
+	if len(members) != 5 {
+		t.Fatalf("mixed: %d topics, want 5", len(members))
+	}
+	for k, n := range members {
+		want := int(math.Round(0.5 * float64(n)))
+		// the bootnode's draw is cleared, one short in its topic
+		if got := legacy[k]; got != want && !(k == as[0].Topics[0] && got == want-1) {
+			t.Fatalf("mixed: topic %s has %d legacy of %d, want %d", k, got, n, want)
 		}
 	}
 }

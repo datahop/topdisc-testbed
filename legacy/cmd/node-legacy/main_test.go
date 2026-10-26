@@ -8,6 +8,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/p2p/enode"
+	"github.com/ethereum/go-ethereum/p2p/enr"
 )
 
 // fakeDisc hands out one fresh provider per Lookup.
@@ -74,6 +75,42 @@ func (d *fakeWalk) RandomNodes() enode.Iterator { return d.it }
 func randNode() *enode.Node {
 	key, _ := crypto.GenerateKey()
 	return enode.NewV4(&key.PublicKey, nil, 0, 0)
+}
+
+func capableNode(t *testing.T, entries ...enr.Entry) *enode.Node {
+	key, _ := crypto.GenerateKey()
+	var r enr.Record
+	r.Set(enr.WithEntry("ng", []byte{1}))
+	for _, e := range entries {
+		r.Set(e)
+	}
+	if err := enode.SignV4(&r, key); err != nil {
+		t.Fatal(err)
+	}
+	nd, err := enode.New(enode.ValidSchemes, &r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return nd
+}
+
+// Ghosts and bootnodes carry "ng" but do not count as a first capable peer,
+// also a ghost another node pinned and passed on.
+func TestHasCapable(t *testing.T) {
+	key, _ := crypto.GenerateKey()
+	n := newNode(assignment{Topics: []string{"t"}}, key)
+	mark := enr.WithEntry("ghost", uint(1))
+	own, foreign, boot, peer := capableNode(t, mark), capableNode(t, mark), capableNode(t), capableNode(t)
+	n.ghostIDs[own.ID()] = struct{}{}
+	n.bootIDs[boot.ID()] = struct{}{}
+	for _, nd := range []*enode.Node{own, foreign, boot} {
+		if n.hasCapable([]*enode.Node{randNode(), nd}) {
+			t.Fatalf("%v counted as capable", nd.ID())
+		}
+	}
+	if !n.hasCapable([]*enode.Node{randNode(), own, foreign, peer}) {
+		t.Fatal("capable peer not counted")
+	}
 }
 
 func TestWalkIteratorReadsEveryNode(t *testing.T) {
