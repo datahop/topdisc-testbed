@@ -4,8 +4,9 @@
 # Host i owns 10.(100+i).0.0/16 and a route table entry sends that /16 to its
 # network interface; the hosts forward and run without the source/dest
 # check, so the VPC delivers packets addressed to their nodes. Every instance
-# has a public IPv4 for the AWS APIs (S3, SSM) only; the security group lets
-# nothing in from outside the VPC. Shell access is through SSM.
+# has a public IPv4 for the AWS APIs (S3, SSM) only; the network ACL lets
+# nothing in from outside the VPC but the replies to those calls. Shell
+# access is through SSM.
 terraform {
   required_providers {
     aws = { source = "hashicorp/aws", version = "~> 5.0" }
@@ -64,14 +65,21 @@ resource "aws_route" "host" {
   destination_cidr_block = "10.${100 + count.index}.0.0/16"
   network_interface_id   = aws_instance.host[count.index].primary_network_interface_id
 }
+# The security group lets everything in from 0.0.0.0/0 so that EC2 tracks
+# no TCP or UDP flow (ICMP is always tracked): with 500 nodes per host the
+# tracked node flows overflowed the instances' connection-tracking allowance.
+# The VPC has no IPv6. The network ACL keeps the internet out instead, so it
+# is attached before the group opens and the instances come up, and detached
+# after they are gone.
 resource "aws_security_group" "tb" {
-  name   = local.name
-  vpc_id = aws_vpc.tb.id
+  name       = local.name
+  vpc_id     = aws_vpc.tb.id
+  depends_on = [aws_network_acl.tb]
   ingress {
     protocol    = "-1"
     from_port   = 0
     to_port     = 0
-    cidr_blocks = [var.subnet, "10.0.0.0/8"]
+    cidr_blocks = ["0.0.0.0/0"]
   }
   egress {
     protocol    = "-1"
@@ -80,6 +88,74 @@ resource "aws_security_group" "tb" {
     cidr_blocks = ["0.0.0.0/0"]
   }
   tags = local.tags
+}
+
+# Stateless, so nothing here is tracked. Beyond the subnet and the nodes'
+# 10.0.0.0/8, only TCP to 32768-60999, the kernel's ephemeral ports, gets in:
+# the replies to the instances' HTTPS calls. The public IP maps to the
+# private one, so the listeners on it, sshd (22) and the hostagent (9000),
+# are denied before the nodes' range, which they never serve. The nodes'
+# addresses are not reachable through the internet gateway, and the VPC's
+# DNS, DHCP, metadata and time service bypass network ACLs.
+resource "aws_network_acl" "tb" {
+  vpc_id     = aws_vpc.tb.id
+  subnet_ids = [aws_subnet.hosts.id]
+  ingress {
+    rule_no    = 100
+    action     = "allow"
+    protocol   = "-1"
+    from_port  = 0
+    to_port    = 0
+    cidr_block = var.subnet
+  }
+  dynamic "ingress" {
+    for_each = { 110 = 22, 120 = 9000 }
+    content {
+      rule_no    = ingress.key
+      action     = "deny"
+      protocol   = "tcp"
+      from_port  = ingress.value
+      to_port    = ingress.value
+      cidr_block = "0.0.0.0/0"
+    }
+  }
+  ingress {
+    rule_no    = 130
+    action     = "allow"
+    protocol   = "-1"
+    from_port  = 0
+    to_port    = 0
+    cidr_block = "10.0.0.0/8"
+  }
+  ingress {
+    rule_no    = 140
+    action     = "allow"
+    protocol   = "tcp"
+    from_port  = 32768
+    to_port    = 60999
+    cidr_block = "0.0.0.0/0"
+  }
+  # fragmentation needed, for path MTU discovery: the VPC's MTU is 9001,
+  # the internet gateway's 1500
+  ingress {
+    rule_no    = 150
+    action     = "allow"
+    protocol   = "icmp"
+    from_port  = 0
+    to_port    = 0
+    icmp_type  = 3
+    icmp_code  = 4
+    cidr_block = "0.0.0.0/0"
+  }
+  egress {
+    rule_no    = 100
+    action     = "allow"
+    protocol   = "-1"
+    from_port  = 0
+    to_port    = 0
+    cidr_block = "0.0.0.0/0"
+  }
+  tags = merge(local.tags, { Name = local.name })
 }
 
 # Binaries in, run archives out. Destroyed with the deployment:

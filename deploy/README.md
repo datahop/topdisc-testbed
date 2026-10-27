@@ -145,6 +145,34 @@ VPC); the coordinator is reached through SSM, as in `deploy/aws.sh`, saves
 every run to the bucket, and `inventory-aws-packed.sh` lists the hosts by
 instance index with `routes: network`.
 
+Connection tracking: 500 nodes per host talk to peers on every other host,
+and at 25k the hosts' tracked flows overflowed the instance's allowance
+(ENA `conntrack_allowance_exceeded`: 37 M dropped packets in the TopDisc
+run, 202 M in discv5). EC2 does not track a TCP or UDP flow when a security
+group rule allows it from `0.0.0.0/0` (or `::/0`) on all ports and the rule
+in the other direction allows all traffic to `0.0.0.0/0`; ICMP is always
+tracked, and so are flows through NAT gateways, load balancers and VPC
+endpoints
+([AWS: security group connection tracking](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/security-group-connection-tracking.html)).
+So the security group allows everything in from and out to `0.0.0.0/0`
+(the VPC has no IPv6), and the node traffic, discovery over UDP and RLPx
+over TCP, is untracked. The subnet's network ACL, stateless, keeps the
+internet out instead. Inbound it allows everything from the subnet (rule
+100), denies TCP 22 (sshd) and 9000 (the hostagent) from anywhere else (110,
+120), allows everything from `10.0.0.0/8`, the nodes (130), and from the
+rest of the world only TCP to 32768-60999 (140), the kernel's ephemeral
+ports, which carry the replies to the instances' HTTPS calls (S3, SSM, EC2,
+dnf), and ICMP fragmentation-needed (type 3 code 4, rule 150), which path
+MTU discovery needs between the VPC's 9001-byte MTU and the internet
+gateway's 1500. The security group depends on the ACL, so terraform attaches
+the ACL before it opens the group and starts the instances, and detaches it
+only after they are gone. Binding the hostagent to the private address would not help: the
+internet gateway maps the public address onto it. The nodes listen on their
+`10.(100+i)` addresses, which the internet gateway never delivers to; the
+other listeners (DNS stub, chrony, DHCP client) are on loopback or are UDP,
+which the ACL lets in from nowhere outside. The VPC's DNS, DHCP, metadata
+and time service bypass network ACLs.
+
 ```
 export AWS_PROFILE=datahop-testbed
 deploy/aws-packed.sh up  scenarios/aws-packed-smoke.yaml    # terraform apply sized by `testbed fleet` (aws_packed_machines); build amd64; push to the bucket
