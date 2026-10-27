@@ -235,7 +235,9 @@
       2000
      ]
     ],
-    "pairs": 8
+    "pairs": 8,
+    "skipped_restart": 0,
+    "skipped_emptied": 0
    }
   },
   {
@@ -534,10 +536,11 @@
    "group": "load",
    "assertion": "registrar load bound: busiest registrar within a multiple of the median",
    "status": "pass",
-   "summary": "busiest registrar at 1.8\u00d7 the median (70 vs 40 queries); bootnode 0 left out: 40 queries, 1.0\u00d7 the median",
+   "summary": "busiest registrar at 1.8\u00d7 the median TOPICQUERY (70 vs 40 queries); FINDNODE at 1.0\u00d7 (20 vs 20), bound max(10\u00d7, FINDNODE) = 10.0\u00d7; bootnode 0 left out: 40 queries, 1.0\u00d7 the median",
    "evidence": {
     "max": 70,
     "median": 40,
+    "multiple": 1.8,
     "limit": 10.0,
     "bootnodes": [
      {
@@ -545,7 +548,11 @@
       "rx": 40,
       "multiple": 1.0
      }
-    ]
+    ],
+    "findnode_max": 20,
+    "findnode_median": 20,
+    "findnode_multiple": 1.0,
+    "bound": 10.0
    }
   },
   {

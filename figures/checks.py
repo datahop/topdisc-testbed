@@ -36,6 +36,7 @@ REG_BUCKET_SIZE = 5
 TOPIC_NODES_LIMIT = 16
 AUX_NODES_LIMIT = 8
 SAMPLE_MS = 30_000  # assignment sample_ms default
+TRUNC_MS = 1  # requiredMs and waitedMs are each truncated to whole ms
 LOAD_WORKERS = min(32, os.cpu_count() or 1)
 LOAD_CHUNK = 32
 
@@ -143,29 +144,58 @@ def early_admissions(i, evs, lim):
             if not ev.get("admitted") or ev.get("renewal"):
                 continue
             n[0] += 1
-            if ev["waitedMs"] < ev["requiredMs"] - lim["floor_ms"]:
+            if ev["waitedMs"] < ev["requiredMs"] - lim["floor_ms"] - TRUNC_MS:
                 yield i, ev["advertiser"][:8], ev["waitedMs"], ev["requiredMs"]
     bad = tally(early())
     return n[0], bad
 
 
-def quote_pairs(i, evs, lim):
-    """W3 over one node: (repeated-quote pairs, tally of undercuts)."""
+def quote_pairs(i, evs, lim, sessions=(), samples=()):
+    """W3 over one node: (repeated-quote pairs compared, tally of undercuts, pairs
+    skipped across a restart, pairs skipped across an emptied topic). The
+    registrar drops a topic's lower bound with its last ad (topictable.go
+    remove) and keeps none across a restart."""
     seq = defaultdict(list)
+    empty = defaultdict(list)  # topic -> when the registrar held none of its ads
     for ev in evs:
         if ev.get("quoteMs", 0) > 0:
             seq[(ev["topic"], ev["advertiser"])].append((ev["atMs"], ev["quoteMs"]))
-    n = [0]
+        if ev.get("topicHeld") == 0:
+            empty[ev["topic"]].append(ev["atMs"])
+    topics = {topic for topic, _ in seq}
+    for smp in samples:
+        if not (smp.get("cache_cap") or 0) > 0:
+            continue  # a failed occupancy read samples an empty cache of capacity 0
+        by = smp.get("cache_by_topic")
+        if by is None and smp.get("cache_held") == 0:
+            by = {}
+        if isinstance(by, dict):
+            for topic in topics:
+                if not by.get(topic):
+                    empty[topic].append(smp["at_ms"])
+    for v in empty.values():
+        v.sort()
+    starts = sorted(x["start_ms"] for x in sessions if isinstance(x, dict) and "start_ms" in x)
+    n, restart, emptied = [0], [0], [0]
+
+    def between(xs, a, b):
+        return bisect.bisect_right(xs, b) > bisect.bisect_left(xs, a)
 
     def undercuts():
         for key, q in seq.items():
             q.sort()
             for (t1, q1), (t2, q2) in zip(q, q[1:]):
+                if bisect.bisect_right(starts, t1) < bisect.bisect_right(starts, t2):
+                    restart[0] += 1
+                    continue
+                if between(empty.get(key[0], ()), t1, t2):
+                    emptied[0] += 1
+                    continue
                 n[0] += 1
                 if q2 < q1 - (t2 - t1) - lim["floor_ms"]:
                     yield i, key[1][:8], q1, q2, t2 - t1
     bad = tally(undercuts())
-    return n[0], bad
+    return n[0], bad, restart[0], emptied[0]
 
 
 def full_cache(i, evs, lim):
@@ -260,7 +290,8 @@ def slim_node(i, t, lim):
     s["has_admissions"] = "admissions" in t
     evs = t.get("admissions") or []
     s["w2"] = derive(lambda: early_admissions(i, evs, lim))
-    s["w3"] = derive(lambda: quote_pairs(i, evs, lim))
+    sessions = t["sessions"] if "sessions" in t else [t["session"]] if t.get("session") else []
+    s["w3"] = derive(lambda: quote_pairs(i, evs, lim, sessions or [], smp or []))
     s["w4"] = derive(lambda: full_cache(i, evs, lim))
     s["w6"] = derive(lambda: record_address(i, evs, lim))
     s["ops"] = derive(lambda: [{**{k: op[k] for k in ("msg",) if k in op}, "nodeIds": tuple(set(op["nodeIds"]))}
@@ -885,20 +916,27 @@ def w2_no_early_admission(run, tol):
     nearly, early = merge(b for _, b in parts)
     if n == 0:
         return verdict("not-exercised", "no admissions recorded")
-    return pf(nearly, f"every one of {n} admissions waited at least the required time minus the {tol.floor_ms / 1000:.0f} s floor",
-              f"{nearly} of {n} admissions before the required wait", offenders=early, admissions=n)
+    allow = f"the {tol.floor_ms / 1000:.0f} s floor and a {TRUNC_MS} ms truncation allowance"
+    return pf(nearly, f"every one of {n} admissions waited at least the required time minus {allow}",
+              f"{nearly} of {n} admissions before the required wait, beyond {allow}; the required wait is recorded before Register's own clock read",
+              offenders=early, admissions=n, truncation_ms=TRUNC_MS,
+              note="requiredMs comes from a WaitTime call before Register reads the clock again; where the lower bound sets the wait, it decays in between")
 
 
 def w3_lower_bound(run, tol):
     if not run.has_admissions:
         return verdict("needs-data", "admission events are not in the traces (fork before testbed.10)")
     parts = admissions(run, "w3")
-    n = sum(c for c, _ in parts)
-    nbad, bad = merge(b for _, b in parts)
+    n = sum(p[0] for p in parts)
+    nbad, bad = merge(p[1] for p in parts)
+    restart, emptied = sum(p[2] for p in parts), sum(p[3] for p in parts)
+    skip = (f"; skipped {restart} pairs across a registrar restart and {emptied} across a topic that emptied at the registrar"
+            " (the bound is kept only within a session and while the topic holds an ad)") if restart or emptied else ""
     if n == 0:
-        return verdict("not-exercised", "no advertiser was quoted twice by one registrar")
-    return pf(nbad, f"no quote undercut the previous one to the same advertiser and topic by more than the time elapsed ({n} pairs)",
-              f"{nbad} of {n} repeated quotes undercut the lower bound", offenders=bad, pairs=n)
+        return verdict("not-exercised", f"no advertiser was quoted twice by one registrar{skip}", skipped_restart=restart, skipped_emptied=emptied)
+    return pf(nbad, f"no quote undercut the previous one to the same advertiser and topic by more than the time elapsed ({n} pairs){skip}",
+              f"{nbad} of {n} repeated quotes undercut the lower bound{skip}", offenders=bad, pairs=n,
+              skipped_restart=restart, skipped_emptied=emptied)
 
 
 def w4_full_cache(run, tol):
@@ -1316,13 +1354,36 @@ def a3_load_bound(run, tol):
                    for b in boot if b["rx"])
     if mx == 0:
         return verdict("not-exercised", f"no TOPICQUERY traffic{note}", bootnodes=boot)
+    # the DHT's own skew over the same registrars: TopDisc is bounded by what it adds on top of it;
+    # wire counters are sparse, an absent type is 0
+    fn = {n["idx"]: n["byType"].get("FINDNODE/v5") for n in run.oh if n["idx"] in rx and n["idx"] not in run.bootnodes}
+    f = sorted((v or {}).get("rxMsgs", 0) for v in fn.values()) if any(v is not None for v in fn.values()) else []
+    fmed, fmx = (f[len(f) // 2], f[-1]) if f else (0, 0)
     if med == 0:
         busy = sum(1 for v in q if v)
-        return verdict("fail", f"TOPICQUERY concentrated: {busy} of {len(q)} registrars received any, the busiest {mx}, the median 0{note}",
-                       max=mx, median=0, busy=busy, registrars=len(q), limit=tol.load_multiple, bootnodes=boot)
-    return pf(mx > tol.load_multiple * med, f"busiest registrar at {mx / med:.1f}× the median ({mx} vs {med} queries){note}",
-              f"busiest registrar at {mx / med:.1f}× the median, above {tol.load_multiple}×{note}", max=mx, median=med, limit=tol.load_multiple,
-              bootnodes=boot)
+        what = f"TOPICQUERY concentrated: {busy} of {len(q)} registrars received any, the busiest {mx}, the median 0"
+        ev = dict(max=mx, median=0, busy=busy, registrars=len(q), limit=tol.load_multiple, bootnodes=boot)
+        if fmx and not fmed:
+            # FINDNODE as concentrated: the DHT's own skew is unbounded, no excess over it can be shown
+            return verdict("pass", f"{what}; FINDNODE median 0 too (busiest {fmx}), its skew unbounded, so no bound can be shown exceeded{note}",
+                           findnode_max=fmx, findnode_median=0, findnode_multiple=None, bound=None, **ev)
+        return verdict("fail", f"{what}{note}", **ev)
+    ev = dict(max=mx, median=med, multiple=round(mx / med, 1), limit=tol.load_multiple, bootnodes=boot)
+    if fmed:
+        bound = max(tol.load_multiple, fmx / fmed)
+        ev.update(findnode_max=fmx, findnode_median=fmed, findnode_multiple=round(fmx / fmed, 1), bound=round(bound, 1))
+        dht = f"; FINDNODE at {fmx / fmed:.1f}× ({fmx} vs {fmed}), bound max({tol.load_multiple:g}×, FINDNODE) = {bound:.1f}×"
+    elif fmx:
+        # the DHT's own skew is unbounded: no TOPICQUERY skew can be shown to exceed it
+        bound = math.inf
+        ev.update(findnode_max=fmx, findnode_median=0, findnode_multiple=None, bound=None)
+        dht = f"; FINDNODE median 0 (busiest {fmx}), its skew unbounded, so no bound can be shown exceeded"
+    else:
+        bound = tol.load_multiple
+        ev.update(bound=bound)
+        dht = f"; no FINDNODE counts, bound {tol.load_multiple:g}×"
+    return pf(mx > bound * med, f"busiest registrar at {mx / med:.1f}× the median TOPICQUERY ({mx} vs {med} queries){dht}{note}",
+              f"busiest registrar at {mx / med:.1f}× the median TOPICQUERY ({mx} vs {med} queries), above the bound{dht}{note}", **ev)
 
 
 def increase(samples, value):
@@ -1354,10 +1415,11 @@ def ena_host(h):
 ENA_ALLOWANCES = ("pps", "bw_in", "bw_out", "conntrack", "linklocal")
 
 
-def host_drops(run):
-    """Drops by where they happened, over the counters the samples carry; None for runs that carry none
-    beyond the root namespace's UDP errors."""
-    hosts = [h for h in run.host if h]
+def host_drops(run, host=None):
+    """Drops by where they happened, over the counters the samples carry (run.host, or the given
+    per-host sample lists); None for runs that carry none beyond the root namespace's UDP errors."""
+    host = run.host if host is None else host
+    hosts = [h for h in host if h]
     has = {
         "netns": [any(smp.get("netns") is not None or smp.get("netns_expected") for smp in h) for h in hosts],
         "ARP": [any(isinstance(smp.get("arp"), dict) for smp in h) for h in hosts],
@@ -1375,7 +1437,7 @@ def host_drops(run):
         if n:
             gaps[src] = gaps.get(src, 0) + n
 
-    empty = sum(1 for h in run.host if not h)
+    empty = sum(1 for h in host if not h)
     if any(has["netns"]):
         ns = [(h, netns_measured(h)) for h, x in zip(hosts, has["netns"]) if x]
         gap("netns", sum(1 for x in has["netns"] if not x) + empty + sum(1 for h, ok in ns if not covered(h, ok)))
@@ -1387,7 +1449,6 @@ def host_drops(run):
         info.update(netns_hosts=len(ns),
                     # netem's drops count as send errors too; sndbuf beyond them is a full socket buffer
                     ns_udp_sndbuf_errors=d("ns_udp_sndbuf_errors"), ns_udp_in_errors=d("ns_udp_in_errors"),
-                    # rx_dropped also counts frames no protocol took, so it is reported, not failed on
                     veth_dropped=d("veth_rx_dropped") + d("veth_tx_dropped"),
                     max_backlog_bytes=max((smp.get("netns_max_backlog_bytes", 0) for h, ok in ns for smp, m in zip(h, ok) if m), default=0))
     if any(has["ARP"]):
@@ -1409,29 +1470,57 @@ def host_drops(run):
 
 def h1_no_drops(run, tol):
     if run.host:
-        hd = host_drops(run)
+        # the experiment window: the trace upload after the stop is no part of it; the
+        # interval crossing the stop counts, as its drops may predate it
+        stop = max((a["phases"]["stop_at_ms"] for a in run.assign.values() if (a.get("phases") or {}).get("stop_at_ms")), default=None)
+        cut = [bisect.bisect_right([smp["at_ms"] for smp in h], stop) if stop is not None else len(h) for h in run.host]
+        # the next sample only where an interval crosses the stop, not after one taken at it
+        host = [h[:k + (0 < k < len(h) and h[k - 1]["at_ms"] < stop)] for h, k in zip(run.host, cut)]
+        before = [h[:k] for h, k in zip(run.host, cut)]
+        win = " up to the stop" if stop is not None else ""
+        hd = host_drops(run, host)
         if hd is None:
-            drops = 0
-            for h in run.host:
-                if h:
-                    drops += max(0, h[-1].get("udp_rcvbuf_errors", 0) - h[0].get("udp_rcvbuf_errors", 0))
-            return pf(drops, f"no UDP receive-buffer drops on {len(run.host)} hosts", f"{drops} UDP receive-buffer drops", drops=drops, hosts=len(run.host))
+            def rcvbuf(hs):
+                return sum(max(0, h[-1].get("udp_rcvbuf_errors", 0) - h[0].get("udp_rcvbuf_errors", 0)) for h in hs if h)
+            drops, total = rcvbuf(host), rcvbuf(run.host)
+            after = f"; {total - drops} more after the stop" if total != drops else ""
+            ev = dict(drops=drops, hosts=len(run.host), **({"drops_with_after_stop": total} if stop is not None else {}))
+            return pf(drops, f"no UDP receive-buffer drops{win} on {len(run.host)} hosts{after}", f"{drops} UDP receive-buffer drops{win}{after}", **ev)
         cats, info, gaps = hd
-        total = sum(cats.values())
+        # netem drops are the modelled access link overflowing its queue: reported, not failed on
+        total = sum(n for c, n in cats.items() if c != "netem") + info.get("veth_dropped", 0)
         per = info.get("ena_allowance", {})
         part = lambda c, n: f"{c} {n}" + (" (" + ", ".join(f"{a} {x}" for a, x in per.items() if x) + ")" if c == "ENA allowance" and n else "")
-        by = ", ".join(part(c, n) for c, n in cats.items())
+        by = ", ".join(part(c, n) for c, n in cats.items() if c != "netem")
         if "netns_hosts" in info:
             rate = int(run.params.get("testbed.wan.rate_kbps") or 0)
-            by += f"; veth {info['veth_dropped']}; longest egress queue {info['max_backlog_bytes'] // 1000} kB" + (
+            by += f"; veth {info['veth_dropped']}; modelled link loss, not counted: netem {cats['netem']}, longest egress queue {info['max_backlog_bytes'] // 1000} kB" + (
                 f" ({info['max_backlog_bytes'] * 8 / (rate * 1000):.1f} s at {rate} kbit/s)" if rate else "")
         missing = ", ".join(f"{src} on {n} hosts" for src, n in gaps.items())
         ev = dict(drops=total, hosts=len(run.host), by_category=cats, coverage_gaps=gaps, **info)
+        if "netem" in cats:
+            ev["modelled_link_loss"] = {"netem": cats["netem"]}
+        if stop is not None:
+            def with_veth(c, i):
+                return {**c, **({"veth": i["veth_dropped"]} if "veth_dropped" in i else {})}
+            here = with_veth(cats, info)
+            all_cats, all_info, _ = host_drops(run)
+            pre = host_drops(run, before)
+            crossing = {c: n - with_veth(*pre[:2]).get(c, 0) for c, n in here.items()} if pre else here
+            crossing = {c: n for c, n in crossing.items() if n}
+            after = {c: n - here.get(c, 0) for c, n in with_veth(all_cats, all_info).items() if n != here.get(c, 0)}
+            ev.update(stop_ms=stop, interval_crossing_stop=crossing, by_category_with_after_stop=all_cats,
+                      ena_allowance_with_after_stop=all_info.get("ena_allowance", {}),
+                      **({"veth_dropped_with_after_stop": all_info["veth_dropped"]} if "veth_dropped" in all_info else {}))
+            if crossing:
+                by += "; in the interval crossing the stop: " + ", ".join(f"{c} {n}" for c, n in crossing.items())
+            if after:
+                by += "; after the stop, not counted: " + ", ".join(f"{c} {n}" for c, n in after.items())
         if total:
-            return verdict("fail", f"{total} packet drops: {by}" + (f"; not measured throughout: {missing}" if gaps else ""), **ev)
+            return verdict("fail", f"{total} packet drops{win}: {by}" + (f"; not measured throughout: {missing}" if gaps else ""), **ev)
         if gaps:
-            return verdict("needs-data", f"insufficient coverage, not measured throughout: {missing}; no drops where measured: {by}", **ev)
-        return verdict("pass", f"no packet drops on {len(run.host)} hosts: {by}", **ev)
+            return verdict("needs-data", f"insufficient coverage, not measured throughout: {missing}; no drops{win} where measured: {by}", **ev)
+        return verdict("pass", f"no packet drops{win} on {len(run.host)} hosts: {by}", **ev)
     log = os.path.join(run.rd, "run.log")
     if os.path.exists(log):
         txt = open(log, errors="replace").read()

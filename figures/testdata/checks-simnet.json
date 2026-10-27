@@ -205,7 +205,7 @@
    "group": "registration",
    "assertion": "no early admission: admitted only after the required wait",
    "status": "fail",
-   "summary": "24 of 32 admissions before the required wait",
+   "summary": "24 of 32 admissions before the required wait, beyond the 1 s floor and a 1 ms truncation allowance; the required wait is recorded before Register's own clock read",
    "evidence": {
     "offenders": [
      [
@@ -269,7 +269,9 @@
       10000
      ]
     ],
-    "admissions": 32
+    "admissions": 32,
+    "truncation_ms": 1,
+    "note": "requiredMs comes from a WaitTime call before Register reads the clock again; where the lower bound sets the wait, it decays in between"
    }
   },
   {
@@ -278,7 +280,10 @@
    "assertion": "lower bound: a repeated quote never undercuts the previous one by more than the time elapsed",
    "status": "not-exercised",
    "summary": "no advertiser was quoted twice by one registrar",
-   "evidence": {}
+   "evidence": {
+    "skipped_restart": 0,
+    "skipped_emptied": 0
+   }
   },
   {
    "id": "W4",
@@ -496,10 +501,11 @@
    "group": "load",
    "assertion": "registrar load bound: busiest registrar within a multiple of the median",
    "status": "pass",
-   "summary": "busiest registrar at 1.8\u00d7 the median (70 vs 40 queries); bootnode 0 left out: 40 queries, 1.0\u00d7 the median",
+   "summary": "busiest registrar at 1.8\u00d7 the median TOPICQUERY (70 vs 40 queries); FINDNODE at 1.0\u00d7 (20 vs 20), bound max(10\u00d7, FINDNODE) = 10.0\u00d7; bootnode 0 left out: 40 queries, 1.0\u00d7 the median",
    "evidence": {
     "max": 70,
     "median": 40,
+    "multiple": 1.8,
     "limit": 10.0,
     "bootnodes": [
      {
@@ -507,7 +513,11 @@
       "rx": 40,
       "multiple": 1.0
      }
-    ]
+    ],
+    "findnode_max": 20,
+    "findnode_median": 20,
+    "findnode_multiple": 1.0,
+    "bound": 10.0
    }
   },
   {
