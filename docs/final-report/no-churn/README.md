@@ -428,7 +428,7 @@ The original search asked the registrars closest to the topic ID first and staye
 
 A topic search runs in **passes**. A pass builds a fresh search table from the node's routing table, sorted into 18 buckets by distance to the topic, and queries registrars one at a time, starting from the active bucket; it ends when that bucket is used up or after 32 queries. The next pass starts after a short gap and builds its table again.
 
-The adaptive search ([#144](https://github.com/datahop/go-ethereum/pull/144)) moves the active bucket by the ad yield of recent replies: outward when replies are full, inward when they are empty, and it stays when they carry at least 8 ads. Each pass is capped at 32 queries, nodes asked in the last ad lifetime are not asked again, and the gap between passes that find nothing new grows from 2 s to 60 s. In the simulator the busiest-to-median ratio fell to 7.2× at 30,000 nodes and 33× at 250,000; the 25k AWS run with churn measured 9.7×.
+The adaptive search ([#144](https://github.com/datahop/go-ethereum/pull/144)) moves the active bucket by the ad yield of recent replies: outward when replies are full, inward when they are empty, and it stays when they carry at least 8 ads. Each pass is capped at 32 queries, nodes asked in the last ad lifetime are not asked again, and the gap between passes that find nothing new grows from 2 s to 60 s. In the simulator the busiest-to-median ratio fell to 7.2× at 30,000 nodes and 33× at 250,000; the 25k AWS run with churn measured 10.2×.
 
 ### One registrar filling a reply: result filter and mixer
 
@@ -448,7 +448,11 @@ Searches asked the same unreachable table entries again on every pass, and regis
 
 ### Tickets
 
-A ticket could be replayed within its window ([#69](https://github.com/datahop/go-ethereum/issues/69)) and handed to another node ([#68](https://github.com/datahop/go-ethereum/issues/68)). Tickets are now single use ([#153](https://github.com/datahop/go-ethereum/pull/153)) and bound to the advertiser's node ID ([#160](https://github.com/datahop/go-ethereum/pull/160)).
+A ticket is the registrar's receipt for the time an advertiser has already waited, so the advertiser can come back later and be credited that wait instead of starting over. The registrar keeps no state for it: the ticket travels with the advertiser and is sealed with an HMAC under a key only the registrar holds, rotated every 6 h or 100,000 tickets.
+
+A sealed ticket carries the topic, the advertiser's node ID, the wait it was quoted, when it was last used and when the waiting started. When an advertiser returns, the registrar checks the MAC, then compares the ticket's node ID with the node ID of the discv5 session the REGTOPIC arrived on. That ID comes from the session's handshake, which proves the sender holds the node's private key. A ticket presented by any other node is answered as a new attempt and stays redeemable by its owner ([#160](https://github.com/datahop/go-ethereum/pull/160), which fixed [#68](https://github.com/datahop/go-ethereum/issues/68): before it, tickets named only the topic and any node could use another's).
+
+A ticket is valid in a 5 s window starting when its quoted wait ends, and is credited up to 10 s late. It is also single use: the registrar remembers each redeemed ticket by its MAC for the length of the window plus the grace, so the same ticket cannot be replayed within its window ([#153](https://github.com/datahop/go-ethereum/pull/153), which fixed [#69](https://github.com/datahop/go-ethereum/issues/69)).
 
 ### Other fixes
 

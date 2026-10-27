@@ -4,13 +4,13 @@
 
 ## Summary
 
-On 25,000 nodes with churn replayed from the mainnet crawl analysis, TopDisc found a median 99.4 % of each topic's providers; plain discv5 found 72.2 %.
+On 25,000 nodes with churn replayed from the mainnet crawl analysis, TopDisc found a median 99.5 % of each topic's providers; plain discv5 found 71.3 %.
 
-- TopDisc reached half of a topic's providers in 108 s and 90 % in 19.6 min. discv5 needed 37.7 min for half and never reached 90 %.
-- 92.5 % of TopDisc searchers found at least 90 % of their providers, against 0.4 % of discv5 searchers.
-- Every topic size gains. Topics under 100 nodes are found in seconds: 90 % in 9.2 s for 10 to 99 nodes and 4.0 s under 10.
-- The busiest registrar received 9.7× the median topic-query load, inside the 10× limit.
-- The median TopDisc node sends 22 % fewer bytes than a discv5 node (22.5 vs 28.7 MB); the 95th percentile sends 34 % more (66.4 vs 49.6 MB), because registrars of popular topics serve the replies.
+- TopDisc reached half of a topic's providers in 87 s and 90 % in 17.8 min. discv5 needed 36.4 min for half and never reached 90 %.
+- 92.9 % of TopDisc searchers found at least 90 % of their providers, against 0.3 % of discv5 searchers.
+- Every topic size gains. Topics under 100 nodes are found in seconds: 90 % in 7.6 s for 10 to 99 nodes and 2.9 s under 10.
+- The busiest registrar received 10.2× the median topic-query load, just above the 10× limit the checks set.
+- The median TopDisc node sends 24 % fewer bytes than a discv5 node (25 vs 33 MB); the 95th percentile sends 45 % more (100 vs 69 MB), because registrars of popular topics serve the replies.
 
 ## Scenario and setup
 
@@ -18,7 +18,7 @@ The two runs are a pair: the same workload, seed and churn schedule, with only t
 
 - **Network.** 25,000 nodes on 50 AWS m6a.2xlarge hosts, 500 per host, each node in its own network namespace with a 1 Mbit/s link, 4 to 45 ms one-way delay and 3 ms jitter.
 - **Topics.** The 100 largest chains of a 24 h crawl of the discv5 mainnet, each topic sized by its chain's share in the crawl. The two largest hold 29 % and 22 % of nodes; the smallest has 4. Every node registers and searches one topic.
-- **Churn.** Node sessions replayed from the same crawl ([churn analysis](../churn-analysis.md); [on GitHub](https://github.com/datahop/topdisc-testbed/blob/main/docs/churn-analysis.md)): 42 % of nodes stay up throughout, and the rest leave and rejoin with the session lengths measured on mainnet, 8,208 departures and 8,875 rejoins over the run.
+- **Churn.** Node sessions replayed from the same crawl ([churn analysis](../churn-analysis.md); [on GitHub](https://github.com/datahop/topdisc-testbed/blob/main/docs/churn-analysis.md)): 42 % of nodes stay up throughout, and the rest leave and rejoin with the session lengths measured on mainnet, about 8,200 departures over the run.
 - **Phases.** 3 min bootstrap, registration from +3 min with starts spread over 15 min, then one continuous 90 min search per node from +33 min.
 - **TopDisc parameters.** Ad lifetime 15 min, ad cache 5,000, 10 registrars per registration bucket, 16 ads per reply, 8 referrals per reply, yield floor 8, at most 32 queries per search pass, result mixing across 5 registrars.
 
@@ -66,12 +66,12 @@ Both runs use the same values; only the protocol differs. Topic values marked *f
 
 ![Nodes per topic](topics.png)
 
-**Reading.** The 100 topics follow the mainnet crawl: the two largest hold 28.8 % and 22.1 % of the 25,000 nodes and the smallest has 4. One run tests very popular and very rare topics together.
+**Reading.** The 100 topics follow the mainnet crawl: the two largest hold 28.8 % and 22.1 % of the 24,990 traced nodes and the smallest has 4. One run tests very popular and very rare topics together.
 
 | Topic size | Topics | Nodes | Share of nodes |
 |---|---:|---:|---:|
-| 1,000+ | 4 | 16,158 | 64.6% |
-| 100–999 | 14 | 6,220 | 24.9% |
+| 1,000+ | 4 | 16,149 | 64.6% |
+| 100–999 | 14 | 6,219 | 24.9% |
 | 10–99 | 75 | 2,573 | 10.3% |
 | under 10 | 7 | 49 | 0.2% |
 
@@ -100,7 +100,7 @@ Classes here count assigned nodes. The result tables below group topics by regis
 | **W6** registration | record address: admitted record IP equals the packet source | pass | n/a |
 | **R1** registration | bucket size: registered plus waiting never exceed the bucket size | pass | n/a |
 | **R2** registration | bucket IP diversity: one registrar per /24 per bucket | not-exercised | n/a |
-| **R3** registration | state maintained: tables complete by search start and no bucket left empty with candidates | **fail** | n/a |
+| **R3** registration | state maintained: tables complete by search start and no bucket left empty with candidates | pass | n/a |
 | **L1** search | right topic: every result registers the requested topic | pass | pass |
 | **L2** search | capable results: no legacy node among results | not-exercised | not-exercised |
 | **L3** search | no expired results: no result down longer than a lifetime | pass | n/a |
@@ -111,19 +111,20 @@ Classes here count assigned nodes. The result tables below group topics by regis
 | **I2** search | base discovery: legacy nodes still find providers | not-exercised | **fail** |
 | **A1** load | request accounting: REGTOPIC and TOPICQUERY sent equal received | pass | n/a |
 | **A2** load | every query answered: TOPICNODES sent at least TOPICQUERY received per node | pass | pass |
-| **A3** load | registrar load bound: busiest registrar within a multiple of the median | pass | n/a |
+| **A3** load | registrar load bound: busiest registrar within a multiple of the median | **fail** | n/a |
 | **H1** load | no packet drops on any host | **fail** | **fail** |
-| **H2** load | complete collection: a trace for every node | pass | pass |
+| **H2** load | complete collection: a trace for every node | **fail** | pass |
 | **H3** load | hosts under load: node CPU and host memory within limits | pass | pass |
 
 Failures:
 
-- **W2** TopDisc: 3 of 16257041 admissions before the required wait
-- **W3** TopDisc: 10 of 17594107 repeated quotes undercut the lower bound
-- **R3** TopDisc: 6 final buckets idle with candidates left; over time: 196 idle spells beyond 120 s; 2568 of 24429 tables were still filling at search start (register_wait)
-- **I2** discv5: 86 of 23171 legacy nodes found nothing, 1829 online under 5 min of their search skipped
-- **H1** TopDisc: 38356604 packet drops: netem 138620, namespace UDP receive buffer 0, ARP 0, ENA allowance 38217984 (bw_out 837608, conntrack 37380376), host UDP receive buffer 0; veth 0; longest egress queue 436 kB (3.5 s at 1000 kbit/s)
-- **H1** discv5: 201722543 packet drops: netem 126, namespace UDP receive buffer 0, ARP 0, ENA allowance 201722417 (bw_out 25159, conntrack 201697258), host UDP receive buffer 0; veth 0; longest egress queue 377 kB (3.0 s at 1000 kbit/s)
+- **W2** TopDisc: 17 of 16347843 admissions before the required wait
+- **W3** TopDisc: 95 of 17667052 repeated quotes undercut the lower bound
+- **I2** discv5: 81 of 23170 legacy nodes found nothing, 1830 online under 5 min of their search skipped
+- **A3** TopDisc: busiest registrar at 10.2× the median, above 10.0×; bootnode 0 left out: 45692 queries, 5.2× the median
+- **H1** TopDisc: 1192568 packet drops: netem 251796, namespace UDP receive buffer 887, ARP 0, ENA allowance 939885 (bw_out 939885), host UDP receive buffer 0; veth 0; longest egress queue 428 kB (3.4 s at 1000 kbit/s)
+- **H1** discv5: 879268 packet drops: netem 1394, namespace UDP receive buffer 0, ARP 0, ENA allowance 877874 (bw_out 877874), host UDP receive buffer 0; veth 0; longest egress queue 340 kB (2.7 s at 1000 kbit/s)
+- **H2** TopDisc: 10 of 25000 traces missing
 
 ## 1. Registration and cache (TopDisc only)
 
@@ -135,9 +136,9 @@ Plain discv5 nodes publish their service in their node record and register nothi
 
 *(a) Registrars holding each registrant's ad; (b) ads held per registrar.*
 
-**Reading.** The median registrant is held by 93 registrars, so most ads reach many registrars. Under churn, 6.1 % of registrants fall below half that and 4.7 % below 10, and (b) reaches about 1,180 registrants per host for the largest topics.
+**Reading.** The median registrant is held by 93 registrars, so most ads reach many registrars. Under churn, 5.9 % of registrants fall below half that and 4.4 % below 10, and (b) reaches about 1,180 registrants per host for the largest topics.
 
-*Churn adds the outliers in (a). Under churn, 6.1 % of registrants sit below half the median fan-out of 93 (4.7 % under 10 registrars) and 0.3 % above 1.5× the median, up to 326. The same workload without churn (Grid’5000) has none outside the box: fan-out runs from 34 to 50 around a median of 43, with no registrant below half the median.*
+*Churn adds the outliers in (a). Under churn, 5.9 % of registrants sit below half the median fan-out of 93 (4.4 % under 10 registrars) and 0.3 % above 1.5× the median, up to 320. The same workload without churn (Grid’5000) has none outside the box: fan-out runs from 34 to 50 around a median of 43, with no registrant below half the median.*
 
 ### 04_id_space_registrants
 
@@ -145,7 +146,7 @@ Plain discv5 nodes publish their service in their node record and register nothi
 
 *Fan-out of each registrant across the ID space.*
 
-**Reading.** Fan-out is flat across the ID space, about 90 to 120 registrars in every size class, so placement does not depend on a registrant's ID. A minority of registrants sit near zero in every class, the churn outliers of 06_fanout.
+**Reading.** Fan-out is flat across the ID space, about 85 to 120 registrars in every size class, so placement does not depend on a registrant's ID. A minority of registrants sit near zero in every class, the churn outliers of 06_fanout.
 
 ### 04b_id_space_registrars
 
@@ -161,7 +162,7 @@ Plain discv5 nodes publish their service in their node record and register nothi
 
 *Ads held per registrar over all topics when the search phase starts, with the mean per node in 100 ID-space slices and the mean over all nodes, as a share of the 5,000-ad cache.*
 
-**Reading.** Registrars hold 87 ads on average, 1.7 % of the cache, so capacity is never a limit. Occupancy is uneven: it peaks near popular topic IDs, at 1,408 ads (28 %) beside the largest topic.
+**Reading.** Registrars hold 87 ads on average, 1.7 % of the cache, so capacity is never a limit. Occupancy is uneven: it peaks near popular topic IDs, at 1,188 ads (24 %) beside the largest topic.
 
 ### 07_registration_latency_bar
 
@@ -169,7 +170,7 @@ Plain discv5 nodes publish their service in their node record and register nothi
 
 *Mean ± 1σ time to first remote admission per topic.*
 
-**Reading.** Mean time to first remote admission is about 635 s with a standard deviation near 1,600 s in every size class. A long tail pulls the mean up, so this view does not show fast registration; the median is 0.7 s.
+**Reading.** Mean time to first remote admission is about 630 to 660 s with a standard deviation near 1,600 s in classes of 10 or more registrants, and 467 s under 10. A long tail pulls the mean up; the median is 0.8 s.
 
 ### 07_placement_time_idspace
 
@@ -177,7 +178,7 @@ Plain discv5 nodes publish their service in their node record and register nothi
 
 *Time to first admission across the ID space (earliest registrar).*
 
-**Reading.** Median time to place an ad is 0.7 s overall and 0.2 s for small topics, with no dependence on ID position. A spread of registrants takes 1,000 to 7,000 s, a tail of slow first admissions the median hides.
+**Reading.** Median time to place an ad is 0.8 s overall and 0.2 s for small topics, with no dependence on ID position. A spread of registrants takes 1,000 to 7,000 s, a tail of slow first admissions the median hides.
 
 ### oh_05_wait_time_cdf
 
@@ -185,7 +186,7 @@ Plain discv5 nodes publish their service in their node record and register nothi
 
 *(a) Waiting times quoted by registrars; (b) total time of every successful registration, from its first REGTOPIC to admission.*
 
-**Reading.** Registrars quote a median wait of 24 s and registrations complete in a median 49 s, down to 4 s for topics under 10 registrants. Every registration completes within about 1,350 s, the 1.5 × ad lifetime budget, so admission cost is bounded.
+**Reading.** Registrars quote a median wait of 25 s and registrations complete in a median 50 s, down to 4 s for topics under 10 registrants. Every registration completes within about 1,350 s, the 1.5 × ad lifetime budget, so admission cost is bounded.
 
 ### oh_08_cache_utilisation
 
@@ -193,7 +194,7 @@ Plain discv5 nodes publish their service in their node record and register nothi
 
 *Ads held network-wide and per topic against cache capacity, over time.*
 
-**Reading.** Ads held network-wide plateau at about 2.2 million after the registration window and caches are at most 1.90 % full. Registrations stay in place for the whole run under churn, and cache size never limits them.
+**Reading.** Ads held network-wide reach about 1.9 million by the end of the registration window and climb slowly to 2.2 million; caches are at most 1.92 % full. Registrations stay in place for the whole run under churn, and cache size never limits them.
 
 ## 2. Discovery
 
@@ -201,38 +202,38 @@ Plain discv5 nodes publish their service in their node record and register nothi
 
 | metric | TopDisc | discv5 |
 |---|---:|---:|
-| searchers | 24,977 | 24,945 |
-| found at least one provider | 98.4 % | 98.9 % |
-| time to first provider, p50 / p95 | 1.5 s / 57.9 min | 0 ms / 58.3 min |
-| first provider already in the routing table | – | 60 % |
-| **all topics**: share found at the end, median | 99.4 % | 72.2 % |
-| &nbsp;&nbsp;time to 50 %, median | 107.8 s (95 % reach) | 37.7 min (84 % reach) |
-| &nbsp;&nbsp;time to 90 %, median | 19.6 min (92 % reach) | not reached by half (0 % reach) |
-| &nbsp;&nbsp;time to 99 %, median | 84.4 min (78 % reach) | not reached by half (0 % reach) |
+| searchers | 24,967 | 24,946 |
+| found at least one provider | 98.4 % | 99.0 % |
+| time to first provider, p50 / p95 | 1.2 s / 57.5 min | 0 ms / 58.3 min |
+| first provider already in the routing table | – | 59 % |
+| **all topics**: share found at the end, median | 99.5 % | 71.3 % |
+| &nbsp;&nbsp;time to 50 %, median | 87.1 s (95 % reach) | 36.4 min (84 % reach) |
+| &nbsp;&nbsp;time to 90 %, median | 17.8 min (93 % reach) | not reached by half (0 % reach) |
+| &nbsp;&nbsp;time to 99 %, median | 83.3 min (81 % reach) | not reached by half (0 % reach) |
 | &nbsp;&nbsp;time to 100 %, median | not reached by half (11 % reach) | not reached by half (0 % reach) |
-| **1000+ nodes (4 topics)**: share found at the end, median | 99.3 % | 72.5 % |
-| &nbsp;&nbsp;time to 50 %, median | 2.5 min (93 % reach) | 37.2 min (84 % reach) |
-| &nbsp;&nbsp;time to 90 %, median | 20.0 min (91 % reach) | not reached by half (0 % reach) |
-| &nbsp;&nbsp;time to 99 %, median | 84.7 min (79 % reach) | not reached by half (0 % reach) |
+| **1000+ nodes (4 topics)**: share found at the end, median | 99.5 % | 71.7 % |
+| &nbsp;&nbsp;time to 50 %, median | 112.4 s (93 % reach) | 35.7 min (85 % reach) |
+| &nbsp;&nbsp;time to 90 %, median | 17.8 min (91 % reach) | not reached by half (0 % reach) |
+| &nbsp;&nbsp;time to 99 %, median | 83.1 min (85 % reach) | not reached by half (0 % reach) |
 | &nbsp;&nbsp;time to 100 %, median | not reached by half (0 % reach) | not reached by half (0 % reach) |
-| **100-999 nodes (14 topics)**: share found at the end, median | 99.4 % | 70.6 % |
-| &nbsp;&nbsp;time to 50 %, median | 15.2 s (98 % reach) | 40.0 min (85 % reach) |
-| &nbsp;&nbsp;time to 90 %, median | 22.1 min (96 % reach) | not reached by half (0 % reach) |
-| &nbsp;&nbsp;time to 99 %, median | 84.6 min (73 % reach) | not reached by half (0 % reach) |
-| &nbsp;&nbsp;time to 100 %, median | not reached by half (12 % reach) | not reached by half (0 % reach) |
-| **10-99 nodes (73 topics)**: share found at the end, median | 100.0 % | 71.8 % |
-| &nbsp;&nbsp;time to 50 %, median | 3.0 s (97 % reach) | 37.1 min (83 % reach) |
-| &nbsp;&nbsp;time to 90 %, median | 9.2 s (95 % reach) | not reached by half (3 % reach) |
-| &nbsp;&nbsp;time to 99 %, median | 61.4 min (77 % reach) | not reached by half (1 % reach) |
-| &nbsp;&nbsp;time to 100 %, median | 61.4 min (77 % reach) | not reached by half (1 % reach) |
-| **under 10 nodes (9 topics)**: share found at the end, median | 100.0 % | 80.0 % |
-| &nbsp;&nbsp;time to 50 %, median | 2.5 s (100 % reach) | 30.2 min (81 % reach) |
-| &nbsp;&nbsp;time to 90 %, median | 4.0 s (100 % reach) | not reached by half (23 % reach) |
-| &nbsp;&nbsp;time to 99 %, median | 4.0 s (100 % reach) | not reached by half (23 % reach) |
-| &nbsp;&nbsp;time to 100 %, median | 4.0 s (100 % reach) | not reached by half (23 % reach) |
+| **100-999 nodes (14 topics)**: share found at the end, median | 99.4 % | 69.7 % |
+| &nbsp;&nbsp;time to 50 %, median | 13.3 s (98 % reach) | 38.7 min (85 % reach) |
+| &nbsp;&nbsp;time to 90 %, median | 20.7 min (96 % reach) | not reached by half (0 % reach) |
+| &nbsp;&nbsp;time to 99 %, median | 85.0 min (72 % reach) | not reached by half (0 % reach) |
+| &nbsp;&nbsp;time to 100 %, median | not reached by half (14 % reach) | not reached by half (0 % reach) |
+| **10-99 nodes (73 topics)**: share found at the end, median | 100.0 % | 70.5 % |
+| &nbsp;&nbsp;time to 50 %, median | 2.5 s (97 % reach) | 36.5 min (83 % reach) |
+| &nbsp;&nbsp;time to 90 %, median | 7.6 s (94 % reach) | not reached by half (2 % reach) |
+| &nbsp;&nbsp;time to 99 %, median | 61.2 min (74 % reach) | not reached by half (0 % reach) |
+| &nbsp;&nbsp;time to 100 %, median | 61.2 min (74 % reach) | not reached by half (0 % reach) |
+| **under 10 nodes (9 topics)**: share found at the end, median | 100.0 % | 71.4 % |
+| &nbsp;&nbsp;time to 50 %, median | 2.3 s (100 % reach) | 34.1 min (78 % reach) |
+| &nbsp;&nbsp;time to 90 %, median | 2.9 s (100 % reach) | not reached by half (19 % reach) |
+| &nbsp;&nbsp;time to 99 %, median | 2.9 s (100 % reach) | not reached by half (19 % reach) |
+| &nbsp;&nbsp;time to 100 %, median | 2.9 s (100 % reach) | not reached by half (19 % reach) |
 
 
-*Two tails are worth reading against the same workload without churn (Grid’5000, see the separate no-churn report). Time to first provider at the 95th percentile is 57.9 min with churn against 4.9 s without: about 5 % of searchers wait most of the search for a first provider while providers leave and rejoin. Searchers that find no provider at all are 1.6 % with churn and 1.5 % without, so that share is not a churn effect; with churn, 95 % of them stopped searching within a minute of starting.*
+*Two tails are worth reading against the same workload without churn (Grid’5000, see the separate no-churn report). Time to first provider at the 95th percentile is 57.5 min with churn against 4.9 s without: about 5 % of searchers wait most of the search for a first provider while providers leave and rejoin. Searchers that find no provider at all are 1.6 % with churn and 1.5 % without, so that share is not a churn effect; with churn, 91.5 % of them stopped searching within a minute of starting.*
 
 ### cp_01_found_over_time
 
@@ -240,17 +241,17 @@ Plain discv5 nodes publish their service in their node record and register nothi
 
 *Share of its topic's other nodes each searcher had found, against time since its search started: median line, interquartile range shaded.*
 
-**Reading.** TopDisc's median searcher passes 85 % of its topic within about 10 min and ends at 99.4 %; discv5 climbs steadily to 72.2 %. TopDisc finds providers faster and more completely in every size class, and small topics almost at once.
+**Reading.** TopDisc's median searcher passes 85 % of its topic within about 5 min and ends at 99.5 %; discv5 climbs steadily to 71.3 %. TopDisc finds providers faster and more completely in every size class, and small topics almost at once.
 
 ### Share of the topic found by the end
 
 | Topics | TopDisc searchers | TopDisc: median | discv5: median | TopDisc: 10th pct | discv5: 10th pct | TopDisc: ≥ 90 % | discv5: ≥ 90 % | TopDisc: none found | discv5: none found |
 |---|---|---|---|---|---|---|---|---|---|
-| all topics | 24,977 | 99.4 % | 72.2 % | 95.2 % | 21.9 % | 92.5 % | 0.4 % | 1.6 % | 1.1 % |
-| 1000+ | 16,158 | 99.3 % | 72.5 % | 93.1 % | 18.4 % | 90.8 % | 0.0 % | 1.6 % | 0.6 % |
-| 100–999 | 6,220 | 99.4 % | 70.6 % | 97.7 % | 30.3 % | 95.7 % | 0.0 % | 1.1 % | 0.8 % |
-| 10–99 | 2,550 | 100.0 % | 71.9 % | 96.4 % | 16.7 % | 94.5 % | 2.9 % | 2.6 % | 4.9 % |
-| under 10 | 49 | 100.0 % | 80.0 % | 100.0 % | 14.3 % | 100.0 % | 28.6 % | 0.0 % | 8.2 % |
+| all topics | 24,967 | 99.5 % | 71.3 % | 95.9 % | 23.5 % | 92.9 % | 0.3 % | 1.6 % | 1.1 % |
+| 1000+ | 16,149 | 99.5 % | 71.7 % | 94.8 % | 20.1 % | 91.5 % | 0.0 % | 1.6 % | 0.6 % |
+| 100–999 | 6,219 | 99.4 % | 69.7 % | 97.7 % | 31.1 % | 95.9 % | 0.0 % | 1.0 % | 0.8 % |
+| 10–99 | 2,550 | 100.0 % | 70.6 % | 95.8 % | 18.3 % | 94.3 % | 2.6 % | 2.6 % | 4.7 % |
+| under 10 | 49 | 100.0 % | 71.4 % | 100.0 % | 27.9 % | 100.0 % | 22.4 % | 0.0 % | 4.1 % |
 
 *Share of its topic each searcher had found when the search phase ended; under churn, of the providers up at the end. Topic size classes by registrants.*
 
@@ -261,7 +262,7 @@ Plain discv5 nodes publish their service in their node record and register nothi
 
 *Time for each searcher to find 50 %, 90 % and 99 % of its topic, by topic size. Searchers that never got there count in the denominator, so a curve ends at the share that did; the legend gives the median time of those that did.*
 
-**Reading.** TopDisc takes 95 % of searchers to 50 % and 92 % to 90 % of their topic; discv5 reaches 90 % for almost none. With churn, time to 90 % for topics over 100 nodes is still 13 to 21 min.
+**Reading.** TopDisc takes 95 % of searchers to 50 % and 93 % to 90 % of their topic; discv5 reaches 90 % for almost none. With churn, time to 90 % for topics over 100 nodes is still 8 to 20 min.
 
 ### cp_09_discovery_rate
 
@@ -277,7 +278,7 @@ Plain discv5 nodes publish their service in their node record and register nothi
 
 *Share of all searchers that had found a provider, against time since their search started, on a log time axis. discv5 starts high because 60 % of its searchers already had a provider in their routing table. Counting any provider found, rather than only providers up at the end, gives the same curves.*
 
-**Reading.** TopDisc gives 83 % of searchers a provider within 10 s (median 1.5 s); discv5 starts at about 71 %. Both runs leave about 15 % waiting over 10 min and under 2 % find none; TopDisc does not shorten that tail.
+**Reading.** TopDisc gives 83 % of searchers a provider within 10 s (median 1.2 s); discv5 starts at about 71 %. Both runs leave about 15 % waiting over 10 min and under 2 % find none; TopDisc does not shorten that tail.
 
 
 
@@ -289,7 +290,7 @@ Plain discv5 nodes publish their service in their node record and register nothi
 
 *Requests each searcher's own search sent: TOPICQUERY for TopDisc, FINDNODE for the plain walk (fork build).*
 
-**Reading.** A TopDisc searcher sends a median 10,010 TOPICQUERY requests over the search, against 38,260 FINDNODE requests for discv5. TopDisc reaches its higher recall with about a quarter of the requests.
+**Reading.** A TopDisc searcher sends a median 11,459 TOPICQUERY requests over the search, against 43,741 FINDNODE requests for discv5. TopDisc reaches its higher recall with about a quarter of the requests.
 
 ### cp_11_lookup_latency
 
@@ -297,7 +298,7 @@ Plain discv5 nodes publish their service in their node record and register nothi
 
 *Scheduled lookups: time to reach F_lookup distinct providers.*
 
-**Reading.** Lookups reach F_lookup providers at a median 86.6 min for TopDisc and 87.2 min for discv5, so this view shows no clear gain. TopDisc completes more lookups early, about 35 % before 85 min against 24 %.
+**Reading.** Lookups reach F_lookup providers at a median 86.6 min for TopDisc and 87.2 min for discv5, so this view shows no clear gain. TopDisc completes more lookups early, about 35 % before 85 min against 25 %.
 
 ### cp_12_idspace_found_share
 
@@ -305,7 +306,7 @@ Plain discv5 nodes publish their service in their node record and register nothi
 
 *For each provider, the share of the other searchers of its topic that found it, across the ID space.*
 
-**Reading.** A median provider is found by 96 % of its topic's searchers with TopDisc against 72 % with discv5, evenly across the ID space. TopDisc still left 207 providers unfound, against 1,154 for discv5.
+**Reading.** A median provider is found by 96 % of its topic's searchers with TopDisc against 71 % with discv5, evenly across the ID space. TopDisc still left 200 providers unfound, against 1,409 for discv5.
 
 ### 12_search_bucket (TopDisc only)
 
@@ -313,7 +314,7 @@ Plain discv5 nodes publish their service in their node record and register nothi
 
 *Where searches query: share of TOPICQUERY requests per search-table bucket (0 = farthest from the topic) and, for adaptive searches, the median active bucket over search time.*
 
-**Reading.** The adaptive search settles where ads are dense: bucket 1 for the four largest topics and about bucket 11 for small ones, roughly one bucket per doubling of topic size (r = -0.83). Popular topics are not queried at their closest registrars.
+**Reading.** The adaptive search settles where ads are dense: bucket 1 to 3 for the four largest topics and 11 to 13 for topics under 100 nodes, one bucket per size doubling (r = -0.82). Popular topics are not queried at their closest registrars.
 
 ### oh_06_idspace_found_time (TopDisc only)
 
@@ -321,9 +322,9 @@ Plain discv5 nodes publish their service in their node record and register nothi
 
 *Time from when an ad could first be found (placed, with searches running) to its first discovery, across the ID space.*
 
-**Reading.** Most ads are first found within a few hundred seconds of placement, with no ID-space region left behind. Six providers were never found, and a few ads in mid-size topics waited over 3,000 s.
+**Reading.** Most ads are first found within a few hundred seconds of placement, with no ID-space region left behind. Five providers were never found, and a few ads in topics of 100 or more registrants waited over 3,000 s.
 
-*The 6 never-found registrants are churn. Each held ads when the search started, but its trace shows it up again only in the last minutes of the search (from minute 86 to 90): it was away for nearly the whole search, its ads expired, and it came back too late to be found.*
+*The 5 never-found registrants are churn. Each held ads when the search started, but its trace shows it up again only in the last minutes of the search (from minute 86 to 90): it was away for nearly the whole search, its ads expired, and it came back too late to be found.*
 
 
 
@@ -333,12 +334,12 @@ A search result is dead when it points at a node that was down at the moment the
 
 ![Dead nodes in search results](dead.png)
 
-**Reading.** TopDisc hands out more dead results, 4.0 % overall and 12 to 17 % of each minute's results after minute 20, but only 46 were down longer than an ad lifetime: a departed node's ad expires within 15 min. discv5 returns fewer dead results, 1.7 %, yet 142,520 had been down over 15 min, from routing-table entries that do not expire.
+**Reading.** TopDisc hands out more dead results, 4.3 % overall and 12 to 19 % of each minute's results after minute 20, but only 45 were down longer than an ad lifetime: a departed node's ad expires within 15 min. discv5 returns fewer dead results, 2.0 %, yet 202,713 had been down over 15 min, from routing-table entries that do not expire.
 
 | | Results | Dead when handed out | Dead for longer than an ad lifetime (15 min) |
 |---|---:|---:|---:|
-| TopDisc | 85,308,058 | 3,438,567 (4.0%) | 46 (0.00%) |
-| discv5 | 53,416,606 | 914,738 (1.7%) | 142,520 (0.27%) |
+| TopDisc | 86,715,547 | 3,747,905 (4.3%) | 45 (0.00%) |
+| discv5 | 53,189,055 | 1,089,983 (2.0%) | 202,713 (0.38%) |
 
 *Down is counted from the node's own trace where it covers the moment, else from the churn schedule. Results are counted each time a searcher received them.*
 
@@ -348,15 +349,15 @@ A search result is dead when it points at a node that was down at the moment the
 
 | metric | TopDisc | discv5 |
 |---|---:|---:|
-| sent per node, whole run, p50 / p95 | 23 MB / 66 MB | 29 MB / 50 MB |
-| requests served per node, whole run, p50 / max (bootnode left out) | 10,388 / 157,696 | 11,797 / 246,823 |
-| reply bytes sent per node, whole run, p50 / max (bootnode left out) | 16 MB / 283 MB | 22 MB / 565 MB |
-| bootnode: requests served / reply bytes sent, whole run | 432,939 / 493 MB | 430,394 / 685 MB |
-| &nbsp;&nbsp;share of bytes sent: registration | 5.3 % | 0.0 % |
-| &nbsp;&nbsp;share of bytes sent: topic search | 69.9 % | 0.0 % |
-| &nbsp;&nbsp;share of bytes sent: DHT (FINDNODE/NODES) | 21.2 % | 96.8 % |
-| &nbsp;&nbsp;share of bytes sent: liveness (PING/PONG) | 1.6 % | 1.7 % |
-| &nbsp;&nbsp;share of bytes sent: session and other | 1.9 % | 1.5 % |
+| sent per node, whole run, p50 / p95 | 25 MB / 100 MB | 33 MB / 69 MB |
+| requests served per node, whole run, p50 / max (bootnode left out) | 11,634 / 152,623 | 13,838 / 263,694 |
+| reply bytes sent per node, whole run, p50 / max (bootnode left out) | 17 MB / 342 MB | 26 MB / 607 MB |
+| bootnode: requests served / reply bytes sent, whole run | 312,698 / 276 MB | 430,217 / 681 MB |
+| &nbsp;&nbsp;share of bytes sent: registration | 4.2 % | 0.0 % |
+| &nbsp;&nbsp;share of bytes sent: topic search | 72.5 % | 0.0 % |
+| &nbsp;&nbsp;share of bytes sent: DHT (FINDNODE/NODES) | 20.0 % | 97.0 % |
+| &nbsp;&nbsp;share of bytes sent: liveness (PING/PONG) | 1.3 % | 1.3 % |
+| &nbsp;&nbsp;share of bytes sent: session and other | 2.0 % | 1.7 % |
 
 ### cp_13_idspace_traffic
 
@@ -364,7 +365,7 @@ A search result is dead when it points at a node that was down at the moment the
 
 *Bytes each node sent and received over the whole run, against its position in the ID space.*
 
-**Reading.** The median node sends 23 MB and receives 27 MB with TopDisc, against 29 and 30 MB with discv5, evenly across most of the ID space. Narrow spikes near two topic IDs reach about 200 MB sent.
+**Reading.** The median node sends 25 MB and receives 34 MB with TopDisc, against 33 and 38 MB with discv5, evenly across most of the ID space. Narrow spikes near two topic IDs reach about 200 MB sent.
 
 ### cp_14_msgtype
 
@@ -372,7 +373,7 @@ A search result is dead when it points at a node that was down at the moment the
 
 *Mean bytes per node by message category over the whole run: registration, topic search, DHT walk, liveness and session setup.*
 
-**Reading.** Both protocols send a mean 27 MB per node. TopDisc replaces most DHT walk traffic with topic search, and registration costs about 1.4 MB per node, so discovery costs no more on average.
+**Reading.** Both protocols send a mean 34 MB per node. TopDisc replaces most DHT walk traffic with topic search, and registration costs about 1.4 MB per node, so discovery costs no more on average.
 
 ### cp_04_traffic_over_time
 
@@ -380,7 +381,7 @@ A search result is dead when it points at a node that was down at the moment the
 
 *Bytes sent per node per second, by message category, over the whole run; dotted lines mark the phases. Each panel has its own y scale.*
 
-**Reading.** During search TopDisc nodes send about 5 kB/s against 5.5 to 6 kB/s for discv5, and registration stays below 0.3 kB/s. The TopDisc rate stays flat to the end, so it keeps querying after most providers are found.
+**Reading.** During search TopDisc nodes send 5.4 to 8.4 kB/s, peaking every 15 min, against about 7 kB/s for discv5; registration stays below 0.3 kB/s. The TopDisc rate does not fall toward the end, so it keeps querying after most providers are found.
 
 ### cp_15_peak_rate_idspace
 
@@ -388,7 +389,7 @@ A search result is dead when it points at a node that was down at the moment the
 
 *Highest sustained receive rate per node (3-sample moving window) in each ID-space bucket, over the whole run.*
 
-**Reading.** TopDisc's highest sustained receive rate per node is 19.5 messages/s against 11.5 for discv5, ranging from about 13 to 19.5 across the ID space. Peaks are higher with TopDisc but stay bounded and do not single out one region.
+**Reading.** TopDisc's highest sustained receive rate per node is 26.0 messages/s against 14.8 for discv5, ranging from about 17.5 to 26 across the ID space. Peaks are higher with TopDisc, highest around ID position 0.4 to 0.46, but stay bounded.
 
 ### cp_16_load_vs_topic_distance
 
@@ -396,7 +397,7 @@ A search result is dead when it points at a node that was down at the moment the
 
 *Load against a node's distance to the closest topic ID. TopDisc concentrates registrations and queries near topic IDs; a plain walk does not depend on topics.*
 
-**Reading.** At most distances TopDisc nodes receive fewer requests and send fewer bytes than discv5 nodes. Load peaks at log2 distance 241 to 242, slightly above discv5, not at the closest nodes, so topic IDs do not create hotspots.
+**Reading.** At most distances TopDisc nodes receive fewer requests and send fewer bytes than discv5 nodes. Load peaks at log2 distance 241, above discv5 there (about 39 against 31 MB sent), while the closest nodes, at 238 to 240, carry less.
 
 ### cp_17_cost_vs_topic_size
 
@@ -404,7 +405,7 @@ A search result is dead when it points at a node that was down at the moment the
 
 *Discovery requests each node sent over the whole run, and providers found per request, against the size of its topic. Whole-run counts include table upkeep and, for TopDisc, registration walks.*
 
-**Reading.** TopDisc nodes send fewer discovery requests than discv5 at every topic size and find 2 to 15 times more providers per request. Nodes of topics under 100 nodes still send about 3,000 to 4,000 requests, though their topics are found within seconds.
+**Reading.** TopDisc nodes send fewer discovery requests than discv5 at every topic size and find 2 to 30 times more providers per request. Nodes of topics under 100 nodes still send about 3,000 to 4,000 requests, though their topics are found within seconds.
 
 ### cp_06_serving_load
 
@@ -412,7 +413,7 @@ A search result is dead when it points at a node that was down at the moment the
 
 *Load each node carries for others over the whole run: requests received (FINDNODE, TOPICQUERY, REGTOPIC, PING) and bytes of the replies it sent (NODES, TOPICNODES, REGCONFIRMATION, PONG). The bootnode is in every routing table: it is left out of the CDFs and drawn as a vertical line.*
 
-**Reading.** Median requests served are 10,550 for TopDisc and 11,959 for discv5; the busiest non-bootnode serves 157,696 against 246,823. The bootnode still serves about 433,000, 41 times the TopDisc median, as under discv5.
+**Reading.** Median requests served are 11,875 for TopDisc and 14,118 for discv5; the busiest non-bootnode serves 152,623 against 263,694. The bootnode serves about 313,000 with TopDisc, 26 times the median, against 430,000 under discv5.
 
 ### oh_10_reg_vs_lookup (TopDisc only)
 
@@ -420,7 +421,7 @@ A search result is dead when it points at a node that was down at the moment the
 
 *Registration vs lookup traffic per node.*
 
-**Reading.** Per node, lookup traffic has a median of 37.2 MB, DHT upkeep 14.4 MB and registration 2.1 MB, so registration is a small part of the cost. Registration traffic rises to about 100 MB near the two largest topic IDs.
+**Reading.** Per node, lookup traffic has a median of 48.4 MB, DHT upkeep 17.0 MB and registration 2.1 MB, so registration is a small part of the cost. Registration traffic rises to 100 to 200 MB near the two largest topic IDs.
 
 ### oh_11_topic_load (TopDisc only)
 
@@ -428,7 +429,7 @@ A search result is dead when it points at a node that was down at the moment the
 
 *Load distribution per topic: search requests (TOPICQUERY) received and TOPICNODES bytes sent per registrar, and registration and lookup traffic per member.*
 
-**Reading.** Registrars receive a median 6,365 TOPICQUERY requests for the largest topics and 5 for topics under 10, so load follows topic size. The busiest registrar stays within 9.7 times the median; the bootnode receives 100,288, about 13 times.
+**Reading.** Registrars receive a median 7,535 TOPICQUERY requests for the largest topics and 6 for topics under 10, so load follows topic size. The busiest registrar receives 10.2 times the median, above the 10× limit; the bootnode receives 45,692, about 5 times.
 
 ## 4. Churn
 
@@ -436,30 +437,30 @@ Each departure's trace is kept and merged, so the counters cover every session; 
 
 | metric | TopDisc | discv5 |
 |---|---:|---:|
-| departures with a kept trace | 8,208 | 8,208 |
-| nodes that left at least once | 4,012 | 4,012 |
-| searchers with a provider down at the end | 22,555 of 24,977 | 22,523 of 24,945 |
+| departures with a kept trace | 8,176 | 8,208 |
+| nodes that left at least once | 4,002 | 4,012 |
+| searchers with a provider down at the end | 22,545 of 24,967 | 22,524 of 24,946 |
 | providers up at the end, share of the topic, median / min | 88 % / 32 % | 88 % / 32 % |
-| found at the end, share of the providers up, median | 99 % | 72 % |
+| found at the end, share of the providers up, median | 99 % | 71 % |
 
 ## 5. Run health
 
 | metric | TopDisc | discv5 |
 |---|---:|---:|
-| node CPU, p95 / max | 2 % / 14 % | 1 % / 10 % |
-| node RSS, p95 / max | 45 / 329 MB | 37 / 44 MB |
+| node CPU, p95 / max | 3 % / 13 % | 2 % / 9 % |
+| node RSS, p95 / max | 47 / 161 MB | 38 / 51 MB |
 | UDP receive-buffer drops | 0 | 0 |
 
 TopDisc:
 
 ```
-hostmetrics: 12350 samples over 50 hosts; node cpu% p50=0 p95=2 max=13; rss MB p50=29 p95=45 max=329; 38356604 packet drops (treat timings with care): netem 138620, namespace UDP receive buffer 0, ARP 0, ENA allowance 38217984, host UDP receive buffer 0
+hostmetrics: 12500 samples over 50 hosts; node cpu% p50=0 p95=2 max=13; rss MB p50=30 p95=46 max=160; 1192568 packet drops (treat timings with care): netem 251796, namespace UDP receive buffer 887, ARP 0, ENA allowance 939885, host UDP receive buffer 0
 ```
 
 discv5:
 
 ```
-hostmetrics: 11978 samples over 50 hosts; node cpu% p50=1 p95=1 max=9; rss MB p50=26 p95=37 max=44; 201722543 packet drops (treat timings with care): netem 126, namespace UDP receive buffer 0, ARP 0, ENA allowance 201722417, host UDP receive buffer 0
+hostmetrics: 12039 samples over 50 hosts; node cpu% p50=1 p95=1 max=9; rss MB p50=27 p95=38 max=50; 879268 packet drops (treat timings with care): netem 1394, namespace UDP receive buffer 0, ARP 0, ENA allowance 877874, host UDP receive buffer 0
 ```
 
 Every node runs plain discv5, so the TopDisc registration and topic-search figures are left out. `compare_protocols.py` puts this run next to its TopDisc pair.
@@ -478,16 +479,16 @@ The same 25,000-node workload ran on Grid'5000 without churn and with a 6 h sear
 | Metric | Grid'5000, no churn: TopDisc | Grid'5000, no churn: discv5 | AWS, churn: TopDisc | AWS, churn: discv5 |
 |---|---:|---:|---:|---:|
 | Search phase | 6 h | 6 h | 90 min | 90 min |
-| Recall, median | 98.5 % | 99.5 % | 99.4 % | 72.2 % |
-| Time to 50 % of providers, median | 42.5 s | 42.8 min | 108 s | 37.7 min |
-| Time to 90 %, median | 2.7 min | 2.5 h | 19.6 min | not reached |
-| Time to first provider, median | 1.2 s | 0 s (62 % in table) | 1.5 s | 0 s (60 % in table) |
-| Found at least one provider | 98.5 % | 100.0 % | 98.4 % | 98.9 % |
-| Time to 90 %, topics of 10 to 99 nodes | 3.3 s | 2.5 h | 9.2 s | not reached |
+| Recall, median | 98.5 % | 99.5 % | 99.5 % | 71.3 % |
+| Time to 50 % of providers, median | 42.5 s | 42.8 min | 87 s | 36.4 min |
+| Time to 90 %, median | 2.7 min | 2.5 h | 17.8 min | not reached |
+| Time to first provider, median | 1.2 s | 0 s (62 % in table) | 1.2 s | 0 s (59 % in table) |
+| Found at least one provider | 98.5 % | 100.0 % | 98.4 % | 99.0 % |
+| Time to 90 %, topics of 10 to 99 nodes | 3.3 s | 2.5 h | 7.6 s | not reached |
 
 - **Without churn** a random walk eventually meets every provider, so discv5's recall ends at 99.5 % after 6 h. The cost is time: half of a topic's providers after 43 min, 90 % after 2.5 h.
-- **With churn** providers leave and rejoin during the search and only those still up count. A 90 min walk does not keep up: discv5 ends at 72.2 %. TopDisc finds providers through registrars that hold fresh ads, so its recall stays at 99.4 %.
-- TopDisc takes longer to reach 90 % with churn: 19.6 min against 2.7 min without.
+- **With churn** providers leave and rejoin during the search and only those still up count. A 90 min walk does not keep up: discv5 ends at 71.3 %. TopDisc finds providers through registrars that hold fresh ads, so its recall stays at 99.5 %.
+- TopDisc takes longer to reach 90 % with churn: 17.8 min against 2.7 min without.
 - On Grid'5000, 375 TopDisc searchers (1.5 %) found no provider at all.
 - Grid'5000 runs used fork `v1.17.2-testbed.14`; the hosts ran 500 to 521 nodes each, and discv5 hosts were CPU-saturated.
 
@@ -511,7 +512,7 @@ The original search asked the registrars closest to the topic ID first and staye
 
 A topic search runs in **passes**. A pass builds a fresh search table from the node's routing table, sorted into 18 buckets by distance to the topic, and queries registrars one at a time, starting from the active bucket; it ends when that bucket is used up or after 32 queries. The next pass starts after a short gap and builds its table again.
 
-The adaptive search ([#144](https://github.com/datahop/go-ethereum/pull/144)) moves the active bucket by the ad yield of recent replies: outward when replies are full, inward when they are empty, and it stays when they carry at least 8 ads. Each pass is capped at 32 queries, nodes asked in the last ad lifetime are not asked again, and the gap between passes that find nothing new grows from 2 s to 60 s. In the simulator the busiest-to-median ratio fell to 7.2× at 30,000 nodes and 33× at 250,000; the 25k AWS run with churn measured 9.7×.
+The adaptive search ([#144](https://github.com/datahop/go-ethereum/pull/144)) moves the active bucket by the ad yield of recent replies: outward when replies are full, inward when they are empty, and it stays when they carry at least 8 ads. Each pass is capped at 32 queries, nodes asked in the last ad lifetime are not asked again, and the gap between passes that find nothing new grows from 2 s to 60 s. In the simulator the busiest-to-median ratio fell to 7.2× at 30,000 nodes and 33× at 250,000; the 25k AWS run with churn measured 10.2×.
 
 ### One registrar filling a reply: result filter and mixer
 
@@ -531,7 +532,11 @@ Searches asked the same unreachable table entries again on every pass, and regis
 
 ### Tickets
 
-A ticket could be replayed within its window ([#69](https://github.com/datahop/go-ethereum/issues/69)) and handed to another node ([#68](https://github.com/datahop/go-ethereum/issues/68)). Tickets are now single use ([#153](https://github.com/datahop/go-ethereum/pull/153)) and bound to the advertiser's node ID ([#160](https://github.com/datahop/go-ethereum/pull/160)).
+A ticket is the registrar's receipt for the time an advertiser has already waited, so the advertiser can come back later and be credited that wait instead of starting over. The registrar keeps no state for it: the ticket travels with the advertiser and is sealed with an HMAC under a key only the registrar holds, rotated every 6 h or 100,000 tickets.
+
+A sealed ticket carries the topic, the advertiser's node ID, the wait it was quoted, when it was last used and when the waiting started. When an advertiser returns, the registrar checks the MAC, then compares the ticket's node ID with the node ID of the discv5 session the REGTOPIC arrived on. That ID comes from the session's handshake, which proves the sender holds the node's private key. A ticket presented by any other node is answered as a new attempt and stays redeemable by its owner ([#160](https://github.com/datahop/go-ethereum/pull/160), which fixed [#68](https://github.com/datahop/go-ethereum/issues/68): before it, tickets named only the topic and any node could use another's).
+
+A ticket is valid in a 5 s window starting when its quoted wait ends, and is credited up to 10 s late. It is also single use: the registrar remembers each redeemed ticket by its MAC for the length of the window plus the grace, so the same ticket cannot be replayed within its window ([#153](https://github.com/datahop/go-ethereum/pull/153), which fixed [#69](https://github.com/datahop/go-ethereum/issues/69)).
 
 ### Other fixes
 
