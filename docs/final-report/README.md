@@ -504,13 +504,16 @@ Grid'5000 pair, found over time and time to reach a share of providers:
 
 ## Partial deployment
 
-TopDisc searchers find the TopDisc providers of their topic at every share tested, and nodes that do not run TopDisc are not hurt. Full analysis, with results by topic size and the coexistence checks: [partial deployment report](deploy/). Four 5,000-node AWS runs with churn and the same workload as above (fork `v1.17.2-testbed.23`, 90 min search) ran TopDisc on 25, 50, 75 and 100 % of the nodes, drawn within every topic; the rest ran plain discv5. A 0 % run is the plain baseline. TopDisc searchers are scored against the TopDisc providers of their topic, plain searchers against all providers, counting only providers up at the end.
+TopDisc searchers find the TopDisc providers of their topic from 5 % deployment on, and nodes that do not run TopDisc are not hurt at any share; at 1 %, TopDisc nodes are too scarce to find each other reliably. Full analysis, with results by topic size and the coexistence checks: [partial deployment report](deploy/). 5,000-node AWS runs with churn and the same workload as above (fork `v1.17.2-testbed.23`, 90 min search) ran TopDisc on 1, 5, 10, 25, 50, 75 and 100 % of the nodes, drawn within every topic; the rest ran plain discv5. A 0 % run is the plain baseline. TopDisc searchers are scored against the TopDisc providers of their topic, plain searchers against all providers, counting only providers up at the end.
 
 ![Partial deployment](deploy.png)
 
 | TopDisc share | TopDisc recall, median / 10th pct | TopDisc time to 50 % / 90 % | Plain recall, median | Plain time to 50 % | Registrar requests, median / busiest |
 |---:|---:|---:|---:|---:|---:|
 | 0 % | – | – | 89.9 % | 7.7 min | – |
+| 1 % | 83.3 / 0.0 % | 8.0 min / not reached | 89.5 % | 7.6 min | 4 / 951 |
+| 5 % | 100.0 / 74.1 % | 4.5 s / 8.6 min | 88.1 % | 7.6 min | 813 / 3,385 |
+| 10 % | 100.0 / 96.9 % | 3.4 s / 16.8 min | 90.5 % | 7.6 min | 1,149 / 6,427 |
 | 25 % | 100.0 / 94.7 % | 5.3 s / 9.0 min | 91.5 % | 7.5 min | 1,785 / 11,614 |
 | 50 % | 99.8 / 95.5 % | 7.6 s / 18.1 min | 93.2 % | 7.4 min | 2,808 / 18,794 |
 | 75 % | 99.8 / 96.2 % | 10.1 s / 15.8 min | 95.2 % | 7.4 min | 4,005 / 25,578 |
@@ -518,8 +521,8 @@ TopDisc searchers find the TopDisc providers of their topic at every share teste
 
 *Registrar requests are REGTOPIC plus TOPICQUERY received per TopDisc registrar over the run, bootnode left out.*
 
-- **Every share works.** At 25 % TopDisc searchers reach a median 100 % of their providers and half of them in 5.3 s; plain searchers need 7.5 min for half of theirs.
-- **Fewer TopDisc nodes do not overload registrars.** Load scales with the number of TopDisc nodes: at 25 % the busiest registrar receives 11,614 requests, against 31,000 at 100 %.
+- **Every share from 5 % works.** At 1 % (46 TopDisc nodes) the median TopDisc searcher finds 83.3 % and is no faster than a plain walk. At 25 % TopDisc searchers reach a median 100 % of their providers and half of them in 5.3 s; plain searchers need 7.5 min for half of theirs.
+- **Fewer TopDisc nodes do not overload registrars.** Load scales with the number of TopDisc nodes: at 5 % the busiest registrar receives 3,385 requests, at 25 % 11,614, against 31,000 at 100 %.
 - **Plain nodes are not hurt.** No topic message reaches a plain node at any share (check I1 passes). Plain recall rises from 89.9 % at 0 % to 95.2 % at 75 %, and plain nodes send less: fewer plain walkers send FINDNODE to them. The rise is observed, not explained.
 - **Small topics at low share.** At 25 %, 23 of 98 topics have no TopDisc node and 29 have exactly one, so a lone TopDisc node has nobody to find; such searchers are not scorable.
 - **Time to 90 % is slower at 50 % and 75 % than at 25 % or 100 %.** These runs do not show why.
