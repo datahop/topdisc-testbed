@@ -418,7 +418,8 @@ class TestCheckLogic(unittest.TestCase):
         self.assertEqual(v["status"], "fail")
         self.assertEqual(v["evidence"]["by_category"],
                          {"netem": 40, "namespace UDP receive buffer": 7, "ARP": 5, "ENA allowance": 11, "host UDP receive buffer": 2})
-        self.assertEqual(v["evidence"]["drops"], 65)
+        self.assertEqual(v["evidence"]["drops"], 28)  # veth counts; netem is modelled link loss, not counted
+        self.assertEqual(v["evidence"]["modelled_link_loss"], {"netem": 40})
         self.assertEqual((v["evidence"]["veth_dropped"], v["evidence"]["ns_udp_sndbuf_errors"]), (3, 41))
         self.assertEqual(v["evidence"]["ena_allowance"], {"pps": 11, "bw_in": 0, "bw_out": 0, "conntrack": 0, "linklocal": 0})
         self.assertEqual(v["evidence"]["coverage_gaps"], {})
@@ -435,7 +436,7 @@ class TestCheckLogic(unittest.TestCase):
         host = [self.smp(0, netns={"qdisc_drops": 0}), self.smp(1, netns={"qdisc_drops": 100}),
                 self.smp(2, netns={"qdisc_drops": 0}, sampled=0)]
         v = self.h1(host)
-        self.assertEqual((v["status"], v["evidence"]["by_category"]["netem"]), ("fail", 100))
+        self.assertEqual((v["status"], v["evidence"]["by_category"]["netem"]), ("needs-data", 100))
         self.assertEqual(v["evidence"]["coverage_gaps"], {"netns": 1})
         self.assertIn("not measured throughout: netns on 1 hosts", v["summary"])
         # a sample that read only some namespaces is no comparison point either
@@ -469,7 +470,7 @@ class TestCheckLogic(unittest.TestCase):
                          for k in range(2)])
             self.assertEqual(v["status"], status)
             self.assertEqual(v["evidence"]["by_category"], {"ENA allowance": grow, "host UDP receive buffer": 0})
-        self.assertEqual(v["summary"], "3 packet drops: ENA allowance 3 (bw_out 3), host UDP receive buffer 0")
+        self.assertEqual(v["summary"], "3 packet drops up to the stop: ENA allowance 3 (bw_out 3), host UDP receive buffer 0")
         late = [self.smp(0, ena_error="no default route"), self.smp(1, ena_iface="ens5", ena_pps_allowance_exceeded=10),
                 self.smp(2, ena_iface="ens5", ena_pps_allowance_exceeded=20)]
         v = self.h1(late)
@@ -490,7 +491,48 @@ class TestCheckLogic(unittest.TestCase):
         """A run whose samples predate the namespace counters keeps H1's root-namespace verdict."""
         run = checks.Run(self.rd)
         v = checks.h1_no_drops(run, checks.argparser().parse_args([self.rd]))
-        self.assertEqual((v["status"], v["summary"], v["evidence"]), ("fail", "6 UDP receive-buffer drops", {"drops": 6, "hosts": 2}))
+        self.assertEqual((v["status"], v["summary"], v["evidence"]),
+                         ("fail", "6 UDP receive-buffer drops up to the stop", {"drops": 6, "hosts": 2, "drops_with_after_stop": 6}))
+
+    def test_h1_window_and_netem(self):
+        """H1 counts drops up to the stop only, and netem's as modelled link loss, not as a failure."""
+        stop = T0 + 3_600_000
+        after = [self.smp(k, netns={"qdisc_drops": 0}, ena_iface="ens5", ena_bw_out_allowance_exceeded=500 * (k > stop - T0 + 20_000))
+                 for k in (0, 1, 3_610_000, 3_630_000)]
+        v = self.h1(after)
+        self.assertEqual((v["status"], v["evidence"]["drops"], v["evidence"]["stop_ms"]), ("pass", 0, stop), v["summary"])
+        self.assertEqual(v["evidence"]["by_category_with_after_stop"]["ENA allowance"], 500)
+        self.assertEqual(v["evidence"]["ena_allowance_with_after_stop"]["bw_out"], 500)
+        self.assertIn("after the stop, not counted: ENA allowance 500", v["summary"])
+        v = self.h1([self.smp(k, netns={"qdisc_drops": 70 * k}) for k in range(3)])
+        self.assertEqual((v["status"], v["evidence"]["drops"], v["evidence"]["modelled_link_loss"]), ("pass", 0, {"netem": 140}), v["summary"])
+        self.assertIn("modelled link loss, not counted: netem 140", v["summary"])
+        v = self.h1([self.smp(k, netns={"qdisc_drops": 70 * k, "ns_udp_rcvbuf_errors": 3 * k}) for k in range(3)])
+        self.assertEqual((v["status"], v["evidence"]["drops"]), ("fail", 6))
+        self.assertTrue(v["summary"].startswith("6 packet drops up to the stop: namespace UDP receive buffer 6"), v["summary"])
+        v = self.h1([self.smp(k, netns={"veth_rx_dropped": 4 * k}) for k in range(2)])
+        self.assertEqual((v["status"], v["evidence"]["drops"], v["evidence"]["veth_dropped"]), ("fail", 4, 4), v["summary"])
+
+    def test_h1_interval_crossing_stop(self):
+        """Drops in the interval crossing the stop may predate it: they count, and are reported apart."""
+        stop = 3_600_000
+        v = self.h1([self.smp(k, netns={"ns_udp_rcvbuf_errors": n}) for k, n in ((0, 0), (stop - 100, 0), (stop + 100, 100), (stop + 300, 150))])
+        self.assertEqual((v["status"], v["evidence"]["drops"], v["evidence"]["interval_crossing_stop"]), ("fail", 100, {"namespace UDP receive buffer": 100}))
+        self.assertIn("in the interval crossing the stop: namespace UDP receive buffer 100; after the stop, not counted: namespace UDP receive buffer 50", v["summary"])
+        # a sample taken at the stop ends the window: no interval crosses it
+        v = self.h1([self.smp(k, netns={"ns_udp_rcvbuf_errors": n}) for k, n in ((0, 0), (stop, 0), (stop + 10, 7))])
+        self.assertEqual((v["status"], v["evidence"]["drops"], v["evidence"]["interval_crossing_stop"]), ("pass", 0, {}), v["summary"])
+        self.assertIn("after the stop, not counted: namespace UDP receive buffer 7", v["summary"])
+
+    def test_h1_category_only_after_stop(self):
+        """A counter first read after the window is reported after the stop, not a KeyError."""
+        stop = 3_600_000
+        host = [self.smp(k, netns={}) for k in (0, stop - 100, stop + 100)]
+        host += [self.smp(stop + k, netns={}, ena_iface="ens5", ena_bw_out_allowance_exceeded=n) for k, n in ((200, 5), (300, 9))]
+        v = self.h1(host)
+        self.assertNotIn("ENA allowance", v["evidence"]["by_category"])
+        self.assertEqual((v["evidence"]["drops"], v["evidence"]["by_category_with_after_stop"]["ENA allowance"]), (0, 4))
+        self.assertIn("after the stop, not counted: ENA allowance 4", v["summary"])
 
     def test_churn_from_node0_search_start(self):
         run = checks.Run(self.rd)
@@ -605,6 +647,43 @@ class TestCheckLogic(unittest.TestCase):
         self.assertEqual((v["status"], v["summary"]), ("not-exercised", "6 searchers skipped: online under 16667 min of their search"))
         self.assertEqual(v["evidence"], {"skipped": 6, "churn_base": "node 0"})
 
+    def adm_only(self, i, evs, **kw):
+        """Node i's admission events (and trace fields kw), every other node's none."""
+        for j in range(6):
+            t = read(os.path.join(self.rd, f"traces/node{j}.json"))
+            t["admissions"] = evs if j == i else []
+            if j == i:
+                t.update(kw)
+            write(self.rd, f"traces/node{j}.json", t)
+        return checks.Run(self.rd), checks.argparser().parse_args([self.rd])
+
+    def test_w2_truncation(self):
+        """W2 allows 1 ms past the floor for the two millisecond truncations, not 2."""
+        evs = [admission(T0, nid(1), requiredMs=10_000, waitedMs=8_999), admission(T0 + 1, nid(2), requiredMs=10_000, waitedMs=8_998)]
+        v = checks.w2_no_early_admission(*self.adm_only(0, evs))
+        self.assertEqual((v["status"], v["evidence"]["offenders"], v["evidence"]["truncation_ms"]), ("fail", [(0, nid(2)[:8], 8_998, 10_000)], 1))
+        self.assertIn("recorded before Register's own clock read", v["summary"])
+        v = checks.w2_no_early_admission(*self.adm_only(0, evs[:1]))
+        self.assertEqual(v["status"], "pass", v["summary"])
+        self.assertIn("1 ms truncation allowance", v["summary"])
+
+    def test_w3_session_and_emptied_topic(self):
+        """W3 compares quotes within a registrar session only, and not across a time its topic held no ad."""
+        def quote(at, adv, q, topic=TA, **kw):
+            return admission(at, adv, topic=topic, quoteMs=q, waitedMs=0, admitted=False, **kw)
+        evs = [quote(T0, nid(1), 500_000), quote(T0 + 20_000, nid(1), 1_000),  # across the restart at T0 + 10 s
+               quote(T0 + 30_000, nid(2), 500_000, TB), quote(T0 + 40_000, nid(3), 0, TB, topicHeld=0),  # TB empty at T0 + 40 s
+               quote(T0 + 50_000, nid(2), 1_000, TB),
+               quote(T0 + 60_000, nid(4), 500_000), quote(T0 + 80_000, nid(4), 1_000),  # TA absent from the sample at T0 + 70 s
+               quote(T0 + 90_000, nid(5), 500_000), quote(T0 + 100_000, nid(5), 1_000)]  # a true undercut
+        smp = [{"at_ms": T0 + 70_000, "cache_held": 1, "cache_cap": 10, "cache_by_topic": {TB: 1}},
+               {"at_ms": T0 + 95_000, "cache_held": 0, "cache_cap": 0, "cache_by_topic": {}}]  # a failed occupancy read: no evidence
+        sessions = [{"start_ms": T0 - 10_000, "end_ms": T0 + 5_000}, {"start_ms": T0 + 10_000, "end_ms": T0 + 200_000}]
+        v = checks.w3_lower_bound(*self.adm_only(0, evs, sessions=sessions, samples=smp))
+        self.assertEqual((v["status"], v["evidence"]["pairs"], v["evidence"]["skipped_restart"], v["evidence"]["skipped_emptied"]), ("fail", 1, 1, 2))
+        self.assertEqual(v["evidence"]["offenders"], [(0, nid(5)[:8], 500_000, 1_000, 10_000)])
+        self.assertIn("skipped 1 pairs across a registrar restart and 2 across a topic that emptied at the registrar", v["summary"])
+
     def test_wait_slack(self):
         """W1 allows the registrar's wall-clock wait a share past the attempt timeout."""
         timeout = 1_350_000
@@ -692,6 +771,49 @@ class TestCheckLogic(unittest.TestCase):
         run.legacy = {0: True}  # a plain bootnode is no registrar: nothing to report
         run.oh[0]["byType"] = {}
         self.assertEqual(checks.a3_load_bound(run, tol)["evidence"]["bootnodes"], [])
+
+    def test_a3_findnode_bound(self):
+        """A3 bounds the TOPICQUERY skew by the DHT's own FINDNODE skew over the same registrars, at least the load multiple."""
+        run = checks.Run(self.rd)
+        tol = checks.argparser().parse_args([self.rd])
+        run.legacy, run.bootnodes = {}, {0}
+
+        def a3(findnode):
+            tq = [5000, 100, 100, 100, 1500]  # 15× the median, the bootnode left out
+            run.oh = [{"idx": i, "byType": {"TOPICQUERY/v5": {"rxMsgs": q}, **({"FINDNODE/v5": {"rxMsgs": f}} if findnode else {})}}
+                      for i, (q, f) in enumerate(zip(tq, findnode or tq))]
+            return checks.a3_load_bound(run, tol)
+
+        v = a3([9000, 100, 100, 100, 2000])  # FINDNODE at 20×
+        self.assertEqual((v["status"], v["evidence"]["multiple"], v["evidence"]["findnode_multiple"], v["evidence"]["bound"]), ("pass", 15.0, 20.0, 20.0))
+        self.assertIn("FINDNODE at 20.0× (2000 vs 100), bound max(10×, FINDNODE) = 20.0×", v["summary"])
+        v = a3([9000, 100, 100, 100, 1200])  # FINDNODE at 12×
+        self.assertEqual((v["status"], v["evidence"]["bound"]), ("fail", 12.0))
+        # registrars without FINDNODE in their sparse counters received none: 0, 0, 100, 200, 2000 is 20×, not 10×
+        run.oh = [{"idx": i, "byType": {"TOPICQUERY/v5": {"rxMsgs": q}, **({"FINDNODE/v5": {"rxMsgs": f}} if f else {})}}
+                  for i, (q, f) in enumerate(zip([5000, 100, 100, 100, 100, 1500], [9000, 0, 0, 100, 200, 2000]))]
+        v = checks.a3_load_bound(run, tol)
+        self.assertEqual((v["status"], v["evidence"]["findnode_median"], v["evidence"]["bound"]), ("pass", 100, 20.0))
+        # FINDNODE busy at one registrar, median 0: its skew is unbounded, so A3 cannot be shown violated
+        run.oh = [{"idx": i, "byType": {"TOPICQUERY/v5": {"rxMsgs": q}, "FINDNODE/v5": {"rxMsgs": f}}}
+                  for i, (q, f) in enumerate(zip([50, 1, 1, 20], [50, 0, 0, 100]))]
+        v = checks.a3_load_bound(run, tol)
+        self.assertEqual((v["status"], v["evidence"]["multiple"], v["evidence"]["findnode_median"], v["evidence"]["bound"]), ("pass", 20.0, 0, None))
+        self.assertIn("FINDNODE median 0 (busiest 100), its skew unbounded", v["summary"])
+        for n in run.oh:  # FINDNODE counted but none received: the load multiple alone
+            n["byType"]["FINDNODE/v5"]["rxMsgs"] = 0
+        self.assertEqual((checks.a3_load_bound(run, tol)["status"], checks.a3_load_bound(run, tol)["evidence"]["bound"]), ("fail", 10.0))
+        # both medians 0: the TOPICQUERY skew is unbounded, but so is the DHT's, so no excess can be shown
+        run.oh = [{"idx": i, "byType": {"TOPICQUERY/v5": {"rxMsgs": n}, "FINDNODE/v5": {"rxMsgs": n}}} for i, n in enumerate([50, 0, 0, 100])]
+        v = checks.a3_load_bound(run, tol)
+        self.assertEqual((v["status"], v["evidence"]["median"], v["evidence"]["findnode_max"], v["evidence"]["bound"]), ("pass", 0, 100, None))
+        self.assertIn("FINDNODE median 0 too (busiest 100), its skew unbounded", v["summary"])
+        for n in run.oh:  # FINDNODE counted but none received: concentrated TOPICQUERY still fails
+            n["byType"]["FINDNODE/v5"]["rxMsgs"] = 0
+        self.assertEqual(checks.a3_load_bound(run, tol)["status"], "fail")
+        v = a3(None)  # no FINDNODE counts: the load multiple alone
+        self.assertEqual((v["status"], v["evidence"]["bound"]), ("fail", 10.0))
+        self.assertIn("no FINDNODE counts, bound 10×", v["summary"])
 
     def test_bootnodes_from_assignments(self):
         """The bootnode is every node's first bootnode; the bootstrap sample after it is not."""
