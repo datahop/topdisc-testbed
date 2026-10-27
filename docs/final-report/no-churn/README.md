@@ -474,4 +474,5 @@ The behaviour changes above are written into the spec amendments in datahop/devp
 1. The ticket binding to the advertiser's node ID (#160); the spec's ticket-transfer text is stale.
 2. The spec asks tickets to bind an `adDigest` (record and payload); the code binds node ID and topic only.
 3. Rate limiting of empty-ticket REGTOPIC ([#63](https://github.com/datahop/go-ethereum/issues/63)).
-4. Final values for `C`, `G`, `K_register` and `F_return` ([#12](https://github.com/datahop/go-ethereum/issues/12)).
+4. The REGTOPIC field order: the wire spec lists `[request-id, topic, ENR, ticket, distances]`, while the implementation encodes `[request-id, topic, ticket, ENR, distances]` (`v5wire/msg.go`).
+5. Final values for `C`, `G`, `K_register` and `F_return` ([#12](https://github.com/datahop/go-ethereum/issues/12)).
