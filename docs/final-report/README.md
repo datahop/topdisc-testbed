@@ -502,6 +502,30 @@ Grid'5000 pair, found over time and time to reach a share of providers:
 
 **Reading.** Without churn, TopDisc takes 98 % of searchers to 90 % of their topic at a median 2.6 min, against 2.5 h for discv5. Only 8 % of TopDisc searchers reach 99 %, against 88 % for discv5 after 5.2 h.
 
+## Partial deployment
+
+TopDisc searchers find the TopDisc providers of their topic at every share from 5 % to 100 %, and nodes that do not run TopDisc are not hurt. Full analysis, with results by topic size and the coexistence checks: [partial deployment report](deploy/). 5,000-node AWS runs with churn and the same workload as above (fork `v1.17.2-testbed.23`, 90 min search) ran TopDisc on 5, 10, 25, 50, 75 and 100 % of the nodes, drawn within every topic; the rest ran plain discv5. A 0 % run is the plain baseline. TopDisc searchers are scored against the TopDisc providers of their topic, plain searchers against all providers, counting only providers up at the end.
+
+![Partial deployment](deploy.png)
+
+| TopDisc share | TopDisc recall, median / 10th pct | TopDisc time to 50 % / 90 % | Plain recall, median | Plain time to 50 % | Registrar requests, median / busiest |
+|---:|---:|---:|---:|---:|---:|
+| 0 % | – | – | 89.9 % | 7.7 min | – |
+| 5 % | 100.0 / 74.1 % | 4.5 s / 8.6 min | 88.1 % | 7.6 min | 813 / 3,385 |
+| 10 % | 100.0 / 96.9 % | 3.4 s / 16.8 min | 90.5 % | 7.6 min | 1,149 / 6,427 |
+| 25 % | 100.0 / 94.7 % | 5.3 s / 9.0 min | 91.5 % | 7.5 min | 1,785 / 11,614 |
+| 50 % | 99.8 / 95.5 % | 7.6 s / 18.1 min | 93.2 % | 7.4 min | 2,808 / 18,794 |
+| 75 % | 99.8 / 96.2 % | 10.1 s / 15.8 min | 95.2 % | 7.4 min | 4,005 / 25,578 |
+| 100 % | 99.8 / 97.1 % | 15.3 s / 11.7 min | – | – | 5,082 / 31,000 |
+
+*Registrar requests are REGTOPIC plus TOPICQUERY received per TopDisc registrar over the run, bootnode left out.*
+
+- **Every share works.** At 5 % TopDisc searchers reach a median 100 % of their providers and half of them in 4.5 s. At 25 % TopDisc searchers reach a median 100 % of their providers and half of them in 5.3 s; plain searchers need 7.5 min for half of theirs.
+- **Fewer TopDisc nodes do not overload registrars.** Load scales with the number of TopDisc nodes: at 5 % the busiest registrar receives 3,385 requests, at 25 % 11,614, against 31,000 at 100 %.
+- **Plain nodes are not hurt.** No topic message reaches a plain node at any share (check I1 passes). Plain recall rises from 89.9 % at 0 % to 95.2 % at 75 %, and plain nodes send less: fewer plain walkers send FINDNODE to them. The rise is observed, not explained.
+- **Small topics at low share.** At 25 %, 23 of 98 topics have no TopDisc node and 29 have exactly one, so a lone TopDisc node has nobody to find; such searchers are not scorable.
+- **Time to 90 % is slower at 50 % and 75 % than at 25 % or 100 %.** These runs do not show why.
+
 ## Findings and fixes
 
 The evaluation found these protocol problems. Each led to a change in the geth implementation and, where it changes behaviour, in the spec.
@@ -558,4 +582,5 @@ The behaviour changes above are written into the spec amendments in datahop/devp
 1. The ticket binding to the advertiser's node ID (#160); the spec's ticket-transfer text is stale.
 2. The spec asks tickets to bind an `adDigest` (record and payload); the code binds node ID and topic only.
 3. Rate limiting of empty-ticket REGTOPIC ([#63](https://github.com/datahop/go-ethereum/issues/63)).
-4. Final values for `C`, `G`, `K_register` and `F_return` ([#12](https://github.com/datahop/go-ethereum/issues/12)).
+4. The REGTOPIC field order: the wire spec lists `[request-id, topic, ENR, ticket, distances]`, while the implementation encodes `[request-id, topic, ticket, ENR, distances]` (`v5wire/msg.go`).
+5. Final values for `C`, `G`, `K_register` and `F_return` ([#12](https://github.com/datahop/go-ethereum/issues/12)).
