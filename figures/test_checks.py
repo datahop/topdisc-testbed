@@ -431,6 +431,32 @@ class TestCheckLogic(unittest.TestCase):
         v = self.h1(host, host)
         self.assertEqual(v["status"], "pass", v["summary"])
 
+    def set_rcvbuf(self, disc, default):
+        for f in os.listdir(os.path.join(self.rd, "traces")):
+            t = read(os.path.join(self.rd, "traces", f))
+            t.update(udp_rcvbuf_bytes=disc, udp_rcvbuf_default_bytes=default)
+            write(self.rd, f"traces/{f}", t)
+
+    def test_h1_reports_node_rcvbuf(self):
+        self.set_rcvbuf(16777216, 4194304)
+        for name, host in (("netns", [self.smp(k, netns={"qdisc_drops": 3}) for k in range(3)]),
+                           ("host-only", [self.smp(k) for k in range(3)])):
+            with self.subTest(name):
+                v = self.h1(host)
+                self.assertEqual(v["status"], "pass", v["summary"])
+                self.assertEqual(v["evidence"]["udp_rcvbuf_bytes"]["min"], 16777216)
+                self.assertEqual(v["evidence"]["udp_rcvbuf_default_bytes"]["max"], 4194304)
+                self.assertIn("discovery socket: 16777216 to 16777216 bytes", v["summary"])
+                self.assertIn("host default: 4194304 to 4194304 bytes", v["summary"])
+
+    def test_h1_rcvbuf_discovery_not_found(self):
+        """A node that did not find its discovery socket records 0 there: only the host default is reported."""
+        self.set_rcvbuf(0, 4194304)
+        v = self.h1([self.smp(k) for k in range(3)])
+        self.assertNotIn("udp_rcvbuf_bytes", v["evidence"])
+        self.assertNotIn("discovery socket", v["summary"])
+        self.assertIn("host default: 4194304", v["summary"])
+
     def test_h1_failed_read_is_not_a_reset(self):
         """Totals 0, 100, then a sample that read no namespace: the 100 stands, and the gap is reported."""
         host = [self.smp(0, netns={"qdisc_drops": 0}), self.smp(1, netns={"qdisc_drops": 100}),

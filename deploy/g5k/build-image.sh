@@ -30,9 +30,9 @@ Restart=always
 WantedBy=multi-user.target
 UNIT
 ln -s /etc/systemd/system/hostagent.service "$ROOT/etc/systemd/system/multi-user.target.wants/hostagent.service"
-echo 'net.core.rmem_max = 8388608
-net.core.wmem_max = 8388608
-net.core.rmem_default = 4194304
-net.core.wmem_default = 4194304' > "$ROOT/etc/sysctl.d/90-topdisc.conf"
+echo 'net.core.rmem_max = 33554432
+net.core.wmem_max = 33554432
+net.core.rmem_default = 16777216
+net.core.wmem_default = 16777216' > "$ROOT/etc/sysctl.d/90-topdisc.conf"
 tar czf "$OUT" -C "$ROOT" .
 echo "image: $OUT ($(du -h "$OUT" | cut -f1)); point testbed.g5k.image at file://$OUT"

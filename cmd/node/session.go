@@ -139,6 +139,7 @@ type node struct {
 	topicLoadDone  map[string]discover.TopicLoad
 	samples        []sample
 	firstCapableMs int64
+	rcvbuf         rcvbufs // measured in the first session
 	sessions       []span
 	connDone       []workload.Found // every closed session's dialer finds, unix ms
 	connLast       *session         // the last closed session that opened a dialer search
@@ -287,8 +288,12 @@ func (n *node) up() error {
 	s.srv.LocalNode().Set(svcOf(n.topicName)) // the service, readable by legacy nodes too
 	events := make(chan *p2p.PeerEvent, 64)
 	s.sub = s.srv.SubscribeEvents(events)
+	rcvbuf := n.rcvbuf // only up writes it, under ctl
+	if rcvbuf.Default == 0 {
+		rcvbuf = rcvbufs{udpRcvbuf(&net.UDPAddr{IP: net.ParseIP(n.ip), Port: n.port}), probeRcvbuf()}
+	}
 	n.mu.Lock()
-	n.cur = s
+	n.cur, n.rcvbuf = s, rcvbuf
 	n.mu.Unlock()
 	s.wg.Add(3)
 	go n.watchAds(s)
@@ -679,7 +684,7 @@ func (n *node) trace() map[string]any {
 		"wire": wire, "topic": n.topic.String(), "topics": a.Topics, "register_at_ms": a.Phases.RegisterAt, "search_at_ms": a.Phases.SearchAt,
 		"wait": waits, "samples": samples, "admissions": discover.AdmissionEvents(n.id),
 		"ops": ops, "topic_load": load, "conn": conn, "sessions": sessions,
-		"outbound": 0, "inbound": 0, "ads_held": 0, "ghosts_assigned": len(n.ghosts), "ghosts_in_table": 0, "table_size": 0, "ads_first_seen_ms": map[string]map[string]int64{}, "ads_final": map[string][]string{},
+		"outbound": 0, "inbound": 0, "ads_held": 0, "ghosts_assigned": len(n.ghosts), "udp_rcvbuf_bytes": n.rcvbuf.Disc, "udp_rcvbuf_default_bytes": n.rcvbuf.Default, "ghosts_in_table": 0, "table_size": 0, "ads_first_seen_ms": map[string]map[string]int64{}, "ads_final": map[string][]string{},
 		"ads_final_expiry_ms": map[string]map[string]int64{}, "ads_snapshot_ms": int64(0), "stale_ad_max_ms": int64(0),
 		"reg_bucket_full_ms": []int64(nil), "reg_complete_ms": int64(-1), "reg_buckets_final": []topicindex.BucketStats(nil),
 	}

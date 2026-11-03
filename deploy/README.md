@@ -54,8 +54,9 @@ holds every trace while it aggregates, and 7,500 nodes overflowed the 8 GB of
 an m7g.large, so `up` picks m7g.xlarge from 4,000 nodes and m7g.2xlarge from
 8,000 unless the args name a `coordinator_type`; traces that fail to fetch at
 the end get a slower second pass before the run gives them up. Hosts set
-`net.core.rmem_default` to 4 MB so a busy registrar's UDP socket does not
-drop under the default 208 kB buffer, which 15 hosts hit on 2026-10-18. The account has a $200 monthly
+`net.core.rmem_default` to 16 MB (`rmem_max` 32 MB) so a busy registrar's UDP
+socket does not drop: 15 hosts overflowed the default 208 kB buffer on
+2026-10-18, and bursts at the hot registrars of the 25k run filled 4 MB (#107). The account has a $200 monthly
 budget `topdisc-testbed` with e-mail alerts (set once with `aws budgets
 create-budget`, outside Terraform so a destroy does not remove it); and the
 coordinator scales every region's autoscaling group to zero `max_hours` after
