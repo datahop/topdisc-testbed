@@ -95,3 +95,37 @@ func TestDropLine(t *testing.T) {
 		}
 	}
 }
+
+// The trace upload's drops fall after the stop: a sample at the stop keeps
+// them out of the window, which otherwise ends at the next periodic sample.
+func TestHostDropsUpToStop(t *testing.T) {
+	const stop = 1_800_000_000_000
+	smp := func(at, bwOut int64) host.Sample {
+		return host.Sample{AtMs: at, ENASample: host.ENASample{ENAIface: "ens5", BWOutAllowanceExceeded: bwOut},
+			Netns: &host.NetSample{QdiscDrops: 7}, NetnsSampled: 500, NetnsExpected: 500}
+	}
+	periodic := []host.Sample{smp(stop-30_000, 0), smp(stop-10_000, 0), smp(stop+20_000, 500)}
+	atStop := []host.Sample{smp(stop-30_000, 0), smp(stop-10_000, 0), smp(stop+5_000, 0), smp(stop+20_000, 500)}
+	for _, c := range []struct {
+		hosts [][]host.Sample
+		stop  int64
+		want  string
+	}{
+		{[][]host.Sample{periodic}, 0,
+			"500 packet drops (treat timings with care): netem 0, namespace UDP receive buffer 0, ENA allowance 500 (bw_out 500), host UDP receive buffer 0"},
+		{[][]host.Sample{periodic}, stop,
+			"500 packet drops up to the stop (treat timings with care): netem 0, namespace UDP receive buffer 0, ENA allowance 500 (bw_out 500), host UDP receive buffer 0"},
+		{[][]host.Sample{atStop}, stop,
+			"no packet drops up to the stop: netem 0, namespace UDP receive buffer 0, ENA allowance 0, host UDP receive buffer 0; 500 after the stop (trace collection), not counted: ENA allowance 500 (bw_out 500)"},
+		// a periodic sample at the stop ends the window too
+		{[][]host.Sample{{smp(stop-30_000, 0), smp(stop, 0), smp(stop+20_000, 500)}}, stop,
+			"no packet drops up to the stop: netem 0, namespace UDP receive buffer 0, ENA allowance 0, host UDP receive buffer 0; 500 after the stop (trace collection), not counted: ENA allowance 500 (bw_out 500)"},
+		// a host whose samples all fall after the stop is a gap
+		{[][]host.Sample{atStop, {smp(stop+1, 0), smp(stop+2, 9)}}, stop,
+			"insufficient coverage, no packet drops up to the stop: netem 0, namespace UDP receive buffer 0, ENA allowance 0, host UDP receive buffer 0; not measured throughout: ENA on 1 hosts, netns on 1 hosts; 509 after the stop (trace collection), not counted: ENA allowance 509 (bw_out 509)"},
+	} {
+		if got := windowDropLine(c.hosts, c.stop); got != c.want {
+			t.Errorf("got  %s\nwant %s", got, c.want)
+		}
+	}
+}

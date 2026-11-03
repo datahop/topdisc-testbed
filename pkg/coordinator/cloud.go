@@ -178,6 +178,9 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 	if err := drive(as, ctl, cc.Grace); err != nil {
 		return err
 	}
+	if cfg.Testbed.Traces.HostSamplePeriod > 0 {
+		sampleAtStop(agents)
+	}
 	trDir := filepath.Join(runDir, "traces")
 	os.MkdirAll(trDir, 0o755)
 	// A node writes its trace at StopAt and the agent serves it from disk;
@@ -186,7 +189,7 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 	var got atomic.Int32
 	var failMu sync.Mutex
 	failed := map[int]error{}
-	each(len(as), func(i int) error {
+	eachByHost(len(as), func(i int) int { return hostOf[i] }, func(i int) error {
 		var err error
 		for attempt := 0; attempt < 3; attempt++ {
 			if err = agents[hostOf[i]].fetch("trace", i, filepath.Join(trDir, fmt.Sprintf("node%d.json", i))); err == nil {
@@ -209,7 +212,7 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 			idx = append(idx, i)
 		}
 		time.Sleep(30 * time.Second)
-		each(len(idx), func(k int) error {
+		eachByHost(len(idx), func(k int) int { return hostOf[idx[k]] }, func(k int) error {
 			i := idx[k]
 			for attempt := 0; attempt < 3; attempt++ {
 				if err := agents[hostOf[i]].fetch("trace", i, filepath.Join(trDir, fmt.Sprintf("node%d.json", i))); err == nil {
@@ -257,7 +260,7 @@ func RunCloud(cfg scenario.Config, runDir string) error {
 			}
 			return nil
 		})
-		hostSummary(all)
+		hostSummary(all, stopOf(as))
 	}
 	return Collect(trDir, runDir, as)
 }
@@ -416,6 +419,71 @@ func fetchLogs(agents []agent, hostOf []int, failed map[int]error, dir string) (
 		return nil
 	})
 	return int(got.Load()), sample
+}
+
+// sampleAtStop has every agent take a host sample before the traces are
+// fetched, so the upload's drops fall after the run's window. Best effort: an
+// agent without /sample keeps only its periodic samples.
+func sampleAtStop(agents []agent) {
+	var mu sync.Mutex
+	var failed int
+	var why error
+	each(len(agents), func(h int) error {
+		if err := agents[h].call("sample", 0); err != nil {
+			mu.Lock()
+			failed++
+			why = err
+			mu.Unlock()
+		}
+		return nil
+	})
+	if failed > 0 {
+		fmt.Printf("hostmetrics: no sample at the stop from %d/%d hosts; e.g. %v\n", failed, len(agents), why)
+	}
+}
+
+// perHostFetches caps the concurrent fetches from one host: all 64 at once on
+// one host's traces overran its ENA outbound bandwidth allowance.
+const perHostFetches = 4
+
+// eachByHost is each with at most perHostFetches of f in flight per host,
+// hostOf(i) naming i's host; hosts proceed in parallel.
+func eachByHost(n int, hostOf func(i int) int, f func(i int) error) error {
+	queues := map[int][]int{}
+	for i := 0; i < n; i++ {
+		queues[hostOf(i)] = append(queues[hostOf(i)], i)
+	}
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 64)
+	var mu sync.Mutex
+	var first error
+	for _, q := range queues {
+		next := make(chan int, len(q))
+		for _, i := range q {
+			next <- i
+		}
+		close(next)
+		for w := 0; w < min(perHostFetches, len(q)); w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for i := range next {
+					sem <- struct{}{}
+					err := f(i)
+					<-sem
+					if err != nil {
+						mu.Lock()
+						if first == nil {
+							first = err
+						}
+						mu.Unlock()
+					}
+				}
+			}()
+		}
+	}
+	wg.Wait()
+	return first
 }
 
 // each runs f over 0..n-1 with bounded concurrency; the first error wins.

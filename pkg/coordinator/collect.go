@@ -205,8 +205,10 @@ func sum(v []int) int {
 
 // hostSummary prints what the host monitor saw: node CPU and RSS at the busiest
 // sample, and where hosts dropped packets, which invalidates a run the way
-// simnet's link drops do.
-func hostSummary(hosts [][]host.Sample) {
+// simnet's link drops do. Drops count up to stop (unix ms; 0 for the whole
+// series) as H1 does; those after it, the trace collection's, are reported
+// apart.
+func hostSummary(hosts [][]host.Sample, stop int64) {
 	var cpu, rss []int
 	samples := 0
 	for _, hs := range hosts {
@@ -230,14 +232,88 @@ func hostSummary(hosts [][]host.Sample) {
 	}
 	fmt.Printf("hostmetrics: %d samples over %d hosts; node cpu%% p50=%d p95=%d max=%d; rss MB p50=%d p95=%d max=%d; ",
 		samples, len(hosts), pct(cpu, 50), pct(cpu, 95), pct(cpu, 100), pct(rss, 50), pct(rss, 95), pct(rss, 100))
-	fmt.Println(dropLine(hostDrops(hosts)))
+	fmt.Println(windowDropLine(hosts, stop))
+}
+
+// windowDropLine is dropLine over the samples up to stop, followed by what
+// the counters rose after it.
+func windowDropLine(hosts [][]host.Sample, stop int64) string {
+	if stop <= 0 {
+		return dropLine(hostDrops(hosts))
+	}
+	cats, gaps := hostDrops(upToStop(hosts, stop))
+	line := dropLine(cats, gaps, " up to the stop")
+	all, _ := hostDrops(hosts)
+	in := map[string]dropCount{}
+	for _, c := range cats {
+		in[c.What] = c
+	}
+	var total int64
+	var parts []string
+	for _, c := range all {
+		w := in[c.What]
+		d := dropCount{What: c.What, N: c.N - w.N}
+		for i, b := range c.By {
+			if i < len(w.By) {
+				b.N -= w.By[i].N
+			}
+			d.By = append(d.By, b)
+		}
+		if d.N > 0 {
+			total += d.N
+			parts = append(parts, d.String())
+		}
+	}
+	if total > 0 {
+		line += fmt.Sprintf("; %d after the stop (trace collection), not counted: %s", total, strings.Join(parts, ", "))
+	}
+	return line
+}
+
+// upToStop cuts every host's samples at stop as figures/checks.py's
+// h1_no_drops does: a sample taken after it is kept only when it closes the
+// interval crossing it, whose drops may predate the stop.
+func upToStop(hosts [][]host.Sample, stop int64) [][]host.Sample {
+	out := make([][]host.Sample, len(hosts))
+	for i, hs := range hosts {
+		k := sort.Search(len(hs), func(j int) bool { return hs[j].AtMs > stop })
+		if 0 < k && k < len(hs) && hs[k-1].AtMs < stop {
+			k++
+		}
+		out[i] = hs[:k]
+	}
+	return out
+}
+
+// stopOf is the run's stop: the latest StopAt, as H1 takes it.
+func stopOf(as []assign.Assignment) int64 {
+	var stop int64
+	for _, a := range as {
+		stop = max(stop, a.Phases.StopAt)
+	}
+	return stop
 }
 
 // dropCount is one category of host drops.
 type dropCount struct {
 	What  string
 	N     int64
-	Hosts int // with any
+	Hosts int         // with any
+	By    []dropCount // its counters, for ENA allowance
+}
+
+func (c dropCount) String() string {
+	s := fmt.Sprintf("%s %d", c.What, c.N)
+	var by []string
+	for _, b := range c.By {
+		if b.N > 0 {
+			by = append(by, fmt.Sprintf("%s %d", b.What, b.N))
+		}
+	}
+	if len(by) > 0 {
+		s += " (" + strings.Join(by, ", ") + ")"
+	}
+	return s
 }
 
 // hostDrops applies figures/checks.py's host_drops rules (H1), which
@@ -361,7 +437,7 @@ func hostDrops(hosts [][]host.Sample) (cats []dropCount, gaps map[string]int) {
 		cats = append(cats, dropCount{What: "ARP", N: arp})
 	}
 	if enaHosts > 0 {
-		var ena int64
+		ena := dropCount{What: "ENA allowance", By: []dropCount{{What: "pps"}, {What: "bw_in"}, {What: "bw_out"}, {What: "conntrack"}, {What: "linklocal"}}}
 		gap("ENA", empty)
 		for _, hs := range live {
 			if !enaHost(hs) {
@@ -371,17 +447,19 @@ func hostDrops(hosts [][]host.Sample) (cats []dropCount, gaps map[string]int) {
 			if !covered(ok) {
 				gap("ENA", 1)
 			}
-			for _, v := range []func(host.Sample) int64{
+			for i, v := range []func(host.Sample) int64{
 				func(s host.Sample) int64 { return s.PPSAllowanceExceeded },
 				func(s host.Sample) int64 { return s.BWInAllowanceExceeded },
 				func(s host.Sample) int64 { return s.BWOutAllowanceExceeded },
 				func(s host.Sample) int64 { return s.ConntrackAllowanceExceeded },
 				func(s host.Sample) int64 { return s.LinklocalAllowanceExceeded },
 			} {
-				ena += increase(hs, ok, v)
+				n := increase(hs, ok, v)
+				ena.N += n
+				ena.By[i].N += n
 			}
 		}
-		cats = append(cats, dropCount{What: "ENA allowance", N: ena})
+		cats = append(cats, ena)
 	}
 	udp := dropCount{What: "host UDP receive buffer"}
 	for _, hs := range live {
@@ -395,23 +473,24 @@ func hostDrops(hosts [][]host.Sample) (cats []dropCount, gaps map[string]int) {
 
 // dropLine is hostSummary's verdict on drops: the root namespace's line for a
 // run without the newer counters, otherwise every category and what went
-// unmeasured.
-func dropLine(cats []dropCount, gaps map[string]int) string {
+// unmeasured. win, if given, names the window the counts cover.
+func dropLine(cats []dropCount, gaps map[string]int, win ...string) string {
+	w := strings.Join(win, "")
 	if len(cats) == 1 {
 		if n := cats[0].N; n > 0 {
-			return fmt.Sprintf("UDP receive-buffer drops: %d on %d hosts (host saturation; treat timings with care)", n, cats[0].Hosts)
+			return fmt.Sprintf("UDP receive-buffer drops%s: %d on %d hosts (host saturation; treat timings with care)", w, n, cats[0].Hosts)
 		}
-		return "no UDP receive-buffer drops"
+		return "no UDP receive-buffer drops" + w
 	}
 	var total int64
 	parts := make([]string, len(cats))
 	for i, c := range cats {
 		total += c.N
-		parts[i] = fmt.Sprintf("%s %d", c.What, c.N)
+		parts[i] = c.String()
 	}
-	line := "no packet drops: "
+	line := "no packet drops" + w + ": "
 	if total > 0 {
-		line = fmt.Sprintf("%d packet drops (treat timings with care): ", total)
+		line = fmt.Sprintf("%d packet drops%s (treat timings with care): ", total, w)
 	}
 	line += strings.Join(parts, ", ")
 	if len(gaps) > 0 {

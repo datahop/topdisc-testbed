@@ -81,6 +81,7 @@ type monitor struct {
 	enaOff   bool          // the host has no ENA device
 	done     chan struct{} // closed once the sampling goroutine has cleaned up
 	stop     chan struct{}
+	now      chan chan struct{} // SampleNow's requests
 	stopOnce sync.Once
 }
 
@@ -88,7 +89,7 @@ type monitor struct {
 // written by WriteSamples.
 func (r *Runner) Monitor(period time.Duration) {
 	r.init()
-	m := &monitor{lastCPU: map[int]float64{}, stop: make(chan struct{}), done: make(chan struct{})}
+	m := &monitor{lastCPU: map[int]float64{}, stop: make(chan struct{}), done: make(chan struct{}), now: make(chan chan struct{})}
 	r.mon = m
 	go func() {
 		t := time.NewTicker(period)
@@ -101,6 +102,9 @@ func (r *Runner) Monitor(period time.Duration) {
 				return
 			case <-t.C:
 				r.sample()
+			case reply := <-m.now:
+				r.sample()
+				close(reply)
 			}
 		}
 	}()
@@ -120,6 +124,23 @@ func (r *Runner) StopMonitor() {
 	if r.mon.done != nil {
 		<-r.mon.done
 	}
+}
+
+// SampleNow takes one sample on the sampling goroutine, outside the period,
+// and returns once it is recorded.
+func (r *Runner) SampleNow() error {
+	m := r.mon
+	if m == nil || m.now == nil {
+		return errors.New("not monitoring")
+	}
+	reply := make(chan struct{})
+	select {
+	case m.now <- reply:
+	case <-m.done:
+		return errors.New("monitor stopped")
+	}
+	<-reply
+	return nil
 }
 
 func (r *Runner) Samples() []Sample {

@@ -50,7 +50,7 @@ func RunLocal(cfg scenario.Config, runDir string) error {
 		defer func() {
 			r.StopMonitor()
 			r.WriteSamples(filepath.Join(runDir, "hostmetrics.json"))
-			hostSummary([][]host.Sample{r.Samples()})
+			hostSummary([][]host.Sample{r.Samples()}, stopOf(as))
 		}()
 	}
 	printPhases("local", as, t0)
@@ -63,6 +63,9 @@ func RunLocal(cfg scenario.Config, runDir string) error {
 	}
 	if err := drive(as, ctl, lc.Grace); err != nil {
 		return err
+	}
+	if cfg.Testbed.Traces.HostSamplePeriod > 0 {
+		r.SampleNow()
 	}
 	return Collect(trDir, runDir, as)
 }
