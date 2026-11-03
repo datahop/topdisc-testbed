@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestFetchLogsForNodesWithoutTrace(t *testing.T) {
@@ -37,5 +39,45 @@ func TestFetchLogsForNodesWithoutTrace(t *testing.T) {
 	}
 	if !strings.Contains(sample, "node 2") {
 		t.Errorf("sample %q does not name node 2", sample)
+	}
+}
+
+func TestEachByHostCapsPerHost(t *testing.T) {
+	const hosts, n = 20, 400
+	var mu sync.Mutex
+	inFlight, peak := map[int]int{}, map[int]int{}
+	total, maxTotal, done := 0, 0, 0
+	err := eachByHost(n, func(i int) int { return i / (n / hosts) }, func(i int) error {
+		h := i / (n / hosts)
+		mu.Lock()
+		inFlight[h]++
+		total++
+		peak[h] = max(peak[h], inFlight[h])
+		maxTotal = max(maxTotal, total)
+		mu.Unlock()
+		time.Sleep(time.Millisecond)
+		mu.Lock()
+		inFlight[h]--
+		total--
+		done++
+		mu.Unlock()
+		if i == 7 {
+			return errors.New("seven")
+		}
+		return nil
+	})
+	if err == nil || err.Error() != "seven" {
+		t.Errorf("err %v, want seven", err)
+	}
+	if done != n {
+		t.Errorf("%d of %d done", done, n)
+	}
+	for h := 0; h < hosts; h++ {
+		if peak[h] > perHostFetches {
+			t.Errorf("host %d: %d in flight, cap %d", h, peak[h], perHostFetches)
+		}
+	}
+	if maxTotal > 64 || maxTotal <= perHostFetches {
+		t.Errorf("%d in flight overall: want hosts in parallel, at most 64", maxTotal)
 	}
 }

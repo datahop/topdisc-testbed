@@ -119,6 +119,7 @@ testbed:
     overhead: ""                       # per-node traffic totals by message type (JSON)
     overhead_series: ""                # traffic and ad-cache samples over time (JSON)
     host_sample_period: 30s            # real backends: sample CPU/RSS/fds per node and UDP buffer drops per host this often into hostmetrics; 0 = off
+                                       # plus one sample at the stop; drops count up to it (H1), the trace collection's after it are reported apart
     overhead_series_period: 30s        # sampling period for overhead_series
     reach: ""                          # per-searcher registrar reach sets (JSON)
     snapshot_dir: ""                   # periodic find-count snapshots

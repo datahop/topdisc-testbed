@@ -97,6 +97,18 @@ func main() {
 			fail(w, err)
 		}
 	})
+	// One host sample now, at the end of the run, so the trace upload's
+	// traffic falls after the run's last sample.
+	http.HandleFunc("/sample", func(w http.ResponseWriter, req *http.Request) {
+		r := runner()
+		if r == nil {
+			fail(w, fmt.Errorf("not prepared"))
+			return
+		}
+		if err := r.SampleNow(); err != nil {
+			fail(w, err)
+		}
+	})
 	http.HandleFunc("/stop", func(w http.ResponseWriter, req *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()

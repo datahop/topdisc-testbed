@@ -91,6 +91,26 @@ func TestSampleSkipsExited(t *testing.T) {
 	}
 }
 
+func TestSampleNow(t *testing.T) {
+	r := newRunner(t, "/bin/true")
+	if r.SampleNow() == nil {
+		t.Error("SampleNow without a monitor succeeded")
+	}
+	r.Monitor(time.Hour)
+	for i := 1; i <= 2; i++ {
+		if err := r.SampleNow(); err != nil {
+			t.Fatal(err)
+		}
+		if n := len(r.Samples()); n != i {
+			t.Fatalf("%d samples after %d SampleNow, want %d", n, i, i)
+		}
+	}
+	r.StopMonitor()
+	if r.SampleNow() == nil {
+		t.Error("SampleNow after StopMonitor succeeded")
+	}
+}
+
 // Down and a churn Start go to the node's own status port; the node's answer
 // comes back as the error.
 func TestRunnerDownUpAndStartDispatch(t *testing.T) {
