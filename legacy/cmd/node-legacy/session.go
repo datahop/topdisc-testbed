@@ -119,6 +119,7 @@ type node struct {
 	wireDone       map[string]wireCounter
 	samples        []sample
 	firstCapableMs int64
+	rcvbuf         rcvbufs // measured in the first session
 	sessions       []span
 	connDone       []found  // every closed session's dialer finds, unix ms
 	connLast       *session // the last closed session that opened a dialer search
@@ -249,8 +250,12 @@ func (n *node) up() error {
 	s.srv.LocalNode().Set(n.svc)
 	events := make(chan *p2p.PeerEvent, 64)
 	s.sub = s.srv.SubscribeEvents(events)
+	rcvbuf := n.rcvbuf // only up writes it, under ctl
+	if rcvbuf.Default == 0 {
+		rcvbuf = rcvbufs{udpRcvbuf(&net.UDPAddr{IP: net.ParseIP(a.IP), Port: a.Port}), probeRcvbuf()}
+	}
 	n.mu.Lock()
-	n.cur = s
+	n.cur, n.rcvbuf = s, rcvbuf
 	n.mu.Unlock()
 	s.wg.Add(3)
 	go n.watchPeers(s, events)
@@ -540,7 +545,7 @@ func (n *node) trace() map[string]any {
 		// epoch value instead of ms into the search.
 		"register_at_ms": a.Phases.RegisterAt, "search_at_ms": a.Phases.SearchAt,
 		"sessions": sessions, "ghosts_assigned": len(n.ghosts), "ghosts_in_table": ghosts, "table_size": table,
-		"fork": forkVersion(),
+		"fork": forkVersion(), "udp_rcvbuf_bytes": n.rcvbuf.Disc, "udp_rcvbuf_default_bytes": n.rcvbuf.Default,
 	}
 }
 

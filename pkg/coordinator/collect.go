@@ -40,6 +40,11 @@ type NodeTrace struct {
 	GhostsInTable  int    `json:"ghosts_in_table"` // last session's table
 	TableSize      int    `json:"table_size"`
 	Fork           string `json:"fork"` // go-ethereum module of a legacy node's binary
+	// Raw Linux getsockopt(SO_RCVBUF): rmem_default as is for a socket that
+	// sets none, 2*min(N, rmem_max) after SetReadBuffer(N), so 16 MiB is
+	// either a 16 MiB default or an 8 MiB request. 0 if not recorded.
+	UDPRcvbuf        int `json:"udp_rcvbuf_bytes"`         // the discovery socket's; 0 also if not found
+	UDPRcvbufDefault int `json:"udp_rcvbuf_default_bytes"` // a fresh socket's
 }
 
 // Collect reads the per-node traces, prints the run summary and writes
@@ -72,7 +77,7 @@ func Collect(trDir, runDir string, as []assign.Assignment) error {
 	var lookups, hits int
 	var lat []int
 	var legacyN, legacyLookups, legacyHits int
-	var legacyLat, capable []int
+	var legacyLat, capable, rcvbuf, rcvbufDef []int
 	legacyForks := map[string]bool{}
 	oh := make([]map[string]any, 0, len(traces))
 	for _, t := range traces {
@@ -94,6 +99,12 @@ func Collect(trDir, runDir string, as []assign.Assignment) error {
 		// ones out left an all-legacy run with peer stats and oh.json for
 		// the bootnode alone.
 		out, in, ads, drops = append(out, t.Outbound), append(in, t.Inbound), append(ads, t.AdsHeld), append(drops, t.PeerDrops)
+		if t.UDPRcvbuf > 0 {
+			rcvbuf = append(rcvbuf, t.UDPRcvbuf)
+		}
+		if t.UDPRcvbufDefault > 0 {
+			rcvbufDef = append(rcvbufDef, t.UDPRcvbufDefault)
+		}
 		for _, r := range t.RefillMs {
 			refills = append(refills, int(r))
 		}
@@ -141,6 +152,10 @@ func Collect(trDir, runDir string, as []assign.Assignment) error {
 		fmt.Printf(" p50=%dms p95=%dms", pct(refills, 50), pct(refills, 95))
 	}
 	fmt.Println()
+	if len(rcvbuf)+len(rcvbufDef) > 0 {
+		fmt.Printf("udp rcvbuf bytes (getsockopt): discovery socket min=%d max=%d (%d/%d nodes); host default min=%d max=%d (%d nodes)\n",
+			pct(rcvbuf, 0), pct(rcvbuf, 100), len(rcvbuf), len(traces), pct(rcvbufDef, 0), pct(rcvbufDef, 100), len(rcvbufDef))
+	}
 	if lookups > 0 {
 		fmt.Printf("lookups=%d hit-target=%d (%.1f%%) latency ms p50=%d p95=%d\n", lookups, hits, 100*float64(hits)/float64(lookups), pct(lat, 50), pct(lat, 95))
 	}

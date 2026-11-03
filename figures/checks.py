@@ -268,7 +268,7 @@ def slim_node(i, t, lim):
     """The fields of a trace (or simnet node state) the checks read, per-event lists reduced."""
     s = {k: t[k] for k in ("idx", "id", "topic", "legacy", "stop_ms", "ads_snapshot_ms", "stale_ad_max_ms",
                            "reg_complete_ms", "search_at_ms", "ads_final", "ads_final_expiry_ms",
-                           "ghosts_assigned", "ghosts_in_table", "table_size") if k in t}
+                           "ghosts_assigned", "ghosts_in_table", "table_size", "udp_rcvbuf_bytes", "udp_rcvbuf_default_bytes") if k in t}
     if "ads_first_seen_ms" in t:
         v = t["ads_first_seen_ms"]
         s["ads_first_seen_ms"] = derive(lambda: {topic: list(seen) for topic, seen in v.items()} if isinstance(v, dict) else v)
@@ -1468,6 +1468,21 @@ def host_drops(run, host=None):
     return cats, info, gaps
 
 
+def rcvbuf_note(run):
+    """The nodes' UDP receive buffers as their traces record them, raw getsockopt(SO_RCVBUF):
+    rmem_default as is for a socket that sets none, 2*min(N, rmem_max) after SetReadBuffer(N),
+    so 16 MiB is either a 16 MiB default or an 8 MiB request."""
+    note, ev = "", {}
+    for key, what in (("udp_rcvbuf_bytes", "discovery socket"), ("udp_rcvbuf_default_bytes", "host default")):
+        v = [t[key] for t in run.traces.values() if t.get(key)]
+        if v:
+            note += f"; node UDP receive buffer, {what}: {min(v)} to {max(v)} bytes on {len(v)}/{len(run.traces)} nodes"
+            ev[key] = {"min": min(v), "max": max(v), "nodes": len(v)}
+    if note:
+        note += " (getsockopt: 2x a requested size)"
+    return note, ev
+
+
 def h1_no_drops(run, tol):
     if run.host:
         # the experiment window: the trace upload after the stop is no part of it; the
@@ -1478,6 +1493,7 @@ def h1_no_drops(run, tol):
         host = [h[:k + (0 < k < len(h) and h[k - 1]["at_ms"] < stop)] for h, k in zip(run.host, cut)]
         before = [h[:k] for h, k in zip(run.host, cut)]
         win = " up to the stop" if stop is not None else ""
+        rb_note, rb_ev = rcvbuf_note(run)
         hd = host_drops(run, host)
         if hd is None:
             def rcvbuf(hs):
@@ -1485,7 +1501,7 @@ def h1_no_drops(run, tol):
             drops, total = rcvbuf(host), rcvbuf(run.host)
             after = f"; {total - drops} more after the stop" if total != drops else ""
             ev = dict(drops=drops, hosts=len(run.host), **({"drops_with_after_stop": total} if stop is not None else {}))
-            return pf(drops, f"no UDP receive-buffer drops{win} on {len(run.host)} hosts{after}", f"{drops} UDP receive-buffer drops{win}{after}", **ev)
+            return pf(drops, f"no UDP receive-buffer drops{win} on {len(run.host)} hosts{after}{rb_note}", f"{drops} UDP receive-buffer drops{win}{after}{rb_note}", **ev, **rb_ev)
         cats, info, gaps = hd
         # netem drops are the modelled access link overflowing its queue: reported, not failed on
         total = sum(n for c, n in cats.items() if c != "netem") + info.get("veth_dropped", 0)
@@ -1498,6 +1514,8 @@ def h1_no_drops(run, tol):
                 f" ({info['max_backlog_bytes'] * 8 / (rate * 1000):.1f} s at {rate} kbit/s)" if rate else "")
         missing = ", ".join(f"{src} on {n} hosts" for src, n in gaps.items())
         ev = dict(drops=total, hosts=len(run.host), by_category=cats, coverage_gaps=gaps, **info)
+        by += rb_note
+        ev.update(rb_ev)
         if "netem" in cats:
             ev["modelled_link_loss"] = {"netem": cats["netem"]}
         if stop is not None:
