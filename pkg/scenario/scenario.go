@@ -379,7 +379,7 @@ var paramDocs = []paramDoc{
 	{"scenario.phases.search_timeout", "length of the search phase"},
 	{"scenario.phases.refresh_interval", "discv5 table refresh; 0 = default 30m"},
 	{"scenario.topic.ad_lifetime", "ad lifetime; 0 = default 15m. Also sets reg_attempt_timeout"},
-	{"scenario.topic.ad_cache_size", "ads a registrar holds; 0 = default 5000"},
+	{"scenario.topic.ad_cache_size", "ads a registrar holds; 0 = default 1000"},
 	{"scenario.topic.reg_attempt_timeout", "give up on a registrar after this; 0 = 1.5 x ad_lifetime"},
 	{"scenario.topic.search_bucket_size", "search table entries per distance bucket; 0 = spec default 16"},
 	{"scenario.topic.search_table_depth", "distance buckets in the search table; 0 = default 10"},

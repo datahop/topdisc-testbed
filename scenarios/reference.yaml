@@ -62,7 +62,7 @@ scenario:
     refresh_interval: 0s               # discv5 table refresh; 0 = default 30m
   topic:
     ad_lifetime: 0s                    # ad lifetime; 0 = default 15m. Also sets reg_attempt_timeout
-    ad_cache_size: 0                   # ads a registrar holds; 0 = default 5000
+    ad_cache_size: 0                   # ads a registrar holds; 0 = default 1000
     reg_attempt_timeout: 0s            # give up on a registrar after this; 0 = 1.5 x ad_lifetime
     search_bucket_size: 0              # search table entries per distance bucket; 0 = spec default 16
     search_table_depth: 0              # distance buckets in the search table; 0 = default 10
