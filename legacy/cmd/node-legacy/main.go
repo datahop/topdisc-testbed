@@ -95,11 +95,11 @@ func svcOf(topic string) svcEntry {
 	return svcEntry(h.Sum32())
 }
 
-// capableEntry reads the fork's "ng" (topic discovery) ENR key without knowing its
+// capableEntry reads the fork's "td" (topic discovery) ENR key without knowing its
 // type: any value means a TopDisc-capable peer.
 type capableEntry []byte
 
-func (capableEntry) ENRKey() string { return "ng" }
+func (capableEntry) ENRKey() string { return "td" }
 func (c *capableEntry) DecodeRLP(s *rlp.Stream) error {
 	b, err := s.Raw()
 	*c = b

@@ -213,7 +213,7 @@ func capableNode(t *testing.T, entries ...enr.Entry) *enode.Node {
 	return nd
 }
 
-// Ghosts and bootnodes carry "ng" but do not count as a first capable peer,
+// Ghosts and bootnodes carry "td" but do not count as a first capable peer,
 // also a ghost another node pinned and passed on.
 func TestHasCapable(t *testing.T) {
 	key, _ := crypto.GenerateKey()

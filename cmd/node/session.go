@@ -568,7 +568,7 @@ func (n *node) watchPeers(s *session, events chan *p2p.PeerEvent) {
 }
 
 // hasCapable skips every ghost record, also those other nodes pinned and
-// passed on: ghosts carry "ng".
+// passed on: ghosts carry "td".
 func (n *node) hasCapable(nodes []*enode.Node) bool {
 	for _, nd := range nodes {
 		_, boot := n.bootIDs[nd.ID()]
