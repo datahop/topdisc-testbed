@@ -42,15 +42,15 @@ func checkGhosts(t *testing.T, a Assignment) ghostLayout {
 		if err != nil {
 			t.Fatalf("node %d: bad ghost %q: %v", a.Idx, s, err)
 		}
-		var ng topicindex.TopicDiscovery
+		var td topicindex.TopicDiscovery
 		keys := map[any]bool{}
 		for i, e := range n.Record().AppendElements(nil) {
 			if i%2 == 1 { // seq, then key, value pairs
 				keys[e] = true
 			}
 		}
-		if n.Load(&ng) != nil || !discover.IsTestbedGhost(n) || keys["svc"] || keys["tcp"] || !keys["ghost"] || !keys["udp"] {
-			t.Fatalf("node %d: ghost %v: want ng and ghost, no svc and no tcp", a.Idx, n)
+		if n.Load(&td) != nil || !discover.IsTestbedGhost(n) || keys["svc"] || keys["tcp"] || !keys["ghost"] || !keys["udp"] {
+			t.Fatalf("node %d: ghost %v: want td and ghost, no svc and no tcp", a.Idx, n)
 		}
 		if p := n.UDP(); p < scenario.GhostPortBase || p >= scenario.GhostPortBase+scenario.GhostPortSpan || n.IPAddr().String() != "127.0.0.1" {
 			t.Fatalf("node %d: ghost endpoint %v:%d", a.Idx, n.IPAddr(), p)

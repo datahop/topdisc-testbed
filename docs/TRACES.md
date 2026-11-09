@@ -242,10 +242,10 @@ ghost fields fails) and G2 (some timeouts at ghosts, never more own-ghost
 than ghost timeouts); both are not-exercised without ghosts.
 
 `first_capable_ms` (node trace, `nodes.json`, both binaries): ms from the
-session start until the node's discv5 table first held a record with `ng` that
+session start until the node's discv5 table first held a record with `td` that
 is neither a ghost nor one of the node's bootstrap records, checked every
 second; earliest over sessions, -1 if never. Earlier testbed versions set it on
-the first RLPx peer with `ng`, so lookup-only runs and the plain fork build
+the first RLPx peer with `td`, so lookup-only runs and the plain fork build
 report -1 there.
 
 ## Sessions under churn
