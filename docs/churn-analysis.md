@@ -114,23 +114,25 @@ churn into the run's window when a higher rate is wanted.
 
 **Why a 15 minute ad lifetime.** The lifetime sets two things against each other.
 
-- Stale ads. A departed node's ads stay in the caches until they expire, so the share of
-  ads that are stale at any moment is about the departure rate times the lifetime. With
-  leaves at 0.4 to 0.9 % per hour and returns at 0.5 to 3.5 % per hour, 15 minutes keeps
-  stale ads around 0.2 to 1 % of the caches on the flickering chains and far less on the
-  stable ones; 60 minutes would make that 1 to 4 %.
-- Absences an ad survives. A third of absences are under 15 minutes, so those nodes come
-  back with their ads valid and register nothing; the two thirds that stay away longer
-  re-register on return, which is the right outcome since their ads had gone stale. A
-  5 minute lifetime would turn almost every absence into a re-registration and triple the
-  renewal traffic for a gain of under a percentage point of stale ads.
-- Renewal cost. A registrant renews about 30 registrations per lifetime; at 15 minutes that
-  is about 2 % of a node's bytes in every run measured, and it scales inversely with the
-  lifetime.
+- Stale ads. A departed node's ads stay in the caches until they expire. With continuous
+  renewal an ad has half a lifetime left on average when its node leaves, so the share of
+  ad time that is stale is about the departure rate times half the lifetime. Over all nodes
+  that is 0.2 % (30 minute rule) to 0.4 % (10 minute rule) at 15 minutes, and 0.8 to 1.2 %
+  at 60 minutes. Among chains of at least 100 nodes the worst is 0.8 % with the 30 minute
+  rule. With the 10 minute rule five chains exceed 1 %, at 1.0 to 3.0 %.
+- Absences an ad survives. With the 10 minute rule 32 % of absences are under 15 minutes,
+  but an ad survives an absence only if it has more time left than the absence lasts.
+  Counting that, an ad survives 7 % of absences; shorter absences than the rule's 10 minutes
+  are not counted, so this is a lower bound. After the others the node re-registers on
+  return, which is the right outcome since its ads had gone stale. A 5 minute lifetime would
+  turn every absence counted here into a re-registration and triple the renewal traffic for
+  a gain of under a percentage point of stale ads.
+- Renewal cost. In the 25,000-node run, registration as a whole, renewals included, was
+  4.2 % of the bytes a node sent. Renewal traffic scales inversely with the lifetime.
 
-15 minutes is where stale ads stay under one percent on the worst chains while renewals
-stay a small share of traffic, and the absence distribution says shortening it further
-buys little. The testbed's measurement at the replayed churn, 0.7 % of returned results
+15 minutes keeps stale ads under one percent across all nodes, and on every chain of at
+least 100 nodes with the 30 minute rule, while renewals stay a small share of traffic. The
+absence distribution says shortening it further buys little. The testbed's measurement at the replayed churn, 0.7 % of returned results
 pointing at departed nodes, none older than a lifetime, agrees with the arithmetic.
 
 Figures in `figures/churn-analysis/` come from `cmd/crawl/churn_figures.py` over the
