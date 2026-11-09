@@ -23,7 +23,7 @@ scenario:
     search_stagger: 10ms
     search_timeout: 90m
   topic:
-    ad_cache_size: 5000
+    ad_cache_size: 1000
     search_yield_floor: 8
   search:
     model: continuous

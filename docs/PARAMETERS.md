@@ -29,7 +29,7 @@ process per node, per-node traces). Status: ✓ done, ◐ partial, ✗ missing,
 | Parameter | Meaning | Scenario key | simnet | real | Notes |
 |---|---|---|---|---|---|
 | Ad lifetime E | How long an advertisement stays in a registrar's cache; 15 min in the plan. Advertisers renew before expiry. | `topic.ad_lifetime` | ◐ | ◐ | Renewal on expiry (#77) is not on `topdisc`; without it the registration count sawtooths every E |
-| Cache capacity C | Ads a registrar holds in total; plan value 1000, code default 5000. | `topic.ad_cache_size` | ✓ | ✓ | Decision on #12 |
+| Cache capacity C | Ads a registrar holds in total; default 1000. | `topic.ad_cache_size` | ✓ | ✓ | Decision on #12 |
 | K_lookup | Entries per distance bucket of the search table; plan 5, code default 16. | `topic.search_bucket_size` | ✓ | ✓ | #12 |
 | K_register | Registrations kept per bucket by an advertiser; plan 3, code default 5. | `topic.reg_bucket_size` | ✓ | ✓ | Also `reg_bucket_standby` (default 20), `reg_table_depth` and `search_table_depth` (default 10 distance buckets each); #12 |
 | F_return | Registrants returned per TOPICQUERY reply; plan 10, code default 16. | `topic.topic_nodes_limit` | ✓ | ✓ | |
