@@ -115,16 +115,18 @@ func (r *Runner) Prepare(as []assign.Assignment, peers map[int]string) error {
 	if runtime.GOOS != "linux" {
 		return fmt.Errorf("wan emulation needs Linux netns")
 	}
+	t1, t2, t3 := neighThresholds(len(as))
 	cmds := []string{
 		"sysctl -q -w net.ipv4.ip_forward=1",
-		// The host keeps one neighbour entry per node on the bridge, and the
-		// defaults (512 soft, 1024 hard) sit below the node counts this runs
-		// at. Overflowing the table evicts entries indiscriminately -- the
-		// host's own default gateway among them -- and the machine drops off
-		// the network mid-run while its BMC still reports it alive.
-		"sysctl -q -w net.ipv4.neigh.default.gc_thresh1=8192",
-		"sysctl -q -w net.ipv4.neigh.default.gc_thresh2=32768",
-		"sysctl -q -w net.ipv4.neigh.default.gc_thresh3=65536",
+		// The neighbour table is global across namespaces and every node keeps
+		// an entry per node it talks to on the bridge, so it needs ~N² entries
+		// (~2N on crawl addresses, where this overshoots harmlessly).
+		// Overflowing it evicts entries indiscriminately -- the host's own
+		// default gateway among them -- and the machine drops off the network
+		// mid-run while its BMC still reports it alive.
+		fmt.Sprintf("sysctl -q -w net.ipv4.neigh.default.gc_thresh1=%d", t1),
+		fmt.Sprintf("sysctl -q -w net.ipv4.neigh.default.gc_thresh2=%d", t2),
+		fmt.Sprintf("sysctl -q -w net.ipv4.neigh.default.gc_thresh3=%d", t3),
 		// discv5 keeps the kernel's default UDP socket buffer, 208 kB, which
 		// the busiest registrars overflowed at 7,500 nodes.
 		"sysctl -q -w net.core.rmem_max=33554432",
@@ -192,6 +194,20 @@ func (r *Runner) Prepare(as []assign.Assignment, peers map[int]string) error {
 	// One `ip` per route costs a process each: at ~13k routes per machine on
 	// crawl addresses that is minutes of forking before the run can start.
 	return ipBatch(routes)
+}
+
+// neighThresholds sizes the neighbour table for n nodes on one host: room for
+// 2·n·(n+1) entries rounded up to a power of two, between the old 65536 and
+// 1<<30, as the kernel rejects gc_thresh values that overflow a signed int.
+func neighThresholds(n int) (t1, t2, t3 int) {
+	const limit = 1 << 30
+	n = min(max(n, 0), 1<<16) // 2·n·(n+1) passes limit well before this
+	need, t := 2*int64(n)*int64(n+1), int64(65536)
+	for t < need && t < limit {
+		t *= 2
+	}
+	t3 = int(t)
+	return t3 / 2, (t3 / 4) * 3, t3
 }
 
 // onLink reports whether addr is reachable without a gateway.

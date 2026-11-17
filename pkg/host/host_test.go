@@ -143,3 +143,29 @@ func TestRunnerDownUpAndStartDispatch(t *testing.T) {
 		t.Error("Down to a closed node succeeded")
 	}
 }
+
+func TestNeighThresholds(t *testing.T) {
+	for _, c := range []struct{ n, t1, t2, t3 int }{
+		{0, 32768, 49152, 65536},
+		{1, 32768, 49152, 65536},
+		{10, 32768, 49152, 65536},
+		{858, 1048576, 1572864, 2097152},
+		{1000, 1048576, 1572864, 2097152},
+		{2000, 4194304, 6291456, 8388608},
+		{23169, 1 << 29, 3 << 28, 1 << 30},
+		{23170, 1 << 29, 3 << 28, 1 << 30},
+		{1 << 20, 1 << 29, 3 << 28, 1 << 30},
+		{-1, 32768, 49152, 65536},
+	} {
+		t1, t2, t3 := neighThresholds(c.n)
+		if t1 != c.t1 || t2 != c.t2 || t3 != c.t3 {
+			t.Errorf("n=%d: got %d/%d/%d, want %d/%d/%d", c.n, t1, t2, t3, c.t1, c.t2, c.t3)
+		}
+		if !(t1 < t2 && t2 < t3) || t3 > 1<<30 {
+			t.Errorf("n=%d: %d/%d/%d not ordered or above 1<<30", c.n, t1, t2, t3)
+		}
+		if need := 2 * int64(c.n) * int64(c.n+1); int64(t3) < need && t3 != 1<<30 {
+			t.Errorf("n=%d: t3=%d below 2n(n+1)=%d without hitting the cap", c.n, t3, need)
+		}
+	}
+}
