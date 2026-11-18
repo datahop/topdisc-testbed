@@ -288,6 +288,9 @@ func scheduledWalks(disc interface {
 		case <-stopCh:
 			return
 		}
+		if !time.Now().Before(deadline) {
+			return
+		}
 		l := randomWalk(disc, cost, isProvider, target, timeout, deadline, stopCh)
 		select {
 		case <-stopCh:

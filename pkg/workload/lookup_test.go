@@ -145,6 +145,37 @@ func TestScheduledStopAtDeadline(t *testing.T) {
 	}
 }
 
+// A lookup that overruns the deadline without a stop ends the schedule: the
+// next lookup, due before the deadline, is not started.
+func TestScheduledOverrunEnds(t *testing.T) {
+	tested := 0
+	for i := 0; i < 10; i++ {
+		start := time.Now()
+		deadline := start.Add(50 * time.Millisecond)
+		open := func() enode.Iterator { return &oneIter{nd: testNode(1), closed: make(chan struct{})} }
+		var busy time.Time
+		isRegistrant := func(enode.ID) bool {
+			if busy.IsZero() {
+				busy = time.Now()
+				time.Sleep(time.Until(deadline) + 20*time.Millisecond)
+			}
+			return true
+		}
+		var recorded []Lookup
+		Scheduled(open, isRegistrant, 2, time.Minute, []time.Time{start, start.Add(10 * time.Millisecond)}, deadline, make(chan struct{}), func(l Lookup) { recorded = append(recorded, l) })
+		if busy.IsZero() || !busy.Before(deadline) {
+			continue
+		}
+		tested++
+		if len(recorded) != 1 || recorded[0].Results != 1 {
+			t.Fatalf("run %d: recorded %+v, want only the overrunning lookup", i, recorded)
+		}
+	}
+	if tested == 0 {
+		t.Skip("no lookup got busy before its deadline")
+	}
+}
+
 // srcIter yields nodes with a per-node source and reports walk queries.
 type srcIter struct {
 	nodes []*enode.Node
