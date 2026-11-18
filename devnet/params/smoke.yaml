@@ -1,0 +1,35 @@
+# devnet/gen-params.sh smoke 2 2 old ethereum/client-go:v1.17.10
+participants:
+  - el_type: geth
+    el_image: ethereum/client-go:v1.17.10
+    el_log_level: debug
+    el_extra_params: ["--bootnodes="]
+    cl_type: lighthouse
+    cl_image: sigp/lighthouse:v8.3.3
+    vc_type: lighthouse
+    vc_image: sigp/lighthouse:v8.3.3
+    validator_count: 32
+    count: 1
+    supernode: true
+  - el_type: geth
+    el_image: topdisc-geth:3b8bef9e31d8
+    el_log_level: debug
+    el_extra_params: ["--discovery.topic", "'--vmodule=p2p/discover/topicindex/*=5'", "--identity=topdisc"]
+    cl_type: lighthouse
+    cl_image: sigp/lighthouse:v8.3.3
+    vc_type: lighthouse
+    vc_image: sigp/lighthouse:v8.3.3
+    validator_count: 32
+    count: 2
+  - el_type: geth
+    el_image: ethereum/client-go:v1.17.10
+    el_log_level: debug
+    el_extra_params: []
+    cl_type: lighthouse
+    cl_image: sigp/lighthouse:v8.3.3
+    vc_type: lighthouse
+    vc_image: sigp/lighthouse:v8.3.3
+    validator_count: 32
+    count: 1
+additional_services: []
+parallel_keystore_generation: true
