@@ -39,7 +39,7 @@ func twoSessions(t *testing.T) *node {
 	n := newNode(assign.Assignment{Idx: 3, Topics: []string{"t"}}, key)
 	s1 := newSession(time.UnixMilli(1000))
 	s1.wire, s1.lookups, s1.ops = wire1, []workload.Lookup{look1}, []map[string]any{{"msg": "TOPICQUERY/v5", "opid": 1}}
-	s1.connStart, s1.connFound = time.UnixMilli(1200), []workload.Found{{ID: "p1", AtMs: 5}}
+	s1.connStart, s1.connFound = time.UnixMilli(1200), []workload.Found{{ID: "p1", AtMs: 5, Src: "walk", Both: true}}
 	n.cur = s1
 	n.drops, n.refills = 1, []int64{40}
 	n.addSample(smp1)
@@ -79,7 +79,7 @@ func TestTraceAccumulatesSessions(t *testing.T) {
 		t.Errorf("peer_drops %v first_capable_ms %v, want 3 and 50", m["peer_drops"], m["first_capable_ms"])
 	}
 	conn := m["conn"].(map[string]any)
-	if found := conn["found"].([]workload.Found); conn["start_ms"] != int64(3200) || len(found) != 2 || found[0].AtMs != 1205-3200 || found[1].AtMs != 7 {
+	if found := conn["found"].([]workload.Found); conn["start_ms"] != int64(3200) || len(found) != 2 || found[0].AtMs != 1205-3200 || found[1].AtMs != 7 || found[0].Src != "walk" || !found[0].Both || found[1].Src != "" {
 		t.Errorf("conn %v, want both finds timed from 3200", conn)
 	}
 	ss := m["sessions"].([]span)
@@ -110,7 +110,7 @@ func TestTraceMatchesLoadTrace(t *testing.T) {
 		}
 	}
 	file(filepath.Join(dir, "node3.s1.json"), map[string]any{"peer_drops": 1, "first_capable_ms": -1, "wire": wire1, "samples": []sample{smp1},
-		"lookups": []workload.Lookup{look1}, "conn": map[string]any{"start_ms": 1200, "found": []workload.Found{{ID: "p1", AtMs: 5}}, "slots_filled_ms": -1},
+		"lookups": []workload.Lookup{look1}, "conn": map[string]any{"start_ms": 1200, "found": []workload.Found{{ID: "p1", AtMs: 5, Src: "walk", Both: true}}, "slots_filled_ms": -1},
 		"session": span{1000, 2000}})
 	file(path, map[string]any{"peer_drops": 2, "first_capable_ms": 50, "wire": wire2, "samples": []sample{smp2},
 		"lookups": []workload.Lookup{look2}, "conn": map[string]any{"start_ms": 3200, "found": []workload.Found{{ID: "p2", AtMs: 7}}, "slots_filled_ms": -1},
@@ -157,6 +157,45 @@ func TestDownWhileWaitingForSearch(t *testing.T) {
 		t.Fatal("Next still blocked after close")
 	}
 	it.Close() // the server's discmix closes it again
+}
+
+// The dialer hears each node's source.
+func TestLazyIterSource(t *testing.T) {
+	ready := make(chan struct{})
+	close(ready)
+	var srcs []string
+	it := newLazyIter(ready, func() enode.Iterator {
+		return enode.WithSourceName("walk", enode.IterNodes([]*enode.Node{capableNode(t)}))
+	}, func(_ *enode.Node, src string) { srcs = append(srcs, src) })
+	for it.Next() {
+	}
+	it.Close()
+	if len(srcs) != 1 || srcs[0] != "walk" {
+		t.Errorf("sources %v, want [walk]", srcs)
+	}
+}
+
+// A node handed to the dialer is recorded once, under its first source, and
+// marked found by both when it arrives again from the other source.
+func TestRecordConn(t *testing.T) {
+	s := newSession(time.Now())
+	s.connStart = time.Now()
+	a, b := svcNode(1, nil), svcNode(2, nil)
+	s.recordConn(a, "topic")
+	s.recordConn(a, "walk")
+	if len(s.connFound) != 1 || s.connFound[0].Src != "topic" || !s.connFound[0].Both {
+		t.Fatalf("after topic, walk: %+v, want one topic entry found by both", s.connFound)
+	}
+	s.recordConn(a, "topic")
+	if len(s.connFound) != 1 || !s.connFound[0].Both {
+		t.Fatalf("after topic again: %+v", s.connFound)
+	}
+	s.recordConn(b, "walk")
+	s.recordConn(b, "walk")
+	s.recordConn(b, "")
+	if len(s.connFound) != 2 || s.connFound[1].ID != b.ID().String() || s.connFound[1].Src != "walk" || s.connFound[1].Both {
+		t.Fatalf("second node: %+v, want a walk entry not found by both", s.connFound)
+	}
 }
 
 // The ghost fields are the last session's snapshot; the timeout counters sum

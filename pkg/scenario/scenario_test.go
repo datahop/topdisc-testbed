@@ -28,6 +28,11 @@ func TestLoadSearchModes(t *testing.T) {
 		{"scenario:\n  search:\n    model: scheduled\n  conn_model:\n    enabled: true\n", "lookup-only"},
 		{"scenario:\n  search:\n    model: continuous\n  conn_model:\n    enabled: true\n", "lookup-only"},
 		{"scenario:\n  search:\n    model: sometimes\n", "want conn, scheduled or continuous"},
+		{"scenario:\n  search:\n    model: continuous\n    topdisc_walk: true\n    score_all_providers: true\ntestbed:\n  backend: local\n", ""},
+		{"scenario:\n  search:\n    model: continuous\n    score_all_providers: true\ntestbed:\n  backend: local\n", ""},
+		{"scenario:\n  search:\n    model: continuous\n    topdisc_walk: true\n    score_all_providers: true\n", "real backend"},
+		{"scenario:\n  search:\n    model: continuous\n    score_all_providers: true\n", "real backend"},
+		{"scenario:\n  search:\n    model: continuous\n    topdisc_walk: true\ntestbed:\n  backend: local\n", "needs search.score_all_providers"},
 	} {
 		err := loadYAML(t, tc.body)
 		switch {

@@ -29,7 +29,7 @@ import (
 type lazyIter struct {
 	ready     <-chan struct{}
 	open      func() enode.Iterator
-	seen      func(*enode.Node) // called for every node handed to the dialer
+	seen      func(*enode.Node, string) // called for every node handed to the dialer, with its source
 	once      sync.Once
 	mu        sync.Mutex
 	it        enode.Iterator
@@ -37,7 +37,7 @@ type lazyIter struct {
 	closeOnce sync.Once
 }
 
-func newLazyIter(ready <-chan struct{}, open func() enode.Iterator, seen func(*enode.Node)) *lazyIter {
+func newLazyIter(ready <-chan struct{}, open func() enode.Iterator, seen func(*enode.Node, string)) *lazyIter {
 	return &lazyIter{ready: ready, open: open, seen: seen, closed: make(chan struct{})}
 }
 
@@ -64,7 +64,11 @@ func (l *lazyIter) Next() bool {
 	}
 	ok := it.Next()
 	if ok && l.seen != nil {
-		l.seen(it.Node())
+		src := ""
+		if si, ok := it.(enode.SourceIterator); ok {
+			src = si.NodeSource()
+		}
+		l.seen(it.Node(), src)
 	}
 	return ok
 }
@@ -120,6 +124,7 @@ type node struct {
 	maxPeers   int
 	dialRatio  int
 	topicName  string
+	svc        svcEntry
 	topic      topicindex.TopicID
 	bootnodes  []*enode.Node
 	bootIDs    map[enode.ID]struct{}
@@ -165,7 +170,7 @@ type session struct {
 
 	connStart  time.Time
 	connIt     enode.Iterator
-	connSeen   map[enode.ID]struct{}
+	connSeen   map[enode.ID]int // index into connFound
 	connFound  []workload.Found
 	connFullMs int64
 	connSearch any
@@ -191,13 +196,24 @@ type session struct {
 }
 
 func newSession(started time.Time) *session {
-	return &session{started: started, firstCapableMs: -1, connSeen: map[enode.ID]struct{}{}, connFound: []workload.Found{}, connFullMs: -1,
+	return &session{started: started, firstCapableMs: -1, connSeen: map[enode.ID]int{}, connFound: []workload.Found{}, connFullMs: -1,
 		adsFirst: map[string]map[string]int64{}, adsLast: map[string][]string{}, adsExpiry: map[string]map[string]int64{}, regCompleteMs: -1}
 }
 
 func newNode(asg assign.Assignment, key *ecdsa.PrivateKey) *node {
 	return &node{asg: asg, key: key, id: enode.PubkeyToIDV4(&key.PublicKey), firstCapableMs: -1, bootIDs: map[enode.ID]struct{}{}, ghostIDs: map[enode.ID]struct{}{},
 		lookupOnly: asg.Search.Model == "continuous" || asg.Search.Model == "scheduled"}
+}
+
+// recordConn records a registrant handed to the dialer, marking it found by
+// both sources when it arrives again from the other one. Callers hold n.mu.
+func (s *session) recordConn(nd *enode.Node, src string) {
+	if k, ok := s.connSeen[nd.ID()]; !ok {
+		s.connSeen[nd.ID()] = len(s.connFound)
+		s.connFound = append(s.connFound, workload.Found{ID: nd.ID().String(), AtMs: time.Since(s.connStart).Milliseconds(), Src: src})
+	} else if src != "" && src != s.connFound[k].Src {
+		s.connFound[k].Both = true
+	}
 }
 
 // waitCtx sleeps until atMs and reports whether ctx is still live.
@@ -246,18 +262,15 @@ func (n *node) up() error {
 	// dialer's search: registrants handed to the dialer, its progress, and when
 	// the outbound slots first filled.
 	s.dialIt = newLazyIter(s.ready, func() enode.Iterator {
-		it := s.srv.DiscoveryV5().TopicSearch(n.topic, uint64(n.port))
+		it := n.openSearch(s.srv.DiscoveryV5(), uint64(n.port))
 		n.mu.Lock()
 		s.connStart, s.connIt = time.Now(), it
 		n.mu.Unlock()
 		return it
-	}, func(nd *enode.Node) {
+	}, func(nd *enode.Node, src string) {
 		n.mu.Lock()
 		defer n.mu.Unlock()
-		if _, ok := s.connSeen[nd.ID()]; !ok {
-			s.connSeen[nd.ID()] = struct{}{}
-			s.connFound = append(s.connFound, workload.Found{ID: nd.ID().String(), AtMs: time.Since(s.connStart).Milliseconds()})
-		}
+		s.recordConn(nd, src)
 	})
 	proto.DialCandidates = s.dialIt
 	if n.lookupOnly {
@@ -388,7 +401,7 @@ func (n *node) phases(s *session) {
 	if a.Phases.StopAt == 0 {
 		deadline = time.Now().Add(24 * time.Hour)
 	}
-	open := func() enode.Iterator { return s.srv.DiscoveryV5().TopicSearch(n.topic, uint64(n.port)+1) }
+	open := func() enode.Iterator { return n.openSearch(s.srv.DiscoveryV5(), uint64(n.port)+1) }
 	timeout := time.Duration(a.Search.RequestTimeout) * time.Millisecond
 	if a.Search.Model == "scheduled" {
 		at := make([]time.Time, len(a.Search.LookupAtMs))
@@ -665,7 +678,7 @@ func (n *node) trace() map[string]any {
 		start := connSrc.connStart.UnixMilli()
 		rel := make([]workload.Found, len(found))
 		for i, f := range found {
-			rel[i] = workload.Found{ID: f.ID, AtMs: f.AtMs - start}
+			rel[i] = workload.Found{ID: f.ID, AtMs: f.AtMs - start, Src: f.Src, Both: f.Both}
 		}
 		conn = map[string]any{"start_ms": start, "found": rel, "slots_filled_ms": connSrc.connFullMs}
 		if connSrc.connSearch != nil {
@@ -752,7 +765,7 @@ func absFound(s *session) []workload.Found {
 	start := s.connStart.UnixMilli()
 	out := make([]workload.Found, len(s.connFound))
 	for i, f := range s.connFound {
-		out[i] = workload.Found{ID: f.ID, AtMs: start + f.AtMs}
+		out[i] = workload.Found{ID: f.ID, AtMs: start + f.AtMs, Src: f.Src, Both: f.Both}
 	}
 	return out
 }

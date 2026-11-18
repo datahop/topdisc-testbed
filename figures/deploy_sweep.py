@@ -10,7 +10,10 @@ read through pairfigs.Run (metrics.json, oh.json, series.json, run.log), plus
 nodes.json (first_capable_ms per node) and assignments/ (node type and topic,
 so topic size classes count every member and stay the same across shares).
 A TopDisc searcher is scored against the TopDisc members of its topic, a
-plain one against every member (pkg/coordinator/metrics.go). With --by-class
+plain one against every member (pkg/coordinator/metrics.go); under
+search.score_all_providers every searcher against every member, each found
+provider tagged with the source that returned it (topic search, random walk
+or both), and every searcher that missed some listed with what it missed. With --by-class
 every metric is also split by the size of the node's own topic. With one run
 it is that run's per-type report.
 
@@ -58,7 +61,20 @@ def stats_for(run, rs_all, nodes, typ, id_idx, capable, regs, boot):
     s = {"nodes": len(nodes), "searchers": len(rs_all), "scorable": len(rs)}
     rec = [min(len(run.found_at(r)) / run.tgt(r), 1.0) for r in rs]
     s["recall_p50"], s["recall_p10"] = pct(rec, 50), pct(rec, 10)
-    for f, k in ((None, "t_first"), (0.5, "t_50"), (0.9, "t_90")):
+    s["recall_min"] = min(rec) if rec else float("nan")
+    s["full_share"] = sum(1 for r in rs if len(run.found_at(r)) >= run.tgt(r)) / len(rs) if rs else float("nan")
+    srcs = {"topic": 0, "walk": 0, "both": 0}
+    for r in rs:
+        tags = r.get("uniqueFoundSrc") or [None] * len(r.get("uniqueFoundAtMs") or [])
+        on = r.get("uniqueFoundOnline") or [True] * len(tags)
+        for tag, up in zip(tags, on):
+            if up:
+                tag = tag or ("topic" if typ == "TopDisc" else "walk")
+                srcs["both" if "+" in tag else tag] += 1
+    n_src = sum(srcs.values())
+    for k, v in srcs.items():
+        s["src_" + k] = v / n_src if n_src else float("nan")
+    for f, k in ((None, "t_first"), (0.5, "t_50"), (0.9, "t_90"), (1.0, "t_100")):
         v = [(float(t[0]) if len(t := run.found_at(r)) else None) if f is None else run.time_to(r, f) for r in rs]
         s[k] = med_inf(v)
     cap = [capable[i] for i in nodes if capable.get(i, -1) >= 0]
@@ -82,6 +98,7 @@ def stats_for(run, rs_all, nodes, typ, id_idx, capable, regs, boot):
         s["contacted"] = pct([a / b for a, b in zip(q, walks)], 50)
     counted = [n for n in run.oh if n["idx"] in nodes and n.get("byType")]
     s["coverage"] = len(counted) / max(len(nodes), 1)
+    s["findnode_p50"] = pct([n["byType"].get("FINDNODE/v5", {}).get("txMsgs", 0) for n in counted], 50)
     tx = [n.get("txBytes", 0) for n in counted]
     s["tx_p50"], s["tx_p95"] = pct(tx, 50) / 1e6, pct(tx, 95) / 1e6
     return s
@@ -108,8 +125,22 @@ def load_run(share, rd, by_class):
             first[rid] = min(ns, first.get(rid, ns))
     regs = {"first": first, "start": run.m.get("registrationStartNs") or {}}
     raw = run.m.get("results") or []
+    a1 = asg.get(1) or asg.get(0) or {}
+    score_all = bool((a1.get("search") or {}).get("score_all_providers"))
+    idx_of = {n["id"][:16]: n["idx"] for n in load(os.path.join(rd, "nodes.json"), []) or [] if n.get("id")}
+    name = lambda i: f"{i} ({'plain' if legacy_of.get(i) else 'TopDisc'})" if i is not None else "?"
+    misses = [] if any("missed" in r for r in raw) else None  # None: metrics from before the field
+    for r in sorted(raw, key=lambda r: r["nodeIdx"]):
+        if r.get("missed") and r.get("target") and run.tgt(r):
+            ids = r.get("missedIds") or []
+            missed = ", ".join(name(idx_of.get(m)) for m in ids) + (f" … +{r['missed'] - len(ids)}" if r["missed"] > len(ids) else "")
+            misses.append((name(r["nodeIdx"]), topic_of.get(r["nodeIdx"], r["topic"]), f"{len(run.found_at(r))}/{run.tgt(r)}", missed))
     groups = [("all", lambda i: True)] + ([(c, lambda i, c=c: cls_of[i] == c) for c in CLASSES] if by_class else [])
-    out = {"share": share, "dir": rd, "notes": list(run.notes), "fork": run.p.get("build.fork", "?"), "classes": {}}
+    notes = list(run.notes)
+    if run.model == "continuous":
+        notes.append("per-search counters (registrars contacted per search, plain FINDNODE per walk) are unreliable in continuous runs: "
+                     "a node's trace can keep its search as of its last new provider; the per-node message rows are not affected")
+    out = {"share": share, "dir": rd, "notes": notes, "fork": run.p.get("build.fork", "?"), "classes": {}, "score_all": score_all, "misses": misses}
     for cname, keep in groups:
         per = {}
         for typ in TYPES:
@@ -143,10 +174,15 @@ def boot_cell(s):
 ROWS = [
     ("nodes", lambda s: f"{s['nodes']:,}"),
     ("searchers / scorable", lambda s: f"{s['searchers']:,} / {s['scorable']:,}"),
+    ("found 100 % of topic, share of searchers", lambda s: f"{100 * s['full_share']:.1f} %" if s["scorable"] else "–"),
     ("recall at end, median / p10", lambda s: f"{100 * s['recall_p50']:.1f} / {100 * s['recall_p10']:.1f} %" if s["scorable"] else "–"),
+    ("recall at end, min", lambda s: f"{100 * s['recall_min']:.1f} %" if s["scorable"] else "–"),
     ("time to first provider, median", lambda s: t_cell(s["t_first"])),
     ("time to 50 %, median", lambda s: t_cell(s["t_50"])),
     ("time to 90 %, median", lambda s: t_cell(s["t_90"])),
+    ("time to 100 %, median", lambda s: t_cell(s["t_100"])),
+    ("providers found via topic only / walk only / both", lambda s: " / ".join(f"{100 * s['src_' + k]:.1f}" for k in ("topic", "walk", "both")) + " %" if has(s, "src_topic") else "–"),
+    ("FINDNODE sent per node, whole run, median", lambda s: f"{s['findnode_p50']:,.0f}" if has(s, "findnode_p50") else "–"),
     ("first TopDisc-capable peer, p50 / p90 (saw one)", lambda s: f"{fmt_s(s['capable_p50'])} / {fmt_s(s['capable_p90'])} ({100 * s['capable_n'] / max(s['nodes'], 1):.0f} %)"),
     ("registrars contacted per search, median (plain: FINDNODE per walk)", lambda s: f"{s['contacted']:,.0f}" if has(s, "contacted") else "–"),
     ("REGTOPIC nodes asked per registration, median", lambda s: f"{s['reg_nodes']:,.0f}" if has(s, "reg_nodes") else "–"),
@@ -157,9 +193,16 @@ ROWS = [
 ]
 
 
+SCORING = {False: "TopDisc searchers are scored against the TopDisc members of their topic, plain searchers against every member",
+           True: "every searcher, TopDisc or plain, is scored against every member of its topic (search.score_all_providers)"}
+MAX_MISSES = 100
+
+
 def write_md(runs, out):
+    modes = {r["score_all"] for r in runs}
+    scoring = SCORING[modes.pop()] if len(modes) == 1 else "scoring differs by run, see each run"
     L = ["# Partial-deployment sweep", "",
-         "Share = TopDisc share of every service; plain = discv5 built on the fork. TopDisc searchers are scored against the TopDisc members of their topic, plain searchers against every member; under churn, against those up at the end of the search.", "",
+         f"Share = TopDisc share of every service; plain = discv5 built on the fork. {scoring[0].upper() + scoring[1:]}; under churn, against those up at the end of the search.", "",
          "## Across shares", "",
          "| share | type | " + " | ".join(name for name, _ in ROWS) + " |",
          "|---:|---|" + "---:|" * len(ROWS)]
@@ -168,7 +211,8 @@ def write_md(runs, out):
             L.append(f"| {r['share']} % | {typ} | " + " | ".join(f(s) for _, f in ROWS) + " |")
     for r in runs:
         L += ["", f"## {r['share']} % TopDisc", "", f"`{r['dir']}` ({r['fork']})", ""]
-        L += [f"- {n}" for n in r["notes"]] + ([""] if r["notes"] else [])
+        notes = r["notes"] + [f"scoring: {SCORING[r['score_all']]}"]
+        L += [f"- {n}" for n in notes] + [""]
         for cname, c in r["classes"].items():
             if cname != "all":
                 L += [f"### {cname} ({c['topics']} topics)", ""]
@@ -176,6 +220,17 @@ def write_md(runs, out):
             L += ["| metric | " + " | ".join(types) + " |", "|---|" + "---:|" * len(types)]
             L += [f"| {name} | " + " | ".join(f(c["types"][t]) for t in types) + " |" for name, f in ROWS]
             L.append("")
+        ms = r["misses"]
+        if ms is None:
+            continue
+        L += ["### Misses", ""]
+        if not ms:
+            L += ["Every scorable searcher found every provider of its topic up at the end.", ""]
+            continue
+        L += [f"{len(ms):,} searchers missed providers up at the end" + (f"; the first {MAX_MISSES} by index:" if len(ms) > MAX_MISSES else ":"), "",
+              "| searcher | topic | found / target | missed |", "|---|---:|---:|---|"]
+        L += [f"| {a} | {t} | {ft} | {m} |" for a, t, ft, m in ms[:MAX_MISSES]]
+        L.append("")
     path = os.path.join(out, "deploy_sweep.md")
     with open(path, "w") as f:
         f.write("\n".join(L) + "\n")

@@ -1,6 +1,7 @@
 # Mixed network: legacy_frac of the nodes of every service run plain discv5
 # (DHT random walk, "svc" record entry), the rest TopDisc. TopDisc nodes can
-# only find TopDisc registrants; plain nodes find any node of their service.
+# only find TopDisc registrants unless search.topdisc_walk (real backends);
+# plain nodes find any node of their service.
 # Sweep legacy_frac over 0.25, 0.5, 0.75 and 0.9 against the all-TopDisc run
 # (legacy_frac 0) and the all-plain run (*-discv5).
 #   ./simnet scenarios/simnet-crawl-5k-mixed.yaml

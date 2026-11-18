@@ -13,7 +13,7 @@ func TestLoadTraceMergesSessions(t *testing.T) {
 	s1 := `{"idx":3,"id":"a","peer_drops":1,"first_capable_ms":-1,"wire":{"PING":{"txBytes":10,"txMsgs":1}},
 		"samples":[{"at_ms":100,"wire":{"PING":{"txBytes":10,"txMsgs":1}}}],
 		"lookups":[{"start_ms":100,"found":[{"id":"p1","at_ms":5}]}],
-		"conn":{"start_ms":100,"found":[{"id":"p1","at_ms":5}]},"session":{"start_ms":0,"end_ms":200}}`
+		"conn":{"start_ms":100,"found":[{"id":"p1","at_ms":5,"src":"walk","both":true}]},"session":{"start_ms":0,"end_ms":200}}`
 	s2 := `{"idx":3,"id":"a","peer_drops":2,"first_capable_ms":50,"wire":{"PING":{"txBytes":5,"txMsgs":2},"PONG":{"txBytes":1}},
 		"samples":[{"at_ms":400,"wire":{"PING":{"txBytes":5,"txMsgs":2}}}],
 		"lookups":[{"start_ms":300,"found":[{"id":"p2","at_ms":7}]}],
@@ -38,6 +38,8 @@ func TestLoadTraceMergesSessions(t *testing.T) {
 			Found   []struct {
 				ID   string `json:"id"`
 				AtMs int64  `json:"at_ms"`
+				Src  string `json:"src"`
+				Both bool   `json:"both"`
 			} `json:"found"`
 		} `json:"conn"`
 	}
@@ -53,7 +55,7 @@ func TestLoadTraceMergesSessions(t *testing.T) {
 	if m.Samples[1].Wire["PING"]["txBytes"] != 15 {
 		t.Errorf("second session's sample not carried on: %v", m.Samples[1].Wire)
 	}
-	if m.Conn.StartMs != 300 || len(m.Conn.Found) != 2 || m.Conn.Found[0].AtMs != -195 || m.Conn.Found[1].AtMs != 7 {
+	if m.Conn.StartMs != 300 || len(m.Conn.Found) != 2 || m.Conn.Found[0].AtMs != -195 || m.Conn.Found[1].AtMs != 7 || m.Conn.Found[0].Src != "walk" || !m.Conn.Found[0].Both || m.Conn.Found[1].Src != "" {
 		t.Errorf("conn: %+v", m.Conn)
 	}
 	// One session: the file as written.

@@ -1,6 +1,9 @@
 package workload
 
 import (
+	"encoding/json"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,6 +32,9 @@ func TestContinuous(t *testing.T) {
 	final := updates[len(updates)-1]
 	if final.Results != 3 || len(final.Found) != 3 || final.HitTarget {
 		t.Fatalf("final lookup %+v, want 3 distinct results and no target", final)
+	}
+	if f := final.Found[0]; f.Src != "" || f.Both || final.WalkQueries != 0 {
+		t.Fatalf("untagged iterator: found %+v, walk queries %d", f, final.WalkQueries)
 	}
 	for i, l := range updates[:3] {
 		if l.Results != i+1 {
@@ -87,5 +93,87 @@ func TestScheduledStops(t *testing.T) {
 		if len(recorded) != 0 {
 			t.Fatalf("first lookup at +%v: recorded %d lookups after stop, want 0", first, len(recorded))
 		}
+	}
+}
+
+// srcIter yields nodes with a per-node source and reports walk queries.
+type srcIter struct {
+	nodes []*enode.Node
+	srcs  []string
+	i     int
+}
+
+func (it *srcIter) Next() bool         { it.i++; return it.i <= len(it.nodes) }
+func (it *srcIter) Node() *enode.Node  { return it.nodes[it.i-1] }
+func (it *srcIter) NodeSource() string { return it.srcs[it.i-1] }
+func (it *srcIter) Close()             {}
+func (it *srcIter) WalkQueries() int   { return 7 }
+
+// Each registrant carries the source that returned it first, and both when
+// the other source returned it again; a repeat is not a new result.
+func TestContinuousSources(t *testing.T) {
+	it := &srcIter{
+		nodes: []*enode.Node{testNode(1), testNode(2), testNode(1), testNode(3)},
+		srcs:  []string{"topic", "walk", "walk", "topic"},
+	}
+	var final Lookup
+	Continuous(func() enode.Iterator { return it }, nil, 0, 0, time.Now().Add(time.Minute), nil, func(l Lookup) { final = l })
+	if final.Results != 3 || len(final.Found) != 3 {
+		t.Fatalf("final lookup %+v, want 3 results", final)
+	}
+	want := []Found{{Src: "topic", Both: true}, {Src: "walk"}, {Src: "topic"}}
+	for i, f := range final.Found {
+		if f.Src != want[i].Src || f.Both != want[i].Both {
+			t.Errorf("found[%d] src %q both %v, want %q %v", i, f.Src, f.Both, want[i].Src, want[i].Both)
+		}
+	}
+	if final.WalkQueries != 7 {
+		t.Errorf("walk queries %d, want 7", final.WalkQueries)
+	}
+}
+
+// slowIter is srcIter with a pause before each node after the first.
+type slowIter struct{ srcIter }
+
+func (it *slowIter) Next() bool {
+	if it.i > 0 {
+		time.Sleep(20 * time.Millisecond)
+	}
+	return it.srcIter.Next()
+}
+
+// A published lookup is a snapshot: marshalling it while the search goes on
+// and marks a repeat as both must not race, and the flag reaches the reader.
+func TestContinuousPublishesSnapshots(t *testing.T) {
+	it := &slowIter{srcIter{nodes: []*enode.Node{testNode(1), testNode(1), testNode(2)}, srcs: []string{"topic", "walk", "topic"}}}
+	var (
+		mu      sync.Mutex
+		last    Lookup
+		stopped atomic.Bool
+		reader  sync.WaitGroup
+	)
+	reader.Add(1)
+	go func() {
+		defer reader.Done()
+		for !stopped.Load() {
+			mu.Lock()
+			l := last
+			mu.Unlock()
+			json.Marshal(l)
+		}
+	}()
+	var bothSeen bool
+	Continuous(func() enode.Iterator { return it }, nil, 0, 0, time.Now().Add(time.Minute), nil, func(l Lookup) {
+		mu.Lock()
+		last = l
+		if l.Results == 1 && l.Found[0].Both {
+			bothSeen = true
+		}
+		mu.Unlock()
+	})
+	stopped.Store(true)
+	reader.Wait()
+	if !bothSeen {
+		t.Error("no update carried both before the next new registrant")
 	}
 }

@@ -82,6 +82,8 @@ scenario:
     target_count: 0                    # conn: stop a searcher after this many distinct registrants; scheduled: end each lookup at this many. 0 = never
     initial_results: 0                 # continuous: new registrants a searcher takes at once before result_interval pacing starts
     result_interval: 0s                # continuous: after initial_results, take one new registrant per interval; 0 = unpaced
+    topdisc_walk: false                # TopDisc nodes also read the plain discv5 random walk, filtered on the svc entry as plain nodes do, mixed with the topic search by enode.FairMix as geth --discovery.topic. Real backends only; needs score_all_providers
+    score_all_providers: false         # score every searcher against all providers of its topic up at the end, TopDisc searchers included; false = TopDisc searchers against TopDisc members only. Real backends only
   conn_model:
     enabled: false
     max_peers: 50                      # total slots per node

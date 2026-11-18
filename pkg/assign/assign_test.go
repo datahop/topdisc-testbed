@@ -154,6 +154,24 @@ func TestLegacyFork(t *testing.T) {
 	}
 }
 
+func TestSearchOptions(t *testing.T) {
+	cfg := scenario.Default()
+	cfg.Scenario.Population.Nodes = 10
+	hosts := func(int) Host { return Host{IP: "10.0.0.1", BasePort: 30300} }
+	for _, on := range []bool{false, true} {
+		cfg.Scenario.Search.TopdiscWalk, cfg.Scenario.Search.ScoreAllProviders = on, on
+		as, err := Generate(cfg, hosts, 0, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range as {
+			if a.Search.TopdiscWalk != on || a.Search.ScoreAllProviders != on {
+				t.Fatalf("%v: node %d search %+v", on, a.Idx, a.Search)
+			}
+		}
+	}
+}
+
 // bootstrap_sample adds earlier starters to the bootnode: never node 0's
 // own list, never a node that started less than bootstrapSettle before, the
 // bootnode always first, and the same draw for the same seed.

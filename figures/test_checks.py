@@ -874,6 +874,28 @@ class TestCheckLogic(unittest.TestCase):
         run.legacy = {i: True for i in run.legacy}
         self.assertEqual(checks.l3_no_expired(run, tol)["summary"], "no TopDisc searchers in the run")
 
+    def test_walk_results(self):
+        """A TopDisc searcher's legacy result passes L2 when the random walk returned it, fails otherwise; L3 skips it."""
+        tol = checks.argparser().parse_args([self.rd])
+        self.assertEqual(checks.l2_capable_results(checks.Run(self.rd), tol)["status"], "fail")  # the fixture's finds of node 5
+        for src, both, want in (("walk", False, "pass"), ("walk", True, "fail"), ("topic", False, "fail")):
+            for i in range(5):
+                t = read(os.path.join(self.rd, f"traces/node{i}.json"))
+                for lk in t["lookups"]:
+                    for r in lk["found"]:
+                        if r["id"] == nid(5):
+                            r["src"], r["both"] = src, both
+                write(self.rd, f"traces/node{i}.json", t)
+            with self.subTest(src=src, both=both):
+                self.assertEqual(checks.l2_capable_results(checks.Run(self.rd), tol)["status"], want)
+        t = read(os.path.join(self.rd, "traces/node0.json"))
+        t["lookups"][0]["found"].append({"id": nid(4), "at_ms": 2_000_000, "src": "walk"})
+        t["lookups"][0]["found"].append({"id": nid(1), "at_ms": 2_000_000, "src": "walk", "both": True})
+        write(self.rd, "traces/node0.json", t)
+        v = checks.l3_no_expired(checks.Run(self.rd), tol)
+        self.assertEqual(v["evidence"]["walk_results_skipped"], 1)  # the walk+both find is checked
+        self.assertIn("; 1 random-walk results skipped", v["summary"])
+
     def test_plain_run(self):
         c = self.plain()
         self.assertEqual((c["L3"]["status"], c["L3"]["summary"]), ("not-exercised", "every node runs plain discv5"))
