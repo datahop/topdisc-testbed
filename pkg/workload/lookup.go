@@ -47,7 +47,7 @@ func Continuous(open func() enode.Iterator, isRegistrant func(enode.ID) bool, in
 
 // Scheduled runs one lookup at each of the given times (a lookup that overruns
 // the next time starts the next one at once), until the deadline. Closing stop
-// returns at once; a lookup it cuts short is not recorded.
+// returns at once; a lookup it cuts short before the deadline is not recorded.
 func Scheduled(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target int, timeout time.Duration, at []time.Time, deadline time.Time, stop <-chan struct{}, record func(Lookup)) {
 	for _, t := range at {
 		if !t.Before(deadline) {
@@ -62,6 +62,9 @@ func Scheduled(open func() enode.Iterator, isRegistrant func(enode.ID) bool, tar
 		}
 		l, stopped := runOne(open, isRegistrant, target, timeout, deadline, stop, nil, 0, 0)
 		if stopped {
+			if !time.Now().Before(deadline) {
+				record(l) // the stop at the deadline: cut by the deadline all the same
+			}
 			return
 		}
 		record(l)

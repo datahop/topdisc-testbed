@@ -311,7 +311,8 @@ func (n *node) fold(s *session, end time.Time) {
 	n.last, n.cur = s, nil
 }
 
-// finish writes the trace and takes the node down for good.
+// finish takes the node down for good and writes the trace. Down comes first:
+// it waits for the walk's final update, which lands only once stop closes.
 func (n *node) finish() {
 	n.ctl.Lock()
 	defer n.ctl.Unlock()
@@ -319,15 +320,8 @@ func (n *node) finish() {
 		return
 	}
 	n.done = true
-	n.mu.Lock()
-	s := n.cur
-	n.mu.Unlock()
-	if s != nil {
-		n.snapshotLive(s)
-		n.snapshotCounters(s)
-	}
+	n.downLocked() // errDown when churn already took it down
 	n.writeTrace()
-	n.downLocked()
 }
 
 // search runs the session's walks. A legacy node has nothing to register:
@@ -350,26 +344,11 @@ func (n *node) search(s *session) {
 	disc := s.srv.DiscoveryV5()
 	cost := findnodesSent(s.srv)
 	if a.Search.Model == "scheduled" {
-		for _, ms := range a.Search.LookupAtMs {
-			t := time.UnixMilli(ms)
-			if !t.Before(deadline) {
-				return
-			}
-			select {
-			case <-time.After(time.Until(t)):
-			case <-s.stop:
-				return
-			}
-			l := randomWalk(disc, cost, n.isProvider, a.Search.TargetCount, timeout, deadline, s.stop)
-			select {
-			case <-s.stop:
-				return // cut short by the departure
-			default:
-			}
+		scheduledWalks(disc, cost, n.isProvider, a.Search.TargetCount, timeout, a.Search.LookupAtMs, deadline, s.stop, func(l lookup) {
 			n.mu.Lock()
 			s.lookups = append(s.lookups, l)
 			n.mu.Unlock()
-		}
+		})
 		return
 	}
 	// continuous: one walk for the whole phase, reported as a single lookup.

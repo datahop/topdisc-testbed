@@ -96,6 +96,55 @@ func TestScheduledStops(t *testing.T) {
 	}
 }
 
+// oneIter yields one node, then nothing until closed.
+type oneIter struct {
+	nd     *enode.Node
+	n      int
+	closed chan struct{}
+}
+
+func (it *oneIter) Next() bool {
+	if it.n++; it.n == 1 {
+		return true
+	}
+	<-it.closed
+	return false
+}
+func (it *oneIter) Node() *enode.Node { return it.nd }
+func (it *oneIter) Close()            { close(it.closed) }
+
+// A lookup that runs into the deadline is recorded, also when the stop that
+// comes at the deadline wins the race with it. A run the scheduler held past
+// the deadline before the lookup got busy tests nothing and is skipped.
+func TestScheduledStopAtDeadline(t *testing.T) {
+	tested := 0
+	for i := 0; i < 10; i++ {
+		deadline := time.Now().Add(50 * time.Millisecond)
+		stop := make(chan struct{})
+		open := func() enode.Iterator { return &oneIter{nd: testNode(1), closed: make(chan struct{})} }
+		var busy time.Time
+		// Still busy at the deadline, then stopped: both end the lookup at once.
+		isRegistrant := func(enode.ID) bool {
+			busy = time.Now()
+			time.Sleep(time.Until(deadline) + time.Millisecond)
+			close(stop)
+			return true
+		}
+		var recorded []Lookup
+		Scheduled(open, isRegistrant, 2, time.Minute, []time.Time{time.Now()}, deadline, stop, func(l Lookup) { recorded = append(recorded, l) })
+		if busy.IsZero() || !busy.Before(deadline) {
+			continue
+		}
+		tested++
+		if len(recorded) != 1 || recorded[0].Results != 1 {
+			t.Fatalf("run %d: recorded %+v, want the lookup cut by the deadline", i, recorded)
+		}
+	}
+	if tested == 0 {
+		t.Skip("no lookup got busy before its deadline")
+	}
+}
+
 // srcIter yields nodes with a per-node source and reports walk queries.
 type srcIter struct {
 	nodes []*enode.Node

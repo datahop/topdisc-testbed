@@ -271,6 +271,36 @@ func randomWalk(disc interface {
 	return done(false)
 }
 
+// scheduledWalks runs one walk at each of the given times (unix ms), until the
+// deadline. A walk that closing stopCh cuts short before the deadline is not
+// recorded.
+func scheduledWalks(disc interface {
+	AllNodes() []*enode.Node
+	Lookup(enode.ID) []*enode.Node
+}, cost func() int64, isProvider func(*enode.Node) bool, target int, timeout time.Duration, at []int64, deadline time.Time, stopCh <-chan struct{}, record func(lookup)) {
+	for _, ms := range at {
+		t := time.UnixMilli(ms)
+		if !t.Before(deadline) {
+			return
+		}
+		select {
+		case <-time.After(time.Until(t)):
+		case <-stopCh:
+			return
+		}
+		l := randomWalk(disc, cost, isProvider, target, timeout, deadline, stopCh)
+		select {
+		case <-stopCh:
+			if !time.Now().Before(deadline) {
+				record(l) // the stop at the deadline: cut by the deadline all the same
+			}
+			return // otherwise cut short by the departure
+		default:
+		}
+		record(l)
+	}
+}
+
 // walkIterator is the continuous search of a topic-unaware client: check the
 // nodes it already knows, then read the discovery random walk the way a
 // dialer does, checking every record the walk yields, until the deadline. A

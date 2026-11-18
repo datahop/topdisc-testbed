@@ -269,3 +269,47 @@ func TestHasCapable(t *testing.T) {
 		t.Fatal("capable peer not counted")
 	}
 }
+
+// The final trace holds the search's last update, which a continuous search
+// delivers only once the session stops, also when churn took the node down
+// before the end.
+func TestFinishWritesFinalLookup(t *testing.T) {
+	for _, downFirst := range []bool{false, true} {
+		key, err := crypto.GenerateKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(t.TempDir(), "node.json")
+		n := newNode(assign.Assignment{Topics: []string{"t"}, TraceFile: path, Search: assign.Search{Model: "continuous"}}, key)
+		n.ip, n.maxPeers, n.topicName, n.svc = "127.0.0.1", 1, "t", svcOf("t")
+		n.topic = topicindex.TopicID(crypto.Keccak256Hash([]byte("t")))
+		if err := n.up(); err != nil {
+			t.Fatal(err)
+		}
+		n.mu.Lock()
+		s := n.cur
+		n.mu.Unlock()
+		<-s.ready // the search is open; with an empty table it finds nothing until stopped
+		time.Sleep(20 * time.Millisecond)
+		if downFirst {
+			if err := n.down(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		n.finish()
+
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var tr struct {
+			Lookups []workload.Lookup `json:"lookups"`
+		}
+		if err := json.Unmarshal(b, &tr); err != nil {
+			t.Fatal(err)
+		}
+		if len(tr.Lookups) != 1 || tr.Lookups[0].LatencyMs <= 0 || tr.Lookups[0].Queries < 0 || tr.Lookups[0].Search == nil {
+			t.Errorf("down first %v: lookups %+v, want the final update of the search", downFirst, tr.Lookups)
+		}
+	}
+}
