@@ -60,6 +60,9 @@ func Scheduled(open func() enode.Iterator, isRegistrant func(enode.ID) bool, tar
 		case <-stop:
 			return
 		}
+		if !time.Now().Before(deadline) {
+			return
+		}
 		l, stopped := runOne(open, isRegistrant, target, timeout, deadline, stop, nil, 0, 0)
 		if stopped {
 			if !time.Now().Before(deadline) {

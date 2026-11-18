@@ -346,3 +346,27 @@ func TestScheduledWalksStop(t *testing.T) {
 		t.Fatalf("stopped at the deadline: recorded %+v, want the walk", recorded)
 	}
 }
+
+// A walk that overruns the deadline without a stop ends the schedule: the next
+// walk, due before the deadline, is not started.
+func TestScheduledWalksOverrunEnds(t *testing.T) {
+	start := time.Now()
+	deadline := start.Add(100 * time.Millisecond)
+	var busy time.Time
+	isProvider := func(*enode.Node) bool {
+		if busy.IsZero() {
+			busy = time.Now()
+			time.Sleep(time.Until(deadline) + 20*time.Millisecond)
+		}
+		return true
+	}
+	var recorded []lookup
+	at := []int64{start.UnixMilli(), start.Add(10 * time.Millisecond).UnixMilli()}
+	scheduledWalks(&fakeDisc{providers: map[enode.ID]bool{}}, nil, isProvider, 2, time.Minute, at, deadline, make(chan struct{}), func(l lookup) { recorded = append(recorded, l) })
+	if busy.IsZero() || !busy.Before(deadline) {
+		t.Skip("the walk did not get busy before its deadline")
+	}
+	if len(recorded) != 1 || recorded[0].Results != 1 {
+		t.Fatalf("recorded %+v, want only the overrunning walk", recorded)
+	}
+}
