@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -45,13 +46,18 @@ type rawTrace struct {
 	Conn           *rawConn                    `json:"conn"`
 }
 
+// rawFound is one find; Src and Both are set by a search with named sources.
+type rawFound struct {
+	ID   string `json:"id"`
+	AtMs int64  `json:"at_ms"`
+	Src  string `json:"src"`
+	Both bool   `json:"both"`
+}
+
 // rawConn is the connection-driven model's record: the dialer's search.
 type rawConn struct {
-	StartMs int64 `json:"start_ms"`
-	Found   []struct {
-		ID   string `json:"id"`
-		AtMs int64  `json:"at_ms"`
-	} `json:"found"`
+	StartMs       int64        `json:"start_ms"`
+	Found         []rawFound   `json:"found"`
 	SlotsFilledMs int64        `json:"slots_filled_ms"`
 	Search        *searchStats `json:"search"`
 }
@@ -107,18 +113,16 @@ func addStats(dst *searchStats, st *searchStats) *searchStats {
 }
 
 type rawLookup struct {
-	StartMs   int64        `json:"start_ms"`
-	LatencyMs int64        `json:"latency_ms"`
-	FirstMs   int64        `json:"first_ms"`
-	Results   int          `json:"results"`
-	HitTarget bool         `json:"hit_target"`
-	Queries   int          `json:"queries"`
-	Contacted int          `json:"contacted"`
-	Search    *searchStats `json:"search"`
-	Found     []struct {
-		ID   string `json:"id"`
-		AtMs int64  `json:"at_ms"`
-	} `json:"found"`
+	StartMs     int64        `json:"start_ms"`
+	LatencyMs   int64        `json:"latency_ms"`
+	FirstMs     int64        `json:"first_ms"`
+	Results     int          `json:"results"`
+	HitTarget   bool         `json:"hit_target"`
+	Queries     int          `json:"queries"`
+	Contacted   int          `json:"contacted"`
+	Search      *searchStats `json:"search"`
+	Found       []rawFound   `json:"found"`
+	WalkQueries int          `json:"walk_queries"`
 }
 
 type waitStats struct {
@@ -141,7 +145,7 @@ type rawSample struct {
 type searchResult struct {
 	NodeIdx             int      `json:"nodeIdx"`
 	NodeID              string   `json:"nodeId"`
-	Legacy              bool     `json:"legacy,omitempty"` // plain discv5 searcher, scored against providers
+	Legacy              bool     `json:"legacy,omitempty"` // plain discv5 searcher, always scored against providers
 	Topic               int      `json:"topic"`
 	Target              int      `json:"target"`
 	TargetOnline        int      `json:"targetOnline"`                // of Target, up at the end of the search
@@ -174,6 +178,38 @@ type searchResult struct {
 	LookupQueries   []int        `json:"lookupQueries,omitempty"`
 	LookupContacted []int        `json:"lookupContacted,omitempty"`
 	SearchStats     *searchStats `json:"searchStats,omitempty"`
+	// Index-aligned with UniqueFoundAtMs: the sources that returned each
+	// provider, first source first ("topic", "walk", "topic+walk", "walk+topic").
+	UniqueFoundSrc    []string `json:"uniqueFoundSrc,omitempty"`
+	LookupWalkQueries []int    `json:"lookupWalkQueries,omitempty"`
+	Missed            int      `json:"missed"`              // of the target, up at the end and never found
+	MissedIDs         []string `json:"missedIds,omitempty"` // sorted, at most maxMissedIDs
+}
+
+const maxMissedIDs = 200
+
+// addSrc merges a find's sources into a provider's tag.
+func addSrc(tag, src string, both bool) string {
+	names := []string{src}
+	if both {
+		switch src {
+		case "topic":
+			names = append(names, "walk")
+		case "walk":
+			names = append(names, "topic")
+		}
+	}
+	for _, nm := range names {
+		if nm == "" {
+			continue
+		}
+		if tag == "" {
+			tag = nm
+		} else if !slices.Contains(strings.Split(tag, "+"), nm) {
+			tag += "+" + nm
+		}
+	}
+	return tag
 }
 
 type topicReport struct {
@@ -350,6 +386,8 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 	// "svc" ENR entry, so for it every node carrying the topic is a provider,
 	// legacy or not. Scoring a legacy search against registrants credits it
 	// with nothing -- which is what silently voided the all-legacy baseline.
+	// Under search.score_all_providers every searcher is scored against
+	// providers: a TopDisc searcher that also walks finds plain nodes too.
 	providers := map[string]map[string]bool{} // topic hex -> 64-hex id
 	sessions := map[string][][2]int64{}       // 64-hex id -> when its processes ran
 	topicIds := map[string]int{}
@@ -392,6 +430,7 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 		return fmt.Errorf("no traces")
 	}
 	stopMs := as[0].Phases.StopAt
+	scoreAll := as[0].Search.ScoreAllProviders
 	churned := false
 	for _, a := range as {
 		churned = churned || len(a.Churn) > 0
@@ -447,7 +486,7 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 		if !t.Legacy || t.Conn != nil || len(t.Lookups) > 0 {
 			th := topicHex(topicOf[a.Idx])
 			prov := registrants[th]
-			if t.Legacy {
+			if t.Legacy || scoreAll {
 				prov = providers[th]
 			}
 			target := len(prov)
@@ -458,7 +497,8 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 				SearchStartMs: t.SearchAtMs - epochMs, TimeToFirstNs: -1,
 				NewFoundAtMs: []int64{}, FoundRegistrantIDs: []string{}, UniqueFoundAtMs: []int64{}, UniqueFoundIDs: []string{},
 				LookupLatencyMs: []int64{}, LookupResults: []int{}}
-			seen := map[string]bool{}
+			seen := map[string]int{} // index into the unique arrays
+			var srcs []string
 			for id := range prov {
 				if id != t.ID && online(id, stopMs) {
 					r.TargetOnline++
@@ -480,6 +520,9 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 				if l.Contacted >= 0 {
 					r.LookupContacted = append(r.LookupContacted, l.Contacted)
 				}
+				if l.WalkQueries > 0 {
+					r.LookupWalkQueries = append(r.LookupWalkQueries, l.WalkQueries)
+				}
 				r.SearchStats = addStats(r.SearchStats, l.Search)
 				r.Found += l.Results
 				end := l.StartMs + l.LatencyMs - t.SearchAtMs
@@ -487,15 +530,20 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 					last = end
 				}
 				for _, f := range l.Found {
+					if scoreAll && !prov[f.ID] {
+						continue
+					}
 					at := l.StartMs + f.AtMs - t.SearchAtMs
 					r.FoundRegistrant++
 					if first < 0 || at < first {
 						first = at
 					}
-					if seen[f.ID] {
+					if k, ok := seen[f.ID]; ok {
+						srcs[k] = addSrc(srcs[k], f.Src, f.Both)
 						continue
 					}
-					seen[f.ID] = true
+					seen[f.ID] = len(srcs)
+					srcs = append(srcs, addSrc("", f.Src, f.Both))
 					r.UniqueFoundIDs = append(r.UniqueFoundIDs, short(f.ID))
 					r.UniqueFoundAtMs = append(r.UniqueFoundAtMs, at)
 					if churned {
@@ -519,10 +567,12 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 					if at > last {
 						last = at
 					}
-					if seen[f.ID] {
+					if k, ok := seen[f.ID]; ok {
+						srcs[k] = addSrc(srcs[k], f.Src, f.Both)
 						continue
 					}
-					seen[f.ID] = true
+					seen[f.ID] = len(srcs)
+					srcs = append(srcs, addSrc("", f.Src, f.Both))
 					r.UniqueFoundIDs = append(r.UniqueFoundIDs, short(f.ID))
 					r.UniqueFoundAtMs = append(r.UniqueFoundAtMs, at)
 					if churned {
@@ -537,6 +587,24 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 				r.SearchStats = addStats(r.SearchStats, c.Search)
 			}
 			r.UniqueRegistrant, r.NewRegistrant = len(seen), len(seen)
+			for _, tag := range srcs {
+				if tag != "" {
+					r.UniqueFoundSrc = srcs
+					break
+				}
+			}
+			var missed []string
+			for id := range prov {
+				if _, ok := seen[id]; !ok && id != t.ID && online(id, stopMs) {
+					missed = append(missed, short(id))
+				}
+			}
+			sort.Strings(missed)
+			r.Missed = len(missed)
+			if len(missed) > maxMissedIDs {
+				missed = missed[:maxMissedIDs]
+			}
+			r.MissedIDs = missed
 			r.FoundRegistrantIDs = append(r.FoundRegistrantIDs, r.UniqueFoundIDs...)
 			if first >= 0 {
 				r.TimeToFirstNs = first * 1e6
@@ -699,7 +767,11 @@ func writeMetrics(trDir, runDir string, as []assign.Assignment) error {
 		}
 		perTopic = append(perTopic, rep)
 		counts := map[string]int{}
-		for id := range registrants[hexOf[k]] {
+		counted := registrants[hexOf[k]]
+		if scoreAll {
+			counted = providers[hexOf[k]]
+		}
+		for id := range counted {
 			counts[short(id)] = 0
 		}
 		for _, r := range rs {

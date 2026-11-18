@@ -52,7 +52,7 @@ Per-searcher record in `results[]`:
 
 | Field | Meaning |
 |---|---|
-| `nodeIdx`, `nodeId`, `topic`, `target` | who searched, for what, and how many providers existed: TopDisc members for a TopDisc searcher, every member for a plain one |
+| `nodeIdx`, `nodeId`, `topic`, `target` | who searched, for what, and how many providers existed: TopDisc members for a TopDisc searcher, every member for a plain one; every member for both under `search.score_all_providers` |
 | `legacy` | the searcher is plain discv5 (absent for TopDisc searchers and in older metrics) |
 | `uniqueRegistrant`, `foundRegistrantIds[]` | distinct registrants found (the set) |
 | `uniqueFoundAtMs[]`, `uniqueFoundIds[]` | index-aligned: when each distinct registrant was first seen, and which |
@@ -60,6 +60,8 @@ Per-searcher record in `results[]`:
 | `timeToFirstNs`, `timeToCompletionNs`, `hitTimeout` | latency and outcome; `timeToFirstNs` is -1 when the searcher found nothing and 0 when its first provider was already in the routing table (older metrics write 0 for both; `uniqueFoundAtMs` tells them apart) |
 | `connectedAtStart`, `alreadyConnectedReg`, `newRegistrant`, `newFoundAtMs[]` | how much was already in the routing table |
 | `targetOnline`, `uniqueFoundOnline[]` | of `target`, the providers up at the end of the search (equal to `target` without churn); and, index-aligned with `uniqueFoundAtMs`, whether each found provider was up then. Only churn runs write `uniqueFoundOnline`; the paired report scores churn runs against these |
+| `uniqueFoundSrc[]` | index-aligned with `uniqueFoundAtMs`: the sources that returned each provider, first source first: `topic`, `walk`, `topic+walk` or `walk+topic`. Only searches with named sources write it (`search.topdisc_walk`) |
+| `missed`, `missedIds[]` | of `target`, the providers up at the end of the search that were never found; their short ids, sorted, at most 200 (`missed` is the full count) |
 
 `uniqueFoundAtMs` is relative to *that searcher's* start, which is not
 comparable across searchers; add `searchStartMs` to put it on the same clock as
@@ -194,6 +196,7 @@ Real backends add to `metrics.json`:
 | Field | Contents |
 |---|---|
 | `results[].lookupQueries`, `results[].lookupContacted` | TOPICQUERY requests sent and distinct nodes queried, per lookup. For a plain-discv5 node built on the fork (`population.legacy_build: fork`) `lookupQueries` is the FINDNODE requests the node sent during the walk, its table refresh included; on the stock build it counts DHT lookups, each 10 to 30 FINDNODE requests. `lookupContacted` is absent for plain nodes |
+| `results[].lookupWalkQueries` | `search.topdisc_walk`: FINDNODE requests a TopDisc node sent while its search ran, per lookup (the wire counter's delta, so its table refresh is included, as for plain nodes) |
 | `registrationBucketFullNs{}` | topic hex → registrant → per registration bucket (far to close), ns since registration start when the bucket first held its target number of ads; -1 = never |
 | `registrationCompleteNs{}` | topic hex → registrant → ns when every bucket was full or out of candidates |
 
@@ -207,6 +210,8 @@ Every backend adds, from fork tag `v1.17.2-testbed.4` on:
 | `metrics.json` | `deadResults` | churn runs: per topic, results returned and dead, dead-age histogram (s), counts over time |
 | `metrics.json` | `results[].searchStats` | the node's topic searches: passes, TOPICQUERY sent, distinct nodes, results received, duplicates within a pass, dropped as recently returned, handed to the reader (fork `v1.17.2-testbed.6`) |
 | node trace | `conn` | real backends, `search.model: conn`: registrants the dialer's search handed out with first-seen times, `slots_filled_ms`, and the search stats; the coordinator maps it to `results[]` |
+| node trace | `lookups[].found[].src`, `both`, `conn.found[].src`, `both` | `search.topdisc_walk`: the source that returned the node first (`topic` or `walk`), and `both` when the other source returned it again within the search. `both` is a lower bound on the overlap: the topic search re-yields a node only after an ad lifetime, the walk repeats freely. The mixer reads one node ahead per source, so `at_ms` can lag by up to one `result_interval` under pacing |
+| node trace | `lookups[].walk_queries` | `search.topdisc_walk`: FINDNODE requests sent during the search |
 | `run.log` | `[series t=]` lines | per series sample: ads held, cumulative TOPICQUERY and REGTOPIC sent (`figures/stability.py` reads them) |
 
 Wire counters on every backend split REGTOPIC requests to a registrar that

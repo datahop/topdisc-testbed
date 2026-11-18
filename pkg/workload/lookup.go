@@ -4,31 +4,35 @@
 package workload
 
 import (
-	"github.com/ethereum/go-ethereum/p2p/discover"
 	"time"
 
+	"github.com/ethereum/go-ethereum/p2p/discover"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 )
 
 // Lookup is one search: how long it took to reach the target, how many
 // distinct registrants it returned, and whether it got there before timing out.
 type Lookup struct {
-	StartMs   int64                      `json:"start_ms"`
-	LatencyMs int64                      `json:"latency_ms"`
-	FirstMs   int64                      `json:"first_ms"` // to the first result; -1 = none
-	Results   int                        `json:"results"`
-	HitTarget bool                       `json:"hit_target"`
-	Found     []Found                    `json:"found"`            // distinct registrants in the order seen
-	Queries   int                        `json:"queries"`          // TOPICQUERY requests sent; -1 = not reported
-	Contacted int                        `json:"contacted"`        // distinct nodes queried; -1 = not reported
-	Search    *discover.TopicSearchStats `json:"search,omitempty"` // search progress; nil = not reported
+	StartMs     int64                      `json:"start_ms"`
+	LatencyMs   int64                      `json:"latency_ms"`
+	FirstMs     int64                      `json:"first_ms"` // to the first result; -1 = none
+	Results     int                        `json:"results"`
+	HitTarget   bool                       `json:"hit_target"`
+	Found       []Found                    `json:"found"`                  // distinct registrants in the order seen
+	Queries     int                        `json:"queries"`                // TOPICQUERY requests sent; -1 = not reported
+	Contacted   int                        `json:"contacted"`              // distinct nodes queried; -1 = not reported
+	Search      *discover.TopicSearchStats `json:"search,omitempty"`       // search progress; nil = not reported
+	WalkQueries int                        `json:"walk_queries,omitempty"` // FINDNODE requests sent during a search mixed with the random walk
 }
 
 // Found is one distinct registrant a lookup returned and when (ms since the
-// lookup started).
+// lookup started). Src is the iterator source that returned it first; Both is
+// set when another source returned it again.
 type Found struct {
 	ID   string `json:"id"`
 	AtMs int64  `json:"at_ms"`
+	Src  string `json:"src,omitempty"`
+	Both bool   `json:"both,omitempty"`
 }
 
 // Continuous runs one search until the deadline and reports it as a single
@@ -68,7 +72,7 @@ func runOne(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target
 	start := time.Now()
 	it := open()
 	defer func() { go it.Close() }() // Close can block on a busy search; do not hold the loop
-	seen := map[enode.ID]struct{}{}
+	pos := map[enode.ID]int{}
 	found := []Found{}
 	var paceStart time.Time
 	stop := deadline
@@ -76,7 +80,7 @@ func runOne(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target
 		stop = start.Add(timeout)
 	}
 	done := func(hit bool) Lookup {
-		l := Lookup{StartMs: start.UnixMilli(), LatencyMs: time.Since(start).Milliseconds(), FirstMs: -1, Results: len(seen), HitTarget: hit, Found: found, Queries: -1, Contacted: -1}
+		l := Lookup{StartMs: start.UnixMilli(), LatencyMs: time.Since(start).Milliseconds(), FirstMs: -1, Results: len(found), HitTarget: hit, Found: append([]Found{}, found...), Queries: -1, Contacted: -1}
 		if c, ok := it.(interface{ Contacts() (int, int) }); ok {
 			l.Queries, l.Contacted = c.Contacts()
 		}
@@ -85,6 +89,9 @@ func runOne(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target
 		}); ok {
 			st := s.Stats()
 			l.Search = &st
+		}
+		if w, ok := it.(interface{ WalkQueries() int }); ok {
+			l.WalkQueries = w.WalkQueries()
 		}
 		if len(found) > 0 {
 			l.FirstMs = found[0].AtMs
@@ -105,14 +112,25 @@ func runOne(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target
 			return done(false), true
 		}
 		id := it.Node().ID()
+		src := ""
+		if si, ok := it.(enode.SourceIterator); ok {
+			src = si.NodeSource()
+		}
 		if isRegistrant == nil || isRegistrant(id) {
-			if _, dup := seen[id]; !dup {
-				seen[id] = struct{}{}
-				found = append(found, Found{ID: id.String(), AtMs: time.Since(start).Milliseconds()})
+			if k, dup := pos[id]; dup {
+				if src != "" && src != found[k].Src && !found[k].Both {
+					found[k].Both = true
+					if progress != nil {
+						progress(done(false))
+					}
+				}
+			} else {
+				pos[id] = len(found)
+				found = append(found, Found{ID: id.String(), AtMs: time.Since(start).Milliseconds(), Src: src})
 				if progress != nil {
 					progress(done(false))
 				}
-				if over := len(seen) - initial; interval > 0 && over >= 0 {
+				if over := len(found) - initial; interval > 0 && over >= 0 {
 					if paceStart.IsZero() {
 						paceStart = time.Now()
 					}
@@ -126,7 +144,7 @@ func runOne(open func() enode.Iterator, isRegistrant func(enode.ID) bool, target
 				}
 			}
 		}
-		if target > 0 && len(seen) >= target {
+		if target > 0 && len(found) >= target {
 			return done(true), false
 		}
 	}

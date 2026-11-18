@@ -114,18 +114,22 @@ def slim_lookup(lk):
 
 
 def found_results(t):
-    """(result ids, found_at_ms) over the node's lookups and its connection phase."""
-    ids, ats = [], []
+    """(result ids, found_at_ms, source) over the node's lookups and its
+    connection phase; source is None when the search did not name it, and
+    "walk" only when the random walk alone returned the node."""
+    ids, ats, srcs = [], [], []
     for lk in t.get("lookups") or []:
         for r in lk.get("found") or []:
             ids.append(r["id"])
             ats.append(lk["start_ms"] + r["at_ms"])
+            srcs.append("walk+topic" if r.get("both") and r.get("src") == "walk" else r.get("src"))
     conn = t.get("conn") or {}
     for r in conn.get("found") or []:
         if isinstance(r, dict):
             ids.append(r["id"])
             ats.append(conn["start_ms"] + r["at_ms"])
-    return ids, compact(ats)
+            srcs.append("walk+topic" if r.get("both") and r.get("src") == "walk" else r.get("src"))
+    return ids, compact(ats), srcs
 
 
 def wait_stats(i, t, lim):
@@ -328,8 +332,8 @@ def intern_ids(t):
     if isinstance(v, dict):
         t["ads_final_expiry_ms"] = {s(tp): {s(a): e for a, e in m.items()} if isinstance(m, dict) else m for tp, m in v.items()}
     if isinstance(t["found"], tuple):
-        ids, ats = t["found"]
-        t["found"] = ([s(x) for x in ids], ats)
+        ids, ats, srcs = t["found"]
+        t["found"] = ([s(x) for x in ids], ats, [s(x) for x in srcs])
     if isinstance(t["ops"], list):
         for op in t["ops"]:
             op["nodeIds"] = tuple(s(x) for x in op["nodeIds"])
@@ -1105,13 +1109,13 @@ def e3_renewal_accounting(run, tol):
 
 # ----------------------------------------------------------------------- search
 
-def lookup_results(run):
-    """(searcher idx, topic hash, result id, found_at_ms) for every lookup result."""
+def lookup_results(run, with_src=False):
+    """(searcher idx, topic hash, result id, found_at_ms[, source]) for every lookup result."""
     for i, t in run.traces.items():
-        ids, ats = got(t["found"])
+        ids, ats, srcs = got(t["found"])
         topic = run.topic_of.get(i)
-        for rid, at in zip(ids, ats):
-            yield i, topic, rid, at
+        for rid, at, src in zip(ids, ats, srcs):
+            yield (i, topic, rid, at, src) if with_src else (i, topic, rid, at)
 
 
 def l1_right_topic(run, tol):
@@ -1141,9 +1145,10 @@ def l2_capable_results(run, tol):
         return verdict("needs-data", "simnet has no legacy nodes")
     if all(run.legacy.values()):
         return verdict("not-exercised", "no TopDisc searchers in the run")
-    # a plain searcher filters on the service entry, so its results are legacy nodes by design
-    bad = [(i, run.id_idx[rid]) for i, _, rid, _ in lookup_results(run)
-           if not run.legacy.get(i) and run.legacy.get(run.id_idx.get(rid, -1), False)]
+    # a plain searcher filters on the service entry, so its results are legacy nodes by design;
+    # so are a TopDisc searcher's random-walk results (search.topdisc_walk)
+    bad = [(i, run.id_idx[rid]) for i, _, rid, _, src in lookup_results(run, with_src=True)
+           if src != "walk" and not run.legacy.get(i) and run.legacy.get(run.id_idx.get(rid, -1), False)]
     return pf(bad, "no legacy node among results", f"{len(bad)} results are legacy nodes", offenders=bad[:10])
 
 
@@ -1157,12 +1162,16 @@ def l3_no_expired(run, tol):
         return verdict("needs-data", "simnet dead-result series is aggregated; per-result age not kept")
     if run.legacy and all(run.legacy.values()):
         return verdict("not-exercised", "no TopDisc searchers in the run")
-    stale, n, cleared, unknown, plain = [], 0, Counter(), 0, 0
+    stale, n, cleared, unknown, plain, walked = [], 0, Counter(), 0, 0, 0
     limit = run.ad_lifetime + tol.snapshot_ms + tol.skew_ms
-    for i, _, rid, at in lookup_results(run):
+    for i, _, rid, at, src in lookup_results(run, with_src=True):
         # a plain searcher's results are routing-table entries, which carry no ad lifetime
         if run.legacy.get(i):
             plain += 1
+            continue
+        # so are a TopDisc searcher's random-walk results
+        if src == "walk":
+            walked += 1
             continue
         n += 1
         j = run.id_idx.get(rid)
@@ -1174,10 +1183,10 @@ def l3_no_expired(run, tol):
             stale.append((i, j, d // 1000))
         else:
             cleared[run.cleared(j, at, limit)] += 1
-    note = unknown_note(unknown, "results") + trace_note(cleared) + (f"; {plain} results of plain searchers skipped" if plain else "")
+    note = unknown_note(unknown, "results") + trace_note(cleared) + (f"; {plain} results of plain searchers skipped" if plain else "") + (f"; {walked} random-walk results skipped" if walked else "")
     return pf(stale, f"no result for a node down longer than a lifetime ({n} results)" + note, f"{len(stale)} results of long-expired nodes" + note,
               offenders=stale[:10], results=n, unknown_ids=unknown, schedule_down_trace_up=cleared["up"], schedule_down_trace_shorter=cleared["shorter"],
-              churn_base=run.churn_base_note, **({"plain_results_skipped": plain} if plain else {}))
+              churn_base=run.churn_base_note, **({"plain_results_skipped": plain} if plain else {}), **({"walk_results_skipped": walked} if walked else {}))
 
 
 def l4_termination(run, tol):

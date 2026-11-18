@@ -272,6 +272,7 @@ func TestSet(t *testing.T) {
 		"search.model=sometimes":           "want conn, scheduled or continuous",
 		"population.nodes":                 "want key=value",
 		"population.topic_model=x/y/z.txt": "",
+		"search.topdisc_walk=true":         "needs search.score_all_providers",
 	} {
 		_, err := Compose(dir, "25k-topdisc-cont", "aws-packed", []string{kv}, "")
 		switch {
@@ -280,6 +281,13 @@ func TestSet(t *testing.T) {
 		case want != "" && (err == nil || !strings.Contains(err.Error(), want)):
 			t.Errorf("%s: error %v, want %q", kv, err, want)
 		}
+	}
+	c, err = Compose(dir, "25k-topdisc-cont", "aws-packed", []string{"search.topdisc_walk=true", "search.score_all_providers=true"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Scenario.Search.TopdiscWalk || !c.Scenario.Search.ScoreAllProviders {
+		t.Errorf("search options not applied: %+v", c.Scenario.Search)
 	}
 	if _, err := Compose(dir, "25k-topdisc-cont", "aws-packed", nil, "a/b"); err == nil {
 		t.Errorf("name with / accepted")

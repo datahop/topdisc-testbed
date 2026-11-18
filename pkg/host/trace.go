@@ -123,7 +123,12 @@ func mergeTraces(ss []map[string]any) map[string]any {
 				for _, f := range found {
 					fm, _ := f.(map[string]any)
 					at, _ := fm["at_ms"].(float64)
-					connFound = append(connFound, map[string]any{"id": fm["id"], "at_ms": start + at})
+					g := map[string]any{}
+					for k, v := range fm {
+						g[k] = v
+					}
+					g["at_ms"] = start + at
+					connFound = append(connFound, g)
 				}
 			}
 			conn = c

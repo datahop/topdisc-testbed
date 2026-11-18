@@ -229,8 +229,8 @@ from the sessions file at the result's timestamp.
 |---|---|---|
 | Startup to first TopDisc-capable peer via legacy Discv5, vs deployment % | ✗ | ✓ `first_capable_ms`, `deploy_sweep.py` |
 | Start of registration to first successful registration, vs deployment % | ✗ | ✓ `deploy_sweep.py` |
-| Fraction of available advertisers discovered, vs deployment % | ✗ | ✓ `deploy_sweep.py`, per node type |
-| Lookup latency, vs deployment % | ✗ | ✓ `deploy_sweep.py` (time to first, 50 %, 90 %) |
+| Fraction of available advertisers discovered, vs deployment % | ✗ | ✓ `deploy_sweep.py`, per node type: recall median / p10 / min, share of searchers at 100 %; under `search.score_all_providers` the share of found providers by source (topic search, random walk, both) and a misses list naming each searcher and the providers it missed |
+| Lookup latency, vs deployment % | ✗ | ✓ `deploy_sweep.py` (time to first, 50 %, 90 %, 100 %) |
 | Registrars contacted per registration and per lookup, vs deployment % | ✗ | ✓ `deploy_sweep.py` |
 | Messages/bytes per lookup, vs deployment % | ✗ | ◐ `deploy_sweep.py`: bytes per node over the run, by type |
 | Per-node load, vs deployment % | ✗ | ✓ `deploy_sweep.py` (REGTOPIC + TOPICQUERY per registrar) |

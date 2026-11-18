@@ -154,12 +154,14 @@ type TopicConfig struct {
 
 // SearchConfig: how nodes search.
 type SearchConfig struct {
-	Model          string        `yaml:"model"`
-	RequestTimeout time.Duration `yaml:"request_timeout"`
-	TargetCount    int           `yaml:"target_count"`
-	Intervals      int           `yaml:"intervals"`
-	InitialResults int           `yaml:"initial_results"`
-	ResultInterval time.Duration `yaml:"result_interval"`
+	Model             string        `yaml:"model"`
+	RequestTimeout    time.Duration `yaml:"request_timeout"`
+	TargetCount       int           `yaml:"target_count"`
+	Intervals         int           `yaml:"intervals"`
+	InitialResults    int           `yaml:"initial_results"`
+	ResultInterval    time.Duration `yaml:"result_interval"`
+	TopdiscWalk       bool          `yaml:"topdisc_walk"`
+	ScoreAllProviders bool          `yaml:"score_all_providers"`
 }
 
 // ConnModelConfig: geth peer slots: a node stops searching once its outbound slots are full.
@@ -398,6 +400,8 @@ var paramDocs = []paramDoc{
 	{"scenario.search.target_count", "conn: stop a searcher after this many distinct registrants; scheduled: end each lookup at this many. 0 = never"},
 	{"scenario.search.initial_results", "continuous: new registrants a searcher takes at once before result_interval pacing starts"},
 	{"scenario.search.result_interval", "continuous: after initial_results, take one new registrant per interval; 0 = unpaced"},
+	{"scenario.search.topdisc_walk", "TopDisc nodes also read the plain discv5 random walk, filtered on the svc entry as plain nodes do, mixed with the topic search by enode.FairMix as geth --discovery.topic. Real backends only; needs score_all_providers"},
+	{"scenario.search.score_all_providers", "score every searcher against all providers of its topic up at the end, TopDisc searchers included; false = TopDisc searchers against TopDisc members only. Real backends only"},
 	{"scenario.conn_model.enabled", ""},
 	{"scenario.conn_model.max_peers", "total slots per node"},
 	{"scenario.conn_model.dial_ratio", "1/N of slots are outbound"},
@@ -532,6 +536,14 @@ func (c *Config) validate(path, dir string) error {
 	}
 	if err := c.checkGhosts(dir); err != nil {
 		return fmt.Errorf("%s: %w", path, err)
+	}
+	if s := c.Scenario.Search; s.TopdiscWalk || s.ScoreAllProviders {
+		if c.Testbed.Backend == "simnet" {
+			return fmt.Errorf("%s: search.topdisc_walk and search.score_all_providers need a real backend (local, cloud)", path)
+		}
+		if s.TopdiscWalk && !s.ScoreAllProviders {
+			return fmt.Errorf("%s: search.topdisc_walk needs search.score_all_providers: a walking TopDisc searcher finds plain providers", path)
+		}
 	}
 	if c.Scenario.Search.Model != "conn" && c.Scenario.ConnModel.Enabled {
 		return fmt.Errorf("%s: search.model %s is lookup-only and never dials; remove conn_model or use search.model conn", path, c.Scenario.Search.Model)

@@ -67,7 +67,7 @@ func main() {
 		panic(err)
 	}
 	n := newNode(asg, key)
-	n.ip, n.port, n.maxPeers, n.dialRatio, n.topicName = *ip, *port, *maxPeers, *dialRatio, *topicName
+	n.ip, n.port, n.maxPeers, n.dialRatio, n.topicName, n.svc = *ip, *port, *maxPeers, *dialRatio, *topicName, svcOf(*topicName)
 	n.topic = topicindex.TopicID(crypto.Keccak256Hash([]byte(*topicName)))
 	for _, u := range strings.Split(*boot, ",") {
 		if u = strings.TrimSpace(u); u != "" {

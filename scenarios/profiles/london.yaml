@@ -1,0 +1,16 @@
+# London, one host: the hostagent on 127.0.0.1:9100 (inventory-london.json) runs every node in its own network namespace, with star-model WAN delays.
+testbed:
+  backend: cloud
+  cloud:
+    inventory: inventory-london.json
+    home_region: us-east-1
+    verbosity: 2
+    grace: 30s
+  wan:
+    enabled: true
+    delay_min_ms: 4
+    delay_max_ms: 45
+    jitter_ms: 3
+    rate_kbps: 1000
+  traces:
+    host_sample_period: 30s
