@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
@@ -263,5 +266,83 @@ func TestTraceAccumulatesSessions(t *testing.T) {
 	n.fold(s2, time.UnixMilli(4000))
 	if m := n.trace(); m["ghosts_in_table"] != 2 || m["table_size"] != 9 {
 		t.Errorf("after the last session closed: ghosts_in_table %v table_size %v, want 2 9", m["ghosts_in_table"], m["table_size"])
+	}
+}
+
+// The final trace holds the walk's last update, which a continuous walk
+// delivers only once the session stops, also when churn took the node down
+// before the end.
+func TestFinishWritesFinalLookup(t *testing.T) {
+	for _, downFirst := range []bool{false, true} {
+		key, _ := crypto.GenerateKey()
+		asg := assignment{IP: "127.0.0.1", Topics: []string{"t"}, TraceFile: filepath.Join(t.TempDir(), "node.json")}
+		asg.Search.Model = "continuous"
+		n := newNode(asg, key)
+		if err := n.up(); err != nil {
+			t.Fatal(err)
+		}
+		n.mu.Lock()
+		s := n.cur
+		n.mu.Unlock()
+		<-s.ready // the walk is open; with an empty table it finds nothing until stopped
+		time.Sleep(20 * time.Millisecond)
+		if downFirst {
+			if err := n.down(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		n.finish()
+
+		b, err := os.ReadFile(asg.TraceFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var tr struct {
+			Lookups []lookup `json:"lookups"`
+		}
+		if err := json.Unmarshal(b, &tr); err != nil {
+			t.Fatal(err)
+		}
+		if len(tr.Lookups) != 1 || tr.Lookups[0].LatencyMs <= 0 {
+			t.Errorf("down first %v: lookups %+v, want the final update of the walk", downFirst, tr.Lookups)
+		}
+	}
+}
+
+// waitDisc's lookup returns nothing once stop closes.
+type waitDisc chan struct{}
+
+func (d waitDisc) AllNodes() []*enode.Node       { return nil }
+func (d waitDisc) Lookup(enode.ID) []*enode.Node { <-d; return nil }
+
+// A scheduled walk that runs into the deadline is recorded, also when the stop
+// that comes at the deadline is already closed; one stopped before the
+// deadline is not.
+func TestScheduledWalksStop(t *testing.T) {
+	stop := make(chan struct{})
+	time.AfterFunc(20*time.Millisecond, func() { close(stop) })
+	var recorded []lookup
+	scheduledWalks(waitDisc(stop), nil, func(*enode.Node) bool { return true }, 1, time.Minute, []int64{time.Now().UnixMilli()}, time.Now().Add(time.Hour), stop, func(l lookup) { recorded = append(recorded, l) })
+	if len(recorded) != 0 {
+		t.Fatalf("stopped before the deadline: recorded %+v, want none", recorded)
+	}
+
+	deadline := time.Now().Add(100 * time.Millisecond)
+	stop = make(chan struct{})
+	var busy time.Time
+	// Still busy at the deadline, then stopped: both end the walk at once.
+	isProvider := func(*enode.Node) bool {
+		busy = time.Now()
+		time.Sleep(time.Until(deadline) + time.Millisecond)
+		close(stop)
+		return true
+	}
+	recorded = nil
+	scheduledWalks(&fakeDisc{providers: map[enode.ID]bool{}}, nil, isProvider, 2, time.Minute, []int64{time.Now().UnixMilli()}, deadline, stop, func(l lookup) { recorded = append(recorded, l) })
+	if busy.IsZero() || !busy.Before(deadline) {
+		t.Skip("the walk did not get busy before its deadline")
+	}
+	if len(recorded) != 1 || recorded[0].Results != 1 {
+		t.Fatalf("stopped at the deadline: recorded %+v, want the walk", recorded)
 	}
 }

@@ -364,7 +364,8 @@ func (n *node) fold(s *session, end time.Time) {
 	n.last, n.cur = s, nil
 }
 
-// finish writes the trace and takes the node down for good.
+// finish takes the node down for good and writes the trace. Down comes first:
+// it waits for the search's final update, which lands only once stop closes.
 func (n *node) finish() {
 	n.ctl.Lock()
 	defer n.ctl.Unlock()
@@ -372,15 +373,8 @@ func (n *node) finish() {
 		return
 	}
 	n.done = true
-	n.mu.Lock()
-	s := n.cur
-	n.mu.Unlock()
-	if s != nil {
-		n.snapshotLive(s)
-		n.snapshotCounters(s)
-	}
+	n.downLocked() // errDown when churn already took it down
 	n.writeTrace()
-	n.downLocked()
 }
 
 func (n *node) phases(s *session) {
