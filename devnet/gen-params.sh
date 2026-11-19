@@ -19,7 +19,7 @@ participant() {
 	[ "$count" -gt 0 ] || return 0
 	if [ "$kind" = new ]; then
 		image=$NEW_IMAGE
-		params=("--discovery.topic" "'--vmodule=p2p/discover/topicindex/*=5'" "--identity=topdisc")
+		params=("--discovery.topic" "'--log.vmodule=p2p/discover/topicindex/*=5'" "--identity=topdisc")
 	else
 		image=$OLD_IMAGE
 	fi

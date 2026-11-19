@@ -74,7 +74,7 @@ The package starts participant 0 first with no bootnodes and gives every other
 EL (and CL) only participant 0's ENR, so participant 0 is the one bootnode.
 Without `--bootnodes=` geth falls back to the mainnet discv5 bootnodes, so
 participant 0 gets an explicit empty list. Every EL logs at debug; NEW nodes
-add `--discovery.topic`, `--vmodule=p2p/discover/topicindex/*=5` and
+add `--discovery.topic`, `--log.vmodule=p2p/discover/topicindex/*=5` and
 `--identity=topdisc`. Each participant has 32 validators. Fulu is at genesis,
 and the package then requires one supernode or at least one node with 128 or
 more validators, so participant 0's beacon node is a supernode in every run.
@@ -92,7 +92,7 @@ tail -f ~/workspace/datahop/runs/<date>-d79-mixed-oldboot/run.log
 (`[{name, kind, ip, id, enr, td, image}]`, one entry per EL; kind from the
 image, which must agree with `td`), waits for genesis and the first block,
 calls the snapshot hook at `SNAP_MIN` minutes after genesis (default
-`10 30 60 75`; the hook is a placeholder until the check tool exists) and
+`10 30 60 75`; the hook only creates `snapshots/t<m>m/` so far) and
 stops at `DURATION_MIN` (default 75), skipping snapshot times beyond it. On exit, also after a failure, it takes
 `kurtosis enclave dump`, `docker logs` of every container and `docker
 inspect`, then removes the enclave (`KEEP_ENCLAVE=1` keeps it). The run
@@ -101,20 +101,100 @@ directory `~/workspace/datahop/runs/<date>-d79-<run>/` is outside git.
 Geth RPC (8545), metrics (9001), the beacon API (4000) and discv5 are reached
 from the host on the container IPs on the enclave bridge.
 
+## Measured load (M2 smoke, 2 new + 2 old)
+
+From `runs/2026-11-18-d79-smoke/SMOKE.md`, per pair after finality:
+
+| container | RSS | CPU |
+|---|---:|---:|
+| geth | 82–89 MiB | < 1 % |
+| Lighthouse bn | 340–365 MiB | 1–4 % (up to 11 % before finality) |
+| Lighthouse vc | 36 MiB | 1–3 % |
+
+About 0.47 GiB and 0.05–0.15 core per pair; geth at debug writes about
+11 KB/min. Projected to 40 pairs:
+
+| | 40 pairs | gate |
+|---|---:|---:|
+| RAM | ≈ 19 GiB | ≤ 100 GB |
+| CPU | ≈ 2–6 cores | ≤ 16 cores |
+| geth logs per 75-min run | ≈ 33 MB | ≤ 2 GB |
+| host neighbour entries | ≈ 125 per bridge | ≪ 65,536 |
+
+## d79check
+
+`cmd/d79check` is a separate Go module (`devnet/go.mod`, the fork at the NEW
+commit replacing `github.com/ethereum/go-ethereum`, used to sign transactions).
+It talks to the containers over the enclave bridge.
+
+```sh
+(cd devnet && go build -o bin/d79check ./cmd/d79check)
+R=~/workspace/datahop/runs/<date>-d79-<run>
+devnet/bin/d79check inventory -run $R
+devnet/bin/d79check peers   -run $R -out $R/snapshots/t30m
+devnet/bin/d79check metrics -run $R -out $R/snapshots/t30m
+devnet/bin/d79check heads   -run $R          # 75 min by default (-duration)
+devnet/bin/d79check txs     -run $R
+devnet/bin/d79check logs    -run $R          # after the dump, reads $R/logs/*.log
+devnet/bin/d79check report  -run $R [-control <R0 run dir>]
+```
+
+`-run` holds `inventory.json`, `genesis.txt` and `logs/`; `-out` (default
+`-run`) receives the JSON. The enclave name for docker (`heads` finds the
+beacon nodes, `metrics` reads `docker stats`) comes from the run directory
+name, or `-enclave`.
+
+| command | writes | checks |
+|---|---|---|
+| `inventory` | `inventory-check.json` | kind vs `td`, unique names, IDs and IPs, participant 0 first |
+| `peers` | `peers.json` | `admin_peers` per EL, peers by kind and direction (kind from the inventory by node ID, name `Geth/topdisc/…` as cross-check); E3(a): every OLD node has a NEW peer and vice versa |
+| `heads` | `heads.jsonl`, `heads.json` | every 12 s for `-duration` (default 75 min, a full M4 run; start it at genesis): EL latest and finalized (number, hash), `eth_syncing`, CL head slot and finalized epoch; E3 heads |
+| `txs` | `txs.json` | 20 transfers (`-n`) from prefunded account 20 via one OLD and one NEW EL (not participant 0 when possible); per node the time from send to the first poll (every `-poll`, default 100 ms, watchers started before the first send) that shows the tx pending; with the default the figure is the poll period, an upper bound on propagation, and the inclusion block |
+| `metrics` | `metrics.json` | DV7 series from `/debug/metrics` (procload, goroutines, `p2p/*` and `discover/*` traffic, fork topic meters and `discover/regtopic/*` when present, `discover/v5/bad`), container memory from `docker stats` |
+| `logs` | `logs.json` | per EL: `Bad discv5 packet`, `Removing p2p peer` by removed peer kind, WARN/ERROR/CRIT message templates, reorgs (all and after `-warmup`, 10 min after genesis), topic registration and query lines; `Topic registration *` lines whose `id=` belongs to a host probe in `<run>/probes.json` (M3b, `[{name, id, started, stopped}]`; no file, nothing ignored) are not counted, and the number ignored is printed and kept per node |
+| `report` | `checks.json`, `summary.md` | merges the run dir and `snapshots/*/`, prints the E table |
+
+Thresholds in `report`. A check passes only on complete data: a node, log,
+metric or snapshot that is absent, unreadable or not comparable makes it
+`missing` (with the gap in the detail), unless a violation already makes it
+FAIL. `info` and `n/a` rows do not count towards the parent's status.
+
+| check | pass when |
+|---|---|
+| E1 | M3b's `tables.json` reports PASS at every labelled snapshot `t<m>m` with m ≥ 30 (each needs a PASS or FAIL; earlier or unlabelled ones are shown as n/a, an n/a or absent one from t30m on is missing), and `crawl-reach.json` reports PASS |
+| E2a, E4e | every OLD node has a readable log with 0 `Bad discv5 packet` lines, and a `discover/v5/bad` reading of 0 in every `metrics.json` of the run |
+| E2 | the control (`-control`) has no NEW nodes and the same node count as the run, else E2 is `missing` naming both counts |
+| E2b | the control has no NEW nodes; every OLD node's log (run and control) is readable; the run's OLD-node WARN/ERROR/CRIT templates ⊆ the control's (the control's participant 0 counts only when the run's participant 0 is OLD) |
+| E2c | per OLD node except participant 0, with DEBUG lines in its log: removals of NEW peers per NEW node ≤ 2 × removals of OLD peers per other OLD node; a node with fewer than 5 removals is listed as informational, not judged (all such: `info`) |
+| E2d | the control has no NEW nodes; at every location with a `metrics.json` in the run or the control, both have one, both ages are within 60 s of the nominal `t<m>m` (or of each other for the run dir), and every OLD node except participant 0 has every series; then the medians of `system/cpu/procload/total`, memory, `p2p/ingress\|egress`, `discover/ingress\|egress` and goroutines are within ±25 % of the control's |
+| E3a | every snapshot dir has a `peers.json` (else `missing`); at every snapshot every EL answered `admin_peers`, every OLD node has ≥ 1 NEW peer and every NEW node ≥ 1 OLD peer |
+| E3b | every tx shows pending (no `blockNumber`) on every other EL in a response completed within 10 s of its send, and is mined ≤ 2 blocks after the head at send; the sends are a burst, so only the maximum first poll hit is reported, as an upper bound |
+| E3c | every sample has one EL and one CL per inventory entry, and every node answered every assessed field at least once; per sample ≤ 2 distinct EL heads; one hash per block number; `eth_syncing` false from +600 s (missing without a sample there); finality (below); query errors at most max(1, 1 % of the samples) per node (listed as `info`), more fail |
+| E3c finality | judged from the first sample in which a CL reports finalized epoch ≥ 1 (before it, geth's "finalized block not found" means not finalized yet); no such sample by the end of the run fails ("never finalized"); after it, every CL's finalized epoch is monotone and ≥ current epoch − 3, and every EL's finalized block is monotone, unique per number and never lost (each EL gets one sample of grace after the first finality before "not found" counts as an error); `heads.json` records the first finalization and the syncing window |
+| E3d | every EL has a readable log with 0 `Chain reorg detected` after warm-up |
+| E4c | every NEW node has the four topic meters and `discover/regtopic/*` counters: `REGCONFIRMATION`, `TOPICNODES`, `REGTOPIC`, `TOPICQUERY` ingress > 0, `discover/regtopic/*` = 0 |
+| E4d | every NEW node has a readable log with ≥ 1 `Topic registration successful`, 0 failed, ≥ 1 `Topic query answered` with n > 0 |
+
+E2 shows "needs control" without `-control`; a single-kind run (the control)
+shows E1, E2 and E4 as n/a. E1 and E4 show "needs M3b" until the M3b files
+(`tables.json`, `crawl-reach.json`, `topic.json`, in the run dir or a snapshot
+dir) exist. Each holds its data and a top-level `check` object
+`{id, status, detail, sub}` with status PASS, FAIL, missing or n/a; a file
+without one counts as missing.
+
 ## Evidence notes
 
 - Participant 0 is the bootnode and the supernode, and its kind differs per
   run (OLD in R0 and R1, NEW in R2), so it is left out of the old-node medians
-  in E2.
-
-## Port and load policy
-
-- The devnet never binds or publishes host UDP 9000, 9001, 30303 or TCP 8545,
-  5052 (reserved for the Hoodi node). Kurtosis publishes TCP only, on random
-  host ports (to be verified in M2). After `kurtosis run` and every minute
-  after, `run.sh` aborts if an enclave container publishes a forbidden host
-  port, and warns if a host listener on one appears that was not there before
-  the run (another process, not the enclave).
-- One run at a time, never alongside a testbed run. Other agents on the host
-  build with `-p 4` while a run is live.
-- Builds use `GOFLAGS=-p=16` and `nice -n 19`.
+  and removal rates in E2.
+- Finality is not tied to elapsed time: plan DV7/A7 expected finality from
+  about 13 min, but the smoke run was still at finalized epoch 0 at +25 min
+  and reached epoch 5 at +47 min.
+- `system/cpu/procload` is an instantaneous whole-percent gauge (0–3 on an
+  idle geth), so E2d compares the cumulative `system/cpu/procload/total`;
+  `metrics.json` keeps both.
+- `Topic query answered` logs n after the search filter, which drops the
+  searcher's own ad and holds results back until 10 registrars replied with
+  ads or 5 s passed. In the 2+2 smoke the other NEW node holds only the
+  searcher's own ad, so n is always 0 (0 of 117 on el-2) and E4d fails there;
+  it is meant for the 20/20 runs.
