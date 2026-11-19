@@ -103,6 +103,8 @@ func readProbes(path string) ([]string, error) {
 		return nil, nil
 	} else if err != nil {
 		return nil, fmt.Errorf("probes.json: %v", err)
+	} else if probes == nil {
+		return nil, errors.New("probes.json: not a JSON list")
 	}
 	var ids []string
 	for _, p := range probes {
