@@ -1,0 +1,253 @@
+{
+  "check": {
+    "id": "E1ab",
+    "desc": "discv5 tables mix OLD and NEW (judged on E1a)",
+    "status": "PASS",
+    "detail": "4 tables",
+    "sub": [
+      {
+        "id": "E1a",
+        "desc": "every OLD table holds a NEW node and every NEW table an OLD node",
+        "status": "PASS",
+        "detail": "4 tables"
+      },
+      {
+        "id": "E1b",
+        "desc": "per-node NEW count inside the 99 % binomial band",
+        "status": "info",
+        "detail": "all 4 inside"
+      }
+    ]
+  },
+  "time": "2026-11-19T13:10:32.608Z",
+  "n": 4,
+  "n_new": 2,
+  "n_old": 2,
+  "nodes": [
+    {
+      "name": "el-1-geth-lighthouse",
+      "kind": "old",
+      "id": "5dd048d94d3a599e58c5ffadb1dd864889a099848bbd28d243788e43e1b80cc9",
+      "read": true,
+      "t": 1795093736615,
+      "entries": 4,
+      "dead": 0,
+      "new": 2,
+      "old": 1,
+      "other": 1,
+      "new_share": 0.6666666666666666,
+      "p": 0.6666666666666666,
+      "band": [
+        0,
+        3
+      ],
+      "outside": false,
+      "table": [
+        {
+          "id": "d167af3ab76d94a2a5fa6b6e72a89cf0704fbdf77305e10f547f66d4bda21cb8",
+          "kind": "other",
+          "alive": true,
+          "bucket": 256
+        },
+        {
+          "id": "121c802941f418ce8fdeb661d21e713b9cfab3caddf7166d1ebb4df80d768d64",
+          "name": "el-4-geth-lighthouse",
+          "kind": "old",
+          "alive": true,
+          "bucket": 255
+        },
+        {
+          "id": "78de8ec159533c80ef806b933c4215f17b2ed07884d1575d252a90077cf6bf4c",
+          "name": "el-3-geth-lighthouse",
+          "kind": "new",
+          "alive": true,
+          "bucket": 254
+        },
+        {
+          "id": "4822759436a4e6794efa0092310a5f49ddb8d8f09ae746871d6d291215f18c15",
+          "name": "el-2-geth-lighthouse",
+          "kind": "new",
+          "alive": true,
+          "bucket": 253
+        }
+      ]
+    },
+    {
+      "name": "el-2-geth-lighthouse",
+      "kind": "new",
+      "id": "4822759436a4e6794efa0092310a5f49ddb8d8f09ae746871d6d291215f18c15",
+      "read": true,
+      "t": 1795093712615,
+      "entries": 4,
+      "dead": 0,
+      "new": 1,
+      "old": 2,
+      "other": 1,
+      "new_share": 0.3333333333333333,
+      "p": 0.3333333333333333,
+      "band": [
+        0,
+        3
+      ],
+      "outside": false,
+      "table": [
+        {
+          "id": "d167af3ab76d94a2a5fa6b6e72a89cf0704fbdf77305e10f547f66d4bda21cb8",
+          "kind": "other",
+          "alive": true,
+          "bucket": 256
+        },
+        {
+          "id": "121c802941f418ce8fdeb661d21e713b9cfab3caddf7166d1ebb4df80d768d64",
+          "name": "el-4-geth-lighthouse",
+          "kind": "old",
+          "alive": true,
+          "bucket": 255
+        },
+        {
+          "id": "78de8ec159533c80ef806b933c4215f17b2ed07884d1575d252a90077cf6bf4c",
+          "name": "el-3-geth-lighthouse",
+          "kind": "new",
+          "alive": true,
+          "bucket": 254
+        },
+        {
+          "id": "5dd048d94d3a599e58c5ffadb1dd864889a099848bbd28d243788e43e1b80cc9",
+          "name": "el-1-geth-lighthouse",
+          "kind": "old",
+          "alive": true,
+          "bucket": 253
+        }
+      ]
+    },
+    {
+      "name": "el-3-geth-lighthouse",
+      "kind": "new",
+      "id": "78de8ec159533c80ef806b933c4215f17b2ed07884d1575d252a90077cf6bf4c",
+      "read": true,
+      "t": 1795093808615,
+      "entries": 4,
+      "dead": 0,
+      "new": 1,
+      "old": 2,
+      "other": 1,
+      "new_share": 0.3333333333333333,
+      "p": 0.3333333333333333,
+      "band": [
+        0,
+        3
+      ],
+      "outside": false,
+      "table": [
+        {
+          "id": "d167af3ab76d94a2a5fa6b6e72a89cf0704fbdf77305e10f547f66d4bda21cb8",
+          "kind": "other",
+          "alive": true,
+          "bucket": 256
+        },
+        {
+          "id": "121c802941f418ce8fdeb661d21e713b9cfab3caddf7166d1ebb4df80d768d64",
+          "name": "el-4-geth-lighthouse",
+          "kind": "old",
+          "alive": true,
+          "bucket": 255
+        },
+        {
+          "id": "4822759436a4e6794efa0092310a5f49ddb8d8f09ae746871d6d291215f18c15",
+          "name": "el-2-geth-lighthouse",
+          "kind": "new",
+          "alive": true,
+          "bucket": 254
+        },
+        {
+          "id": "5dd048d94d3a599e58c5ffadb1dd864889a099848bbd28d243788e43e1b80cc9",
+          "name": "el-1-geth-lighthouse",
+          "kind": "old",
+          "alive": true,
+          "bucket": 254
+        }
+      ]
+    },
+    {
+      "name": "el-4-geth-lighthouse",
+      "kind": "old",
+      "id": "121c802941f418ce8fdeb661d21e713b9cfab3caddf7166d1ebb4df80d768d64",
+      "read": true,
+      "t": 1795093784616,
+      "entries": 4,
+      "dead": 0,
+      "new": 2,
+      "old": 1,
+      "other": 1,
+      "new_share": 0.6666666666666666,
+      "p": 0.6666666666666666,
+      "band": [
+        0,
+        3
+      ],
+      "outside": false,
+      "table": [
+        {
+          "id": "d167af3ab76d94a2a5fa6b6e72a89cf0704fbdf77305e10f547f66d4bda21cb8",
+          "kind": "other",
+          "alive": true,
+          "bucket": 256
+        },
+        {
+          "id": "4822759436a4e6794efa0092310a5f49ddb8d8f09ae746871d6d291215f18c15",
+          "name": "el-2-geth-lighthouse",
+          "kind": "new",
+          "alive": true,
+          "bucket": 255
+        },
+        {
+          "id": "5dd048d94d3a599e58c5ffadb1dd864889a099848bbd28d243788e43e1b80cc9",
+          "name": "el-1-geth-lighthouse",
+          "kind": "old",
+          "alive": true,
+          "bucket": 255
+        },
+        {
+          "id": "78de8ec159533c80ef806b933c4215f17b2ed07884d1575d252a90077cf6bf4c",
+          "name": "el-3-geth-lighthouse",
+          "kind": "new",
+          "alive": true,
+          "bucket": 255
+        }
+      ]
+    }
+  ],
+  "unread": [],
+  "e1a": {
+    "applicable": true,
+    "pass": true,
+    "failing": []
+  },
+  "e1b": {
+    "conf": 0.99,
+    "outside": [],
+    "empty": []
+  },
+  "crawl": {
+    "args": [
+      "-sample-full",
+      "-no-td",
+      "-listen",
+      "172.16.0.23:31400",
+      "-extip",
+      "172.16.0.23",
+      "-bootnodes",
+      "/home/sergi/workspace/datahop/runs/2026-11-18-d79-smoke/m3b-test-r1/tables-crawl/bootnodes.txt",
+      "-sample",
+      "2m0s",
+      "-duration",
+      "6m0s",
+      "-out",
+      "/home/sergi/workspace/datahop/runs/2026-11-18-d79-smoke/m3b-test-r1/tables-crawl"
+    ],
+    "end": "2026-11-19T13:10:32.61753363Z",
+    "events": "/home/sergi/workspace/datahop/runs/2026-11-18-d79-smoke/m3b-test-r1/tables-crawl/events.jsonl",
+    "start": "2026-11-19T13:04:32.597565775Z"
+  },
+  "peers_partial": 0
+}

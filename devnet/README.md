@@ -135,6 +135,9 @@ devnet/bin/d79check peers   -run $R -out $R/snapshots/t30m
 devnet/bin/d79check metrics -run $R -out $R/snapshots/t30m
 devnet/bin/d79check heads   -run $R          # 75 min by default (-duration)
 devnet/bin/d79check txs     -run $R
+devnet/bin/d79check tables      -run $R -out $R/snapshots/t30m
+devnet/bin/d79check crawl-reach -run $R -out $R/snapshots/t30m
+devnet/bin/d79check topic       -run $R -out $R/snapshots/t30m
 devnet/bin/d79check logs    -run $R          # after the dump, reads $R/logs/*.log
 devnet/bin/d79check report  -run $R [-control <R0 run dir>]
 ```
@@ -151,7 +154,11 @@ name, or `-enclave`.
 | `heads` | `heads.jsonl`, `heads.json` | every 12 s for `-duration` (default 75 min, a full M4 run; start it at genesis): EL latest and finalized (number, hash), `eth_syncing`, CL head slot and finalized epoch; E3 heads |
 | `txs` | `txs.json` | 20 transfers (`-n`) from prefunded account 20 via one OLD and one NEW EL (not participant 0 when possible); per node the time from send to the first poll (every `-poll`, default 100 ms, watchers started before the first send) that shows the tx pending; with the default the figure is the poll period, an upper bound on propagation, and the inclusion block |
 | `metrics` | `metrics.json` | DV7 series from `/debug/metrics` (procload, goroutines, `p2p/*` and `discover/*` traffic, fork topic meters and `discover/regtopic/*` when present, `discover/v5/bad`), container memory from `docker stats` |
-| `logs` | `logs.json` | per EL: `Bad discv5 packet`, `Removing p2p peer` by removed peer kind, WARN/ERROR/CRIT message templates, reorgs (all and after `-warmup`, 10 min after genesis), topic registration and query lines; `Topic registration *` lines whose `id=` belongs to a host probe in `<run>/probes.json` (M3b, `[{name, id, started, stopped}]`; no file, nothing ignored) are not counted, and the number ignored is printed and kept per node |
+| `logs` | `logs.json` | per EL: `Bad discv5 packet`, `Removing p2p peer` by removed peer kind, WARN/ERROR/CRIT message templates, reorgs (all and after `-warmup`, 10 min after genesis), topic registration and query lines; `Topic registration *` lines whose `id=` belongs to a host probe in `<run>/probes.json` (see Host probes; no file, nothing ignored) are not counted, and the number ignored is printed and kept per node |
+| `tables` | `tables.json`, `tables-crawl/` | E1(a,b): `bin/crawl -sample-full -no-td -sample 2m -duration 6m` from 31400, seeded with every ENR, then `tools/crawl_tables.py`; each node's live table entries as old, new or other (not in the inventory), and its NEW count against the 99 % binomial band, p = N_new/(N−1) for an OLD node and (N_new−1)/(N−1) for a NEW one |
+| `crawl-reach` | `crawl-reach.json`, `crawl-reach/` | E1(c): stock `bin/devp2p-v1.17.10 discv5 crawl` (`cmd/devp2p` of upstream go-ethereum v1.17.10, built by `build-tools.sh`) twice in parallel for 5 min, from 31410 seeded with the first OLD ENR and from 31411 with the first NEW ENR; nodes reached and time to full reach from `firstResponse` |
+| `topic` | `topic.json`, `topic-<seed>.log` | E4(a,b): a fork discv5 node on 31420 runs `TopicSearch` for `eth.DiscoveryTopic(chain id, genesis hash)` (from `eth_chainId` and block 0 of the first EL) for 10 min, seeded with the first NEW node, then the first OLD node (`-seed new\|old\|both\|enr:…`), one key per seed; refuses to run earlier than 20 min after genesis; a later run in the same dir adds its seeds |
+| `badpacket-control` | `badpacket-control.json` | E2 positive control: from 31430, a random packet to an OLD node (first OLD, or `-target`), then a handshake carrying a REGTOPIC; counts that node's `Bad discv5 packet` lines from the probe in `docker logs`, pass at exactly one with `unknown packet type 7`; refuses `d79-control` and `d79-mixed-*` |
 | `report` | `checks.json`, `summary.md` | merges the run dir and `snapshots/*/`, prints the E table |
 
 Thresholds in `report`. A check passes only on complete data: a node, log,
@@ -161,7 +168,11 @@ FAIL. `info` and `n/a` rows do not count towards the parent's status.
 
 | check | pass when |
 |---|---|
-| E1 | M3b's `tables.json` reports PASS at every labelled snapshot `t<m>m` with m ≥ 30 (each needs a PASS or FAIL; earlier or unlabelled ones are shown as n/a, an n/a or absent one from t30m on is missing), and `crawl-reach.json` reports PASS |
+| E1 | `tables.json` reports PASS at every labelled snapshot `t<m>m` with m ≥ 30 (each needs a PASS or FAIL; earlier or unlabelled ones are shown as n/a, an n/a or absent one from t30m on is missing), and `crawl-reach.json` reports PASS |
+| E1a | every inventory node's table was read; every OLD table holds ≥ 1 live NEW entry and every NEW table ≥ 1 live OLD entry; `tables.json` is judged on E1a alone |
+| E1b | `info`: per node the NEW count against the 99 % band, nodes outside listed; `missing` when a table is unread or has no live OLD or NEW entry |
+| E1c | each crawl reaches every inventory node within 5 min; a crawl that fails to run is `missing` |
+| E4a, E4b | seeded with a NEW (E4a) or OLD (E4b) node: ≥ N_new−1 NEW nodes within 3 min, all within 10 min, no OLD node in the 10 min; a seed not run is `missing` |
 | E2a, E4e | every OLD node has a readable log with 0 `Bad discv5 packet` lines, and a `discover/v5/bad` reading of 0 in every `metrics.json` of the run |
 | E2 | the control (`-control`) has no NEW nodes and the same node count as the run, else E2 is `missing` naming both counts |
 | E2b | the control has no NEW nodes; every OLD node's log (run and control) is readable; the run's OLD-node WARN/ERROR/CRIT templates ⊆ the control's (the control's participant 0 counts only when the run's participant 0 is OLD) |
@@ -179,8 +190,35 @@ E2 shows "needs control" without `-control`; a single-kind run (the control)
 shows E1, E2 and E4 as n/a. E1 and E4 show "needs M3b" until the M3b files
 (`tables.json`, `crawl-reach.json`, `topic.json`, in the run dir or a snapshot
 dir) exist. Each holds its data and a top-level `check` object
-`{id, status, detail, sub}` with status PASS, FAIL, missing or n/a; a file
-without one counts as missing.
+`{id, desc, status, detail, sub}` with status PASS, FAIL, missing, n/a or
+info; a file without one counts as missing. A crawler output that already
+exists stops `tables` or `crawl-reach`: use a fresh `-out` per snapshot.
+
+### Host probes
+
+`tables`, `crawl-reach`, `topic` and `badpacket-control` run host-side discv5
+nodes on the gateway of the enclave's docker network `kt-<enclave>` (`-bridge`
+must name it), UDP 31400–31499 only. They run only in snapshot windows, use
+fixed keys (one per role), advertise no TCP port, and are excluded from every
+count (kind `other`). Their records have no `td` key, and no packet leaves
+before it is gone (the `d79check` probes and `cmd/crawl -no-td` hold writes
+until then; stock devp2p never sets it), so NEW nodes neither register ads
+with them nor send them topic queries.
+
+Each probe records itself in `<run>/probes.json`, `[{name, id, started,
+stopped}]` with the full node ID: one entry per ID, never removed. A start
+adds the entry or, for a known ID, keeps its first `started` and clears
+`stopped` while the probe runs; the stop sets `stopped`. The file is updated
+under `probes.json.lock` through `probes.json.tmp` and a rename; an empty or
+unparsable file is an error. `logs` ignores per-peer lines whose `id=` (the
+first 8 bytes, as geth logs it) is a prefix of a probe ID.
+
+ufw INPUT may drop the containers' unsolicited PINGs to a probe; replies to
+the probe's own requests pass. Probes therefore drop out of the containers'
+tables between windows, which is not table churn. `badpacket-control` leaves
+one `Bad discv5 packet` line in the target's log, which is why it refuses the
+enclaves judged on E2.
+
 
 ## Evidence notes
 
@@ -198,3 +236,15 @@ without one counts as missing.
   ads or 5 s passed. In the 2+2 smoke the other NEW node holds only the
   searcher's own ad, so n is always 0 (0 of 117 on el-2) and E4d fails there;
   it is meant for the 20/20 runs.
+
+## Port and load policy
+
+- The devnet never binds or publishes host UDP 9000, 9001, 30303 or TCP 8545,
+  5052 (reserved for the Hoodi node). Kurtosis publishes TCP only, on random
+  host ports (to be verified in M2). After `kurtosis run` and every minute
+  after, `run.sh` aborts if an enclave container publishes a forbidden host
+  port, and warns if a host listener on one appears that was not there before
+  the run (another process, not the enclave).
+- One run at a time, never alongside a testbed run. Other agents on the host
+  build with `-p 4` while a run is live.
+- Builds use `GOFLAGS=-p=16` and `nice -n 19`.

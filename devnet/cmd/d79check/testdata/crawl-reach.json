@@ -1,0 +1,65 @@
+{
+  "check": {
+    "id": "E1c",
+    "desc": "a crawl from one OLD and one NEW node reaches every node",
+    "status": "PASS",
+    "sub": [
+      {
+        "id": "E1c old",
+        "desc": "crawl seeded with one OLD node",
+        "status": "PASS",
+        "detail": "devp2p-v1.17.10 reached 4/4 in 0 s"
+      },
+      {
+        "id": "E1c new",
+        "desc": "crawl seeded with one NEW node",
+        "status": "PASS",
+        "detail": "devp2p-v1.17.10 reached 4/4 in 1 s"
+      }
+    ]
+  },
+  "crawls": {
+    "new": {
+      "tool": "devp2p-v1.17.10",
+      "seed": {
+        "name": "el-2-geth-lighthouse",
+        "kind": "new",
+        "ip": "172.16.0.15",
+        "id": "4822759436a4e6794efa0092310a5f49ddb8d8f09ae746871d6d291215f18c15",
+        "enr": "enr:-Ke4QNJqzUYMG5GwDunBsnQ1WFmepxm0ByW4i0cVhOUsvI33JBgG36A41JZSF3xec_ljS_hClRNNQE-1tqkZEPp6O3iGAaHvR37Pg2V0aMfGhGHjzyuAgmlkgnY0gmlwhKwQAA-Jc2VjcDI1NmsxoQJayWliHy0IWp2bYOy8I_-Jb8Mj1TbOFX2o_SgMJAJtAoRzbmFwwIN0Y3CCdl-CdGQBg3VkcIJ2Xw",
+        "td": "01",
+        "image": "topdisc-geth:3b8bef9e31d8"
+      },
+      "start": "2026-11-19T13:10:32.708281335Z",
+      "timeout": "5m0s",
+      "reached": 4,
+      "of": 4,
+      "missing": [],
+      "others": 1,
+      "t_full_s": 1,
+      "pass": true,
+      "nodes_file": "/home/sergi/workspace/datahop/runs/2026-11-18-d79-smoke/m3b-test-r1/crawl-reach/new.nodes.json"
+    },
+    "old": {
+      "tool": "devp2p-v1.17.10",
+      "seed": {
+        "name": "el-1-geth-lighthouse",
+        "kind": "old",
+        "ip": "172.16.0.12",
+        "id": "5dd048d94d3a599e58c5ffadb1dd864889a099848bbd28d243788e43e1b80cc9",
+        "enr": "enr:-KO4QJykf556smjz09Gub9QqJLbmEK3stv0m8R4sZ1KwbA3tN5fa8pkk-JfGl01B4a2hXgdFPoS6krEjFRAjaeQEHlOGAaHvR3WEg2V0aMfGhGHjzyuAgmlkgnY0gmlwhKwQAAyJc2VjcDI1NmsxoQL59bi_l0Llche_Ne0ud0MBW4rvEYEduDHZnxB8woPqcoRzbmFwwIN0Y3CCdl-DdWRwgnZf",
+        "td": null,
+        "image": "ethereum/client-go:v1.17.10"
+      },
+      "start": "2026-11-19T13:10:32.708454731Z",
+      "timeout": "5m0s",
+      "reached": 4,
+      "of": 4,
+      "missing": [],
+      "others": 1,
+      "t_full_s": 0,
+      "pass": true,
+      "nodes_file": "/home/sergi/workspace/datahop/runs/2026-11-18-d79-smoke/m3b-test-r1/crawl-reach/old.nodes.json"
+    }
+  }
+}

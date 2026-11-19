@@ -26,6 +26,7 @@ The node key is kept in `<out>/key`, so a restart keeps the crawler's identity.
 | `-probe-dead` | 30m | ping period for never-responders |
 | `-workers` / `-dead-workers` | 256 / 32 | ping concurrency for the two classes; never-responders can never delay the live schedule |
 | `-sweep` | 10m | period of the count events |
+| `-no-td` | off | leave the `td` key out of the crawler's record, so TopDisc nodes do not register their ads with it |
 
 `-sample <period> -sample-full` reads the whole table of every live node once
 per period, one FINDNODE per distance 256 down to 224 (240 and below cover
