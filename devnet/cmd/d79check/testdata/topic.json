@@ -1,0 +1,119 @@
+{
+  "check": {
+    "id": "E4ab",
+    "desc": "topic search from the host probe",
+    "status": "PASS",
+    "sub": [
+      {
+        "id": "E4a",
+        "desc": "search seeded with a NEW node: ≥ N_new−1 NEW in 3 min, all in 10 min, no OLD",
+        "status": "PASS",
+        "detail": "seed el-2-geth-lighthouse: 2/2 NEW (2 by 3m0s), 0 OLD"
+      },
+      {
+        "id": "E4b",
+        "desc": "search seeded with an OLD node: same criteria",
+        "status": "PASS",
+        "detail": "seed el-1-geth-lighthouse: 2/2 NEW (2 by 3m0s), 0 OLD"
+      }
+    ]
+  },
+  "seeds": {
+    "new": {
+      "seed": "new",
+      "seed_node": {
+        "name": "el-2-geth-lighthouse",
+        "kind": "new",
+        "ip": "172.16.0.15",
+        "id": "4822759436a4e6794efa0092310a5f49ddb8d8f09ae746871d6d291215f18c15",
+        "enr": "enr:-Ke4QNJqzUYMG5GwDunBsnQ1WFmepxm0ByW4i0cVhOUsvI33JBgG36A41JZSF3xec_ljS_hClRNNQE-1tqkZEPp6O3iGAaHvR37Pg2V0aMfGhGHjzyuAgmlkgnY0gmlwhKwQAA-Jc2VjcDI1NmsxoQJayWliHy0IWp2bYOy8I_-Jb8Mj1TbOFX2o_SgMJAJtAoRzbmFwwIN0Y3CCdl-CdGQBg3VkcIJ2Xw",
+        "td": "01",
+        "image": "topdisc-geth:3b8bef9e31d8"
+      },
+      "topic": "6c05b8a3d841fca1a19daa5c29b2d8f3107d8de26ed19994a70041e298136f98",
+      "chain_id": "3151908",
+      "genesis": "0x0e3cec23120f94ead3c9a6d548476137a003a493398f8e4ba77d5fe3e56e097e",
+      "genesis_time": "2026-11-18T15:30:35Z",
+      "start": "2026-11-19T13:15:32.806751938Z",
+      "early": "3m0s",
+      "timeout": "10m0s",
+      "found": [
+        {
+          "id": "78de8ec159533c80ef806b933c4215f17b2ed07884d1575d252a90077cf6bf4c",
+          "name": "el-3-geth-lighthouse",
+          "kind": "new",
+          "t_s": 0.002505525
+        },
+        {
+          "id": "4822759436a4e6794efa0092310a5f49ddb8d8f09ae746871d6d291215f18c15",
+          "name": "el-2-geth-lighthouse",
+          "kind": "new",
+          "t_s": 2.001698597
+        }
+      ],
+      "expected": 2,
+      "found_new": 2,
+      "found_new_early": 2,
+      "missing": [],
+      "old": [],
+      "others": 0,
+      "pass_early": true,
+      "pass_all": true,
+      "zero_old": true,
+      "pass": true,
+      "probe_log": "/home/sergi/workspace/datahop/runs/2026-11-18-d79-smoke/m3b-test-r1/topic-new.log",
+      "probe_id": "f38661d972ea2ac4962a648173e22385e8f426c8c2990a5c17770dab692240da",
+      "probe_td": false,
+      "probe_ip": "172.16.0.23",
+      "probe_port": 31420
+    },
+    "old": {
+      "seed": "old",
+      "seed_node": {
+        "name": "el-1-geth-lighthouse",
+        "kind": "old",
+        "ip": "172.16.0.12",
+        "id": "5dd048d94d3a599e58c5ffadb1dd864889a099848bbd28d243788e43e1b80cc9",
+        "enr": "enr:-KO4QJykf556smjz09Gub9QqJLbmEK3stv0m8R4sZ1KwbA3tN5fa8pkk-JfGl01B4a2hXgdFPoS6krEjFRAjaeQEHlOGAaHvR3WEg2V0aMfGhGHjzyuAgmlkgnY0gmlwhKwQAAyJc2VjcDI1NmsxoQL59bi_l0Llche_Ne0ud0MBW4rvEYEduDHZnxB8woPqcoRzbmFwwIN0Y3CCdl-DdWRwgnZf",
+        "td": null,
+        "image": "ethereum/client-go:v1.17.10"
+      },
+      "topic": "6c05b8a3d841fca1a19daa5c29b2d8f3107d8de26ed19994a70041e298136f98",
+      "chain_id": "3151908",
+      "genesis": "0x0e3cec23120f94ead3c9a6d548476137a003a493398f8e4ba77d5fe3e56e097e",
+      "genesis_time": "2026-11-18T15:30:35Z",
+      "start": "2026-11-19T13:25:32.815401126Z",
+      "early": "3m0s",
+      "timeout": "10m0s",
+      "found": [
+        {
+          "id": "78de8ec159533c80ef806b933c4215f17b2ed07884d1575d252a90077cf6bf4c",
+          "name": "el-3-geth-lighthouse",
+          "kind": "new",
+          "t_s": 2.002025654
+        },
+        {
+          "id": "4822759436a4e6794efa0092310a5f49ddb8d8f09ae746871d6d291215f18c15",
+          "name": "el-2-geth-lighthouse",
+          "kind": "new",
+          "t_s": 2.002027484
+        }
+      ],
+      "expected": 2,
+      "found_new": 2,
+      "found_new_early": 2,
+      "missing": [],
+      "old": [],
+      "others": 0,
+      "pass_early": true,
+      "pass_all": true,
+      "zero_old": true,
+      "pass": true,
+      "probe_log": "/home/sergi/workspace/datahop/runs/2026-11-18-d79-smoke/m3b-test-r1/topic-old.log",
+      "probe_id": "f38661d972ea2ac4962a648173e22385e8f426c8c2990a5c17770dab692240da",
+      "probe_td": false,
+      "probe_ip": "172.16.0.23",
+      "probe_port": 31420
+    }
+  }
+}
