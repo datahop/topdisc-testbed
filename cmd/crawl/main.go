@@ -40,6 +40,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net"
+	"net/netip"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -52,6 +53,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p/discover"
+	"github.com/ethereum/go-ethereum/p2p/discover/topicindex"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -77,6 +79,7 @@ func main() {
 		sampleD   = flag.Int("sample-distances", 3, "random distinct distances in 248..256 per FINDNODE")
 		sampleF   = flag.Bool("sample-full", false, "read the whole table of every live node each sample period: one FINDNODE per distance 256 down to 224 (33 requests per node; 240 and below cover bucket 0); -sample-distances is ignored")
 		verbosity = flag.Int("verbosity", 3, "log verbosity")
+		noTD      = flag.Bool("no-td", false, "leave the td key out of the local record, so TopDisc nodes do not register with the crawler")
 	)
 	flag.Parse()
 	log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, log.FromLegacyLevel(*verbosity), false)))
@@ -112,13 +115,21 @@ func main() {
 		ln.SetStaticIP(net.ParseIP(*extIP))
 	}
 	ln.SetFallbackUDP(addr.Port)
-	disc, err := discover.ListenV5(conn, ln, discover.Config{
+	gate := &gatedConn{UDPConn: conn, open: make(chan struct{})}
+	if !*noTD {
+		close(gate.open)
+	}
+	disc, err := discover.ListenV5(gate, ln, discover.Config{
 		PrivateKey: key,
 		Bootnodes:  bootnodes,
 		Log:        log.Root(),
 	})
 	if err != nil {
 		fatal(err)
+	}
+	if *noTD {
+		ln.Delete(topicindex.TopicDiscoveryVersion)
+		close(gate.open)
 	}
 	log.Info("crawler up", "self", disc.Self().String(), "bootnodes", len(bootnodes))
 
@@ -189,6 +200,18 @@ func main() {
 	disc.Close()
 	wg.Wait()
 	reg.sweep(-1, *probe, *newTries)
+}
+
+// gatedConn holds writes until open is closed: with -no-td, until td is gone from the
+// record ListenV5 starts with.
+type gatedConn struct {
+	*net.UDPConn
+	open chan struct{}
+}
+
+func (c *gatedConn) WriteToUDPAddrPort(b []byte, addr netip.AddrPort) (int, error) {
+	<-c.open
+	return c.UDPConn.WriteToUDPAddrPort(b, addr)
 }
 
 func fatal(err error) {
