@@ -3,7 +3,7 @@ participants:
   - el_type: geth
     el_image: topdisc-geth:3b8bef9e31d8
     el_log_level: debug
-    el_extra_params: ["--discovery.topic", "'--vmodule=p2p/discover/topicindex/*=5'", "--identity=topdisc", "--bootnodes="]
+    el_extra_params: ["--discovery.topic", "'--log.vmodule=p2p/discover/topicindex/*=5'", "--identity=topdisc", "--bootnodes="]
     cl_type: lighthouse
     cl_image: sigp/lighthouse:v8.3.3
     vc_type: lighthouse
@@ -14,7 +14,7 @@ participants:
   - el_type: geth
     el_image: topdisc-geth:3b8bef9e31d8
     el_log_level: debug
-    el_extra_params: ["--discovery.topic", "'--vmodule=p2p/discover/topicindex/*=5'", "--identity=topdisc"]
+    el_extra_params: ["--discovery.topic", "'--log.vmodule=p2p/discover/topicindex/*=5'", "--identity=topdisc"]
     cl_type: lighthouse
     cl_image: sigp/lighthouse:v8.3.3
     vc_type: lighthouse

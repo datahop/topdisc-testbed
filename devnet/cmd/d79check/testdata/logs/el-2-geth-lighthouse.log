@@ -1,0 +1,12 @@
+2026-11-18T15:30:02.084378219Z WARN [11-18|15:30:02.084] The flag '--vmodule' is deprecated, please use '--log.vmodule' instead
+2026-11-18T15:30:02.094371631Z INFO [11-18|15:30:02.094] Starting Geth on Ethereum mainnet...
+2026-11-18T15:30:02.229332379Z WARN [11-18|15:30:02.229] Head block is not reachable
+2026-11-18T15:30:02.238447775Z WARN [11-18|15:30:02.238] Sanitizing invalid node buffer size      provided=1.00GiB updated=256.00MiB
+2026-11-18T15:30:02.580922838Z DEBUG[11-18|15:30:02.580] Adding p2p peer                          peercount=1 id=5dd048d94d3a599e conn=dyndial addr=172.16.0.12:30303                 name=Geth/v1.17.10-stable...
+2026-11-18T15:30:06.580792595Z TRACE[11-18|15:30:06.580] Topic registration successful            topic=6c05b8a3d841fca1 id=78de8ec159533c80 adlifetime=15m0s
+2026-11-18T15:30:06.580063711Z DEBUG[11-18|15:30:06.579] Topic query answered                     topic=6c05b8a3d841fca1 fromid=78de8ec159533c80 n=0
+# synthetic lines in the same format
+2026-11-18T15:40:00.000000000Z DEBUG[11-18|15:40:00.000] Topic query answered                     topic=6c05b8a3d841fca1 fromid=78de8ec159533c80 n=3
+2026-11-18T15:41:00.000000000Z DEBUG[11-18|15:41:00.000] Topic registration failed                topic=6c05b8a3d841fca1 id=78de8ec159533c80 err="timeout"
+2026-11-18T15:42:00.000000000Z TRACE[11-18|15:42:00.000] Topic registration successful            topic=6c05b8a3d841fca1 id=d167af3ab76d94a2 adlifetime=15m0s
+2026-11-18T15:43:00.000000000Z DEBUG[11-18|15:43:00.000] Topic registration failed                topic=6c05b8a3d841fca1 id=d167af3ab76d94a2 err="timeout"

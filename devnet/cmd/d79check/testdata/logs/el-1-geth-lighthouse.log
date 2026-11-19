@@ -1,0 +1,13 @@
+2026-11-18T15:29:59.771899332Z INFO [11-18|15:29:59.771] Starting Geth on Ethereum mainnet...
+2026-11-18T15:29:59.772103974Z INFO [11-18|15:29:59.772] Maximum peer count                       ETH=50 total=50
+2026-11-18T15:29:59.883856931Z WARN [11-18|15:29:59.883] Head block is not reachable
+2026-11-18T15:29:59.892640915Z WARN [11-18|15:29:59.892] Sanitizing invalid node buffer size      provided=1.00GiB updated=256.00MiB
+2026-11-18T15:30:02.362707134Z DEBUG[11-18|15:30:02.362] Adding p2p peer                          peercount=1 id=121c802941f418ce conn=dyndial addr=172.16.0.14:30303                 name=Geth/v1.17.10-stable...
+2026-11-18T15:30:47.047231079Z INFO [11-18|15:30:47.046] Imported new potential chain segment     number=1 hash=ffbc67..0b06a5 blocks=1 txs=0 mgas=0.000 elapsed=1.149ms     mgasps=0.000 triediffs=4.39KiB triedirty=0.00B
+2026-11-18T15:30:47.051877845Z WARN [11-18|15:30:47.051] Nil finalized block cannot evict old blobs
+# synthetic lines in the same format
+2026-11-18T15:35:00.000000000Z DEBUG[11-18|15:35:00.000] Removing p2p peer                        peercount=2 id=78de8ec159533c80 duration=4m57.419s req=false err="too many peers"
+2026-11-18T15:36:00.000000000Z DEBUG[11-18|15:36:00.000] Removing p2p peer                        peercount=2 id=121c802941f418ce duration=5m57.419s req=true  err="disconnect requested"
+2026-11-18T15:36:30.000000000Z DEBUG[11-18|15:36:30.000] Removing p2p peer                        peercount=1 id=aaaaaaaaaaaaaaaa duration=1s req=false err=EOF
+2026-11-18T15:37:00.000000000Z INFO [11-18|15:37:00.000] Chain reorg detected                     number=20 hash=aaaaaa..aaaaaa drop=1 dropfrom=bbbbbb..bbbbbb add=1 addfrom=cccccc..cccccc
+2026-11-18T15:45:00.000000000Z WARN [11-18|15:45:00.000] Large chain reorg detected               number=60 hash=aaaaaa..aaaaaa drop=5 dropfrom=bbbbbb..bbbbbb add=5 addfrom=cccccc..cccccc

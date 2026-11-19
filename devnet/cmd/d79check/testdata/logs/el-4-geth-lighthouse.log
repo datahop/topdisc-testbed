@@ -1,0 +1,5 @@
+2026-11-18T15:30:01.894283641Z INFO [11-18|15:30:01.894] Starting Geth on Ethereum mainnet...
+2026-11-18T15:30:01.980853927Z WARN [11-18|15:30:01.980] Head block is not reachable
+# synthetic lines in the same format
+2026-11-18T15:38:00.000000000Z DEBUG[11-18|15:38:00.000] Bad discv5 packet                        id=4822759436a4e679 addr=172.16.0.15:30303 err="unknown packet type 7"
+2026-11-18T15:39:00.000000000Z ERROR[11-18|15:39:00.000] Something broke                          reason=test
