@@ -162,7 +162,7 @@ func runTables(args []string) error {
 	}
 
 	res := classifyTables(inv, &ct)
-	res.Check = tablesCheck(res, rf.out)
+	res.Check = tablesCheck(res, rf.out, oldNew)
 	res.Crawl = crawlInfo
 	if err := writeJSON(filepath.Join(rf.out, "tables.json"), res); err != nil {
 		return err
@@ -287,9 +287,10 @@ var snapLabel = regexp.MustCompile(`^t(\d+)m$`)
 
 // tablesCheck judges E1(a) and E1(b); snapDir is the output directory, whose name
 // is the snapshot label (t<m>m) in a run. E1(a) is judged only from t30m on.
-func tablesCheck(res *tablesResult, snapDir string) check {
-	a := check{ID: "E1a", Desc: "every OLD table holds a NEW node and every NEW table an OLD node"}
-	b := check{ID: "E1b", Desc: fmt.Sprintf("per-node NEW count inside the %.0f %% binomial band", bandConf*100)}
+func tablesCheck(res *tablesResult, snapDir string, g groupNames) check {
+	o, n := upper(g.old), upper(g.new)
+	a := check{ID: "E1a", Desc: fmt.Sprintf("every %s table holds a %s node and every %s table an %s node", o, n, n, o)}
+	b := check{ID: "E1b", Desc: fmt.Sprintf("per-node %s count inside the %.0f %% binomial band", n, bandConf*100)}
 	unread := ""
 	if len(res.Unread) > 0 {
 		unread = "not read: " + strings.Join(res.Unread, ", ")
@@ -335,7 +336,7 @@ func tablesCheck(res *tablesResult, snapDir string) check {
 			}
 		}
 	}
-	return check{ID: "E1ab", Desc: "discv5 tables mix OLD and NEW (judged on E1a)", Status: a.Status, Detail: a.Detail, Sub: []check{a, b}}
+	return check{ID: "E1ab", Desc: fmt.Sprintf("discv5 tables mix %s and %s (judged on E1a)", o, n), Status: a.Status, Detail: a.Detail, Sub: []check{a, b}}
 }
 
 // binomialBand returns the central conf interval [lo, hi] of Binomial(n, p): the

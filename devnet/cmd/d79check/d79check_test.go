@@ -248,7 +248,7 @@ func TestEvalHeads(t *testing.T) {
 			t.Errorf("%s = %s, want %s", id, got, want)
 		}
 	}
-	if d := c.Sub[5].Detail; !strings.Contains(d, "epoch 2→1") || !strings.Contains(d, "current 7") {
+	if d := c.Sub[5].Detail; !strings.Contains(d, "epoch 2→1") || !strings.Contains(d, "head epoch 7") {
 		t.Errorf("finality detail %q", d)
 	}
 
@@ -262,6 +262,37 @@ func TestEvalHeads(t *testing.T) {
 	}
 	if c, _ = evalHeads(lag, 2); subStatus(c, "E3c-errors") != statusInfo {
 		t.Errorf("second not-found sample after finality: %s", renderTable([]check{c}))
+	}
+
+	// R0 at first finality: wall-clock epoch 4, but cl-2's head is still in epoch 3.
+	r0 := []headSample{
+		{Elapsed: 1524, ELs: []elSample{el("a", 127, blockHash(127), 0, false), el("b", 127, blockHash(127), 0, false)},
+			CLs: []clSample{cl(0, 127, 0), cl(1, 127, 0)}},
+		{Elapsed: 1536, ELs: []elSample{el("a", 128, blockHash(128), 64, false), el("b", 127, blockHash(127), 0, false)},
+			CLs: []clSample{cl(0, 128, 2), cl(1, 127, 0)}},
+		{Elapsed: 1548, ELs: []elSample{el("a", 129, blockHash(129), 64, false), el("b", 129, blockHash(129), 64, false)},
+			CLs: []clSample{cl(0, 129, 2), cl(1, 129, 2)}},
+	}
+	if c, _ = evalHeads(r0, 2); subStatus(c, "E3c-finality") != statusPass {
+		t.Errorf("R0 first finality: %s", renderTable([]check{c}))
+	}
+	// Frozen after first finality: heads stay at slot 129, finalized epoch 2, until +4500 s.
+	stall := append([]headSample{}, r0...)
+	for e := 1560.0; e <= 4500; e += 12 {
+		s := r0[2]
+		s.Elapsed = e
+		stall = append(stall, s)
+	}
+	if c, _ = evalHeads(stall, 2); subStatus(c, "E3c-finality") != statusFail ||
+		!strings.Contains(c.Sub[5].Detail, "head slot 129, wall-clock slot 162") {
+		t.Errorf("chain frozen at slot 129: %s", renderTable([]check{c}))
+	}
+	if c, _ = evalHeads(stall[:len(r0)+32], 2); subStatus(c, "E3c-finality") != statusPass {
+		t.Errorf("32 slots behind is within the bound: %s", renderTable([]check{c}))
+	}
+	r0[2].CLs[1] = cl(1, 160, 1)
+	if c, _ = evalHeads(r0, 2); subStatus(c, "E3c-finality") != statusFail || !strings.Contains(c.Sub[5].Detail, "head epoch 5") {
+		t.Errorf("cl-2 four epochs behind its head: %s", renderTable([]check{c}))
 	}
 }
 
@@ -420,6 +451,9 @@ func TestLogs(t *testing.T) {
 	}
 	if el1.Removed[kindNew] != 1 || el1.Removed[kindOld] != 1 || el1.Removed[kindUnknown] != 1 {
 		t.Errorf("el-1 removed = %v", el1.Removed)
+	}
+	if bp := el1.RemovedByPeer; len(bp) != 2 || bp["el-3-geth-lighthouse"] != 1 || bp["el-4-geth-lighthouse"] != 1 {
+		t.Errorf("el-1 removed by peer = %v", bp)
 	}
 	if el1.Reorgs != 2 || el1.ReorgsAfterWarmup != 1 {
 		t.Errorf("el-1 reorgs %d, after warm-up %d", el1.Reorgs, el1.ReorgsAfterWarmup)

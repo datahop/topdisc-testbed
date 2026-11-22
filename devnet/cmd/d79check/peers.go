@@ -110,16 +110,19 @@ func collectPeers(ctx context.Context, inv *inventory) peersResult {
 		pn.Total = len(peers)
 		res.Nodes[i] = pn
 	})
-	res.Matrix, res.Failures, res.Check = evalPeers(inv, res.Nodes)
+	res.Matrix, res.Failures, res.Check = evalPeers(inv, res.Nodes, oldNew)
 	return res
 }
 
-// evalPeers checks E3(a): every OLD node has a NEW peer and every NEW node an OLD peer.
-// A node that did not answer makes the check incomplete.
-func evalPeers(inv *inventory, nodes []peersNode) (map[string]map[string]int, []string, check) {
+// evalPeers checks E3(a): every OLD node has a NEW peer and every NEW node an OLD peer,
+// worded with g. A node that did not answer makes the check incomplete.
+func evalPeers(inv *inventory, nodes []peersNode, g groupNames) (map[string]map[string]int, []string, check) {
 	matrix := map[string]map[string]int{kindOld: {}, kindNew: {}}
 	var fails, missing []string
 	for _, n := range nodes {
+		if matrix[n.Kind] == nil {
+			matrix[n.Kind] = map[string]int{}
+		}
 		for k, dc := range n.ByKind {
 			matrix[n.Kind][k] += dc.In + dc.Out
 		}
@@ -131,14 +134,14 @@ func evalPeers(inv *inventory, nodes []peersNode) (map[string]map[string]int, []
 		case n.Error != "":
 			missing = append(missing, n.Name+": "+n.Error)
 		case inv.count(other) > 0 && n.ByKind[other].In+n.ByKind[other].Out == 0:
-			fails = append(fails, fmt.Sprintf("%s (%s) has no %s peer", n.Name, n.Kind, other))
+			fails = append(fails, fmt.Sprintf("%s (%s) has no %s peer", n.Name, g.of(n.Kind), g.of(other)))
 		}
 		for _, m := range n.NameMismatch {
 			fails = append(fails, n.Name+": name mismatch "+m)
 		}
 	}
-	c := check{ID: "E3a", Desc: "every OLD node has a NEW peer and vice versa"}
-	judge(&c, fails, missing, fmt.Sprintf("old→old %d old→new %d new→old %d new→new %d", matrix[kindOld][kindOld],
+	c := check{ID: "E3a", Desc: fmt.Sprintf("every %s node has a %s peer and vice versa", upper(g.old), upper(g.new))}
+	judge(&c, fails, missing, fmt.Sprintf("%[1]s→%[1]s %[3]d %[1]s→%[2]s %[4]d %[2]s→%[1]s %[5]d %[2]s→%[2]s %[6]d", g.old, g.new, matrix[kindOld][kindOld],
 		matrix[kindOld][kindNew], matrix[kindNew][kindOld], matrix[kindNew][kindNew]))
 	if c.Status == statusPass && (inv.count(kindOld) == 0 || inv.count(kindNew) == 0) {
 		c.Status, c.Detail = statusNA, "single-kind run"

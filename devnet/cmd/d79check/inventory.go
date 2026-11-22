@@ -90,18 +90,40 @@ func (inv *inventory) validate() []string {
 	return errs
 }
 
-// kindOf maps a full node ID or a log-abbreviated prefix to the node's kind.
-func (inv *inventory) kindOf(id string) string {
+// newInventory indexes nodes without validating them.
+func newInventory(nodes []node) *inventory {
+	inv := &inventory{Nodes: nodes, byID: make(map[string]int)}
+	for i, n := range nodes {
+		inv.byID[n.ID] = i
+	}
+	return inv
+}
+
+// indexOf maps a full node ID or a log-abbreviated prefix to its inventory index, -1 if
+// none or if the prefix is ambiguous.
+func (inv *inventory) indexOf(id string) int {
 	id = strings.ToLower(id)
 	if i, ok := inv.byID[id]; ok {
-		return inv.Nodes[i].Kind
+		return i
 	}
+	found := -1
 	if len(id) >= 8 && len(id) < 64 {
-		for _, n := range inv.Nodes {
+		for i, n := range inv.Nodes {
 			if strings.HasPrefix(n.ID, id) {
-				return n.Kind
+				if found >= 0 {
+					return -1
+				}
+				found = i
 			}
 		}
+	}
+	return found
+}
+
+// kindOf maps a full node ID or a log-abbreviated prefix to the node's kind.
+func (inv *inventory) kindOf(id string) string {
+	if i := inv.indexOf(id); i >= 0 {
+		return inv.Nodes[i].Kind
 	}
 	return kindUnknown
 }

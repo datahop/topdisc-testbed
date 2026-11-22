@@ -38,6 +38,9 @@ type runData struct {
 	logs    *logsResult
 	m3b     map[string][]string // file name → paths found
 	subdirs []string            // "." then snapshots/<label>, sorted
+	// split relabels a single-kind run into A (OLD role) and B (NEW role).
+	split       *inventory
+	headSamples []headSample
 }
 
 func loadRun(dir string) (*runData, error) {
@@ -85,6 +88,9 @@ func loadRun(dir string) (*runData, error) {
 			return nil, err
 		} else if ok && rd.heads == nil {
 			rd.heads = &h
+			if s, err := readSamples(filepath.Join(dir, rel, "heads.jsonl")); err == nil {
+				rd.headSamples = s
+			}
 		}
 		var t txsResult
 		if ok, err := load(rel, "txs.json", &t); err != nil {
@@ -153,9 +159,10 @@ func (rd *runData) latestMetrics() *metricsResult {
 }
 
 type reportResult struct {
-	Run     string  `json:"run"`
-	Control string  `json:"control,omitempty"`
-	Checks  []check `json:"checks"`
+	Run     string       `json:"run"`
+	Control string       `json:"control,omitempty"`
+	Split   *splitGroups `json:"split,omitempty"`
+	Checks  []check      `json:"checks"`
 }
 
 func init() {
@@ -185,8 +192,15 @@ func runReport(args []string) error {
 		}
 	}
 	res := reportResult{Run: *run, Control: *control, Checks: buildChecks(rd, ctl)}
+	res.Split = rd.splitGroups()
 	md := renderSummary(res)
+	if res.Split != nil {
+		fmt.Println(res.Split.line())
+	}
 	fmt.Print(renderTable(res.Checks))
+	if err := os.MkdirAll(*out, 0o755); err != nil {
+		return err
+	}
 	if err := writeJSON(filepath.Join(*out, "checks.json"), res); err != nil {
 		return err
 	}
@@ -196,9 +210,12 @@ func runReport(args []string) error {
 func buildChecks(rd, ctl *runData) []check {
 	nOld, nNew, known := rd.kinds()
 	single := known && (nOld == 0 || nNew == 0)
+	if single && rd.inv != nil {
+		rd.split = splitInventory(rd.inv.Nodes)
+	}
 	return []check{
 		e1Check(rd, single),
-		e2Check(rd, ctl, single),
+		e2Check(rd, ctl),
 		e3Check(rd),
 		e4Check(rd, single),
 	}
@@ -295,15 +312,22 @@ func snapMinutes(rel string) int {
 // e1Check judges E1(a) tables only at labelled snapshots t<m>m with m ≥ 30, each of which
 // needs a PASS or FAIL; crawl reach is read wherever it is.
 func e1Check(rd *runData, single bool) check {
-	const id, desc = "E1", "discv5 tables mix OLD and NEW; crawl reaches every node"
-	if single {
-		return check{ID: id, Desc: desc, Status: statusNA, Detail: "single-kind run"}
+	const id = "E1"
+	g := rd.names()
+	desc := fmt.Sprintf("discv5 tables mix %s and %s; crawl reaches every node", upper(g.old), upper(g.new))
+	if single && rd.split == nil {
+		return check{ID: id, Desc: desc, Status: statusNA, Detail: "single-kind run (no inventory-check.json to split)"}
 	}
 	var tables []check
 	have := make(map[string]bool)
 	for _, p := range rd.m3b["tables.json"] {
 		rel, _ := filepath.Rel(rd.dir, filepath.Dir(p))
-		c := readM3b(p, "E1 "+filepath.Join(rel, "tables.json"))
+		var c check
+		if rd.split != nil {
+			c = rd.splitTables(p, rel)
+		} else {
+			c = readM3b(p, "E1 "+filepath.Join(rel, "tables.json"))
+		}
 		switch m := snapMinutes(rel); {
 		case m < 30:
 			c.Detail = strings.TrimSpace(fmt.Sprintf("not judged before t30m or unlabelled (%s) %s", c.Status, c.Detail))
@@ -372,11 +396,8 @@ func readM3b(path, id string) check {
 	return c
 }
 
-func e2Check(rd, ctl *runData, single bool) check {
+func e2Check(rd, ctl *runData) check {
 	const id, desc = "E2", "old-node health vs control"
-	if single {
-		return check{ID: id, Desc: desc, Status: statusNA, Detail: "single-kind run (control)"}
-	}
 	sub := []check{badPacketCheck(rd, "E2a"), templatesCheck(rd, ctl), removalCheck(rd), mediansCheck(rd, ctl)}
 	c := top(id, desc, sub)
 	if ctl != nil {
@@ -500,22 +521,24 @@ func templatesCheck(rd, ctl *runData) check {
 // removalMin is the number of removals an OLD node needs before its rate is judged.
 const removalMin = 5
 
-// removalCheck judges each OLD node (participant 0 excluded): removals of NEW peers per NEW
-// node ≤ 2× removals of OLD peers per other OLD node.
+// removalCheck compares, per OLD node (participant 0 excluded), removals of NEW peers per NEW
+// node with 2× removals of OLD peers per other OLD node; A against B in a split run. It only
+// informs (D117): every removal comes from geth's random eth-layer dropper, which never sees
+// discovery. Incomplete data is still missing.
 func removalCheck(rd *runData) check {
-	c := check{ID: "E2c", Desc: fmt.Sprintf("per OLD node: old↔new removal rate ≤ 2× old↔old (participant 0 excluded, judged from %d removals)", removalMin)}
-	olds, ok := rd.population(kindOld, true)
+	g := rd.names()
+	c := check{ID: "E2c", Desc: fmt.Sprintf("per %s node: %s↔%s removal rate vs 2× %s↔%s, info only: geth's random peer dropper, not discovery (participant 0 excluded, from %d removals)",
+		upper(g.old), g.old, g.new, g.old, g.old, removalMin)}
+	olds, ok := rd.groupNodes(kindOld, true)
 	if !ok {
 		c.Status, c.Detail = statusMissing, "no inventory-check.json"
 		return c
 	}
-	news, _ := rd.population(kindNew, false)
-	nOld := len(olds) + 1
-	if rd.inv.BootKind != kindOld {
-		nOld = len(olds)
-	}
+	news, _ := rd.groupNodes(kindNew, false)
+	all, _ := rd.groupNodes(kindOld, false)
+	nOld := len(all)
 	logs, missing := rd.logsFor(olds)
-	var fails, info []string
+	var above, info []string
 	judged := 0
 	for _, n := range olds {
 		l, ok := logs[n.Name]
@@ -526,8 +549,13 @@ func removalCheck(rd *runData) check {
 			missing = append(missing, n.Name+": no DEBUG lines")
 			continue
 		}
-		ro, rn := l.Removed[kindOld], l.Removed[kindNew]
-		counts := fmt.Sprintf("%s old %d new %d unknown %d", n.Name, ro, rn, l.Removed[kindUnknown])
+		rm, why := rd.removed(l)
+		if why != "" {
+			missing = append(missing, n.Name+": "+why)
+			continue
+		}
+		ro, rn := rm[kindOld], rm[kindNew]
+		counts := fmt.Sprintf("%s %s %d %s %d unknown %d", n.Name, g.old, ro, g.new, rn, rm[kindUnknown])
 		if ro+rn < removalMin {
 			info = append(info, counts)
 			continue
@@ -536,12 +564,18 @@ func removalCheck(rd *runData) check {
 		rateNew := float64(rn) / float64(max(len(news), 1))
 		rateOld := float64(ro) / float64(max(nOld-1, 1))
 		if rateNew > 2*rateOld {
-			fails = append(fails, fmt.Sprintf("%s (%.2f vs %.2f per node)", counts, rateNew, rateOld))
+			above = append(above, fmt.Sprintf("%s (%.2f vs %.2f per node)", counts, rateNew, rateOld))
 		}
 	}
-	judge(&c, fails, missing, fmt.Sprintf("%d nodes judged", judged))
-	if c.Status == statusPass && judged == 0 {
-		c.Status, c.Detail = statusInfo, "too few removals to judge"
+	c.Status, c.Detail = statusInfo, fmt.Sprintf("%d nodes compared, none above 2×", judged)
+	switch {
+	case len(above) > 0:
+		c.Detail = fmt.Sprintf("%d nodes compared; above 2×: %s (info: random eth dropper, not affected by discovery)", judged, firstN(above, 4))
+	case judged == 0:
+		c.Detail = "too few removals to compare"
+	}
+	if len(missing) > 0 {
+		c.Status, c.Detail = statusMissing, "incomplete: "+firstN(missing, 4)+"; "+c.Detail
 	}
 	if len(info) > 0 {
 		c.Detail += fmt.Sprintf("; informational (< %d removals): %s", removalMin, firstN(info, 4))
@@ -682,13 +716,18 @@ func e3Check(rd *runData) check {
 	for _, rel := range rd.subdirs {
 		if p, ok := rd.peers[rel]; ok {
 			pc := p.Check
+			if rd.split != nil {
+				pc = rd.splitPeers(p)
+			}
 			pc.ID = "E3a " + rel
 			peers = append(peers, pc)
 		} else if rel != "." {
 			peers = append(peers, check{ID: "E3a " + rel, Status: statusMissing, Detail: "no peers.json"})
 		}
 	}
-	pc := check{ID: "E3a", Desc: "every OLD node has a NEW peer and vice versa", Status: statusMissing, Detail: "peers.json"}
+	g := rd.names()
+	pc := check{ID: "E3a", Desc: fmt.Sprintf("every %s node has a %s peer and vice versa", upper(g.old), upper(g.new)),
+		Status: statusMissing, Detail: "peers.json"}
 	if len(peers) > 0 {
 		pc.Status, pc.Detail, pc.Sub = overall(peers), "", peers
 	}
@@ -697,7 +736,9 @@ func e3Check(rd *runData) check {
 		tc = rd.txs.Check
 	}
 	hc := check{ID: "E3c", Desc: "heads", Status: statusMissing, Detail: "heads.json"}
-	if rd.heads != nil {
+	if len(rd.headSamples) > 0 && rd.inv != nil {
+		hc, _ = evalHeads(rd.headSamples, len(rd.inv.Nodes))
+	} else if rd.heads != nil {
 		hc = rd.heads.Check
 	}
 	rc := check{ID: "E3d", Desc: "zero Chain reorg detected after warm-up"}
@@ -815,6 +856,9 @@ func renderSummary(r reportResult) string {
 	fmt.Fprintf(&b, "# d79check report\n\nRun: `%s`", r.Run)
 	if r.Control != "" {
 		fmt.Fprintf(&b, ", control: `%s`", r.Control)
+	}
+	if r.Split != nil {
+		b.WriteString("\n\n" + r.Split.line())
 	}
 	b.WriteString("\n\n| check | status | detail |\n|---|---|---|\n")
 	flatten(r.Checks, 0, func(c check, depth int) {
