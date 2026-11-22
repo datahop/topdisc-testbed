@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	slotTime  = 12 * time.Second
-	epochTime = 32 * slotTime
+	slotTime      = 12 * time.Second
+	slotsPerEpoch = 32
 )
 
 type clNode struct {
@@ -165,6 +165,26 @@ func runHeads(args []string) error {
 	res.Check, res.Coverage = evalHeads(samples, len(inv.Nodes))
 	printCheck(res.Check)
 	return writeJSON(filepath.Join(rf.out, "heads.json"), res)
+}
+
+// readSamples reads the raw samples of a heads.jsonl.
+func readSamples(path string) ([]headSample, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	var samples []headSample
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 1<<20), 1<<20)
+	for sc.Scan() {
+		var s headSample
+		if err := json.Unmarshal(sc.Bytes(), &s); err != nil {
+			return nil, fmt.Errorf("%s: %v", path, err)
+		}
+		samples = append(samples, s)
+	}
+	return samples, sc.Err()
 }
 
 func clGenesis(cls []clNode) (time.Time, error) {
@@ -406,6 +426,10 @@ func evalHeads(samples []headSample, n int) (check, headsCoverage) {
 			if c.HeadSlot != nil {
 				obs("CL "+c.Name, "head slot")
 				lo, hi = min(lo, *c.HeadSlot), max(hi, *c.HeadSlot)
+				// Elapsed counts from the beacon genesis_time, so this is the slot due now.
+				if wall := int(s.Elapsed / slotTime.Seconds()); after && wall-int(*c.HeadSlot) > slotsPerEpoch {
+					finalityFails = append(finalityFails, fmt.Sprintf("%s head slot %d, wall-clock slot %d at %s", c.Name, *c.HeadSlot, wall, at))
+				}
 			}
 			if c.FinalizedEpoch != nil {
 				obs("CL "+c.Name, "finalized epoch")
@@ -414,8 +438,10 @@ func evalHeads(samples []headSample, n int) (check, headsCoverage) {
 					finalityFails = append(finalityFails, fmt.Sprintf("%s epoch %d→%d at %s", c.Name, prev, ep, at))
 				}
 				lastEpoch[c.Name] = ep
-				if cur := int(s.Elapsed / epochTime.Seconds()); after && int(ep) < cur-3 {
-					finalityFails = append(finalityFails, fmt.Sprintf("%s finalized epoch %d, current %d at %s", c.Name, ep, cur, at))
+				if c.HeadSlot != nil {
+					if cur := int(*c.HeadSlot) / slotsPerEpoch; after && int(ep) < cur-3 {
+						finalityFails = append(finalityFails, fmt.Sprintf("%s finalized epoch %d, head epoch %d (slot %d) at %s", c.Name, ep, cur, *c.HeadSlot, at))
+					}
 				}
 			}
 		}
@@ -449,7 +475,7 @@ func evalHeads(samples []headSample, n int) (check, headsCoverage) {
 			}
 		}
 	}
-	finalityOK := "lag ≤ 3 epochs, monotone"
+	finalityOK := "lag ≤ 3 epochs, monotone, heads ≤ 32 slots behind"
 	if cov.FirstFinalizedS != nil {
 		finalityOK = fmt.Sprintf("first finalized at +%.0fs; %s", *cov.FirstFinalizedS, finalityOK)
 	}
@@ -464,7 +490,7 @@ func evalHeads(samples []headSample, n int) (check, headsCoverage) {
 			Detail: firstN(syncingLate, 3)},
 		{ID: "E3c-slots", Desc: "CL head slots within 1", Status: passIf(maxSlotSpread <= 1),
 			Detail: fmt.Sprintf("max spread %d", maxSlotSpread)},
-		{ID: "E3c-finality", Desc: "CL finality reached; then finalized epoch ≥ current − 3", Status: passIf(len(finalityFails) == 0),
+		{ID: "E3c-finality", Desc: "CL finality reached; then finalized epoch ≥ head epoch − 3 and head slot ≥ wall-clock slot − 32", Status: passIf(len(finalityFails) == 0),
 			Detail: firstN(finalityFails, 3)},
 		errorsCheck(errs, nodeErrs, len(samples)),
 		{ID: "E3c-nodes", Desc: fmt.Sprintf("every sample has the inventory's %d ELs and %d CLs", n, n), Status: statusPass},

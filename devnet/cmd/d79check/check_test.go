@@ -65,24 +65,24 @@ func TestTablesCheck(t *testing.T) {
 		"04": {Buckets: map[string][]crawlEntry{"256": {{"01", true}, {"02", true}, {"03", true}}}},
 	}}
 	res := classifyTables(fourNodes(), full)
-	if c := tablesCheck(res, "/runs/x/snapshots/t30m"); c.Status != statusPass || c.Sub[0].Status != statusPass || c.Sub[1].Status != statusInfo {
+	if c := tablesCheck(res, "/runs/x/snapshots/t30m", oldNew); c.Status != statusPass || c.Sub[0].Status != statusPass || c.Sub[1].Status != statusInfo {
 		t.Errorf("full tables at t30m: %+v", c)
 	}
-	if c := tablesCheck(res, "/runs/x/snapshots/t10m"); c.Sub[0].Status != statusNA || c.Status != statusNA {
+	if c := tablesCheck(res, "/runs/x/snapshots/t10m", oldNew); c.Sub[0].Status != statusNA || c.Status != statusNA {
 		t.Errorf("full tables at t10m: %+v", c)
 	}
 	// el-4 answered but holds only dead entries: E1(a) fails, E1(b) lacks data.
 	full.Nodes["04"] = crawlRead{Buckets: map[string][]crawlEntry{"256": {{"01", false}}}}
 	res = classifyTables(fourNodes(), full)
-	if c := tablesCheck(res, "/runs/x/snapshots/t30m"); c.Status != statusFail || c.Sub[1].Status != statusMissing {
+	if c := tablesCheck(res, "/runs/x/snapshots/t30m", oldNew); c.Status != statusFail || c.Sub[1].Status != statusMissing {
 		t.Errorf("one empty table: %+v", c)
 	}
 	delete(full.Nodes, "04")
 	res = classifyTables(fourNodes(), full)
-	if c := tablesCheck(res, "/runs/x/snapshots/t60m"); c.Status != statusMissing || c.Sub[0].Status != statusMissing || c.Sub[1].Status != statusMissing {
+	if c := tablesCheck(res, "/runs/x/snapshots/t60m", oldNew); c.Status != statusMissing || c.Sub[0].Status != statusMissing || c.Sub[1].Status != statusMissing {
 		t.Errorf("one table unread: %+v", c)
 	}
-	if c := tablesCheck(classifyTables(fourNodes(), &crawlTables{}), "/runs/x"); c.Status == statusPass {
+	if c := tablesCheck(classifyTables(fourNodes(), &crawlTables{}), "/runs/x", oldNew); c.Status == statusPass {
 		t.Errorf("no tables read: %+v", c)
 	}
 }

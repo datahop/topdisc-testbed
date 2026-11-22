@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -35,7 +36,7 @@ func runFor(inv *inventory) *runData {
 
 func okLog(n node) logsNode {
 	return logsNode{Name: n.Name, Kind: n.Kind, Lines: 10, Levels: map[string]int{"DEBUG": 5}, Removed: map[string]int{},
-		Templates: map[string]int{}}
+		RemovedByPeer: map[string]int{}, Templates: map[string]int{}}
 }
 
 func withLogs(rd *runData, edit func(*logsNode)) *runData {
@@ -220,11 +221,11 @@ func TestE2cPerNode(t *testing.T) {
 		})
 	}
 	c := removalCheck(mk(nil))
-	if c.Status != statusFail || !strings.Contains(c.Detail, "el-3-geth-lighthouse old 1 new 6") || strings.Contains(c.Detail, "el-1-geth") {
+	if c.Status != statusInfo || !strings.Contains(c.Detail, "above 2×: el-3-geth-lighthouse old 1 new 6") || strings.Contains(c.Detail, "el-1-geth") {
 		t.Errorf("el-3 over the rate: %s %s", c.Status, c.Detail)
 	}
 	c = removalCheck(mk(map[string][2]int{"el-3-geth-lighthouse": {4, 3}}))
-	if c.Status != statusPass || !strings.Contains(c.Detail, "3 nodes judged") || !strings.Contains(c.Detail, "el-4-geth-lighthouse old 0 new 2") {
+	if c.Status != statusInfo || !strings.Contains(c.Detail, "3 nodes compared, none above 2×") || !strings.Contains(c.Detail, "el-4-geth-lighthouse old 0 new 2") {
 		t.Errorf("all within: %s %s", c.Status, c.Detail)
 	}
 	small := map[string][2]int{"el-2-geth-lighthouse": {0, 1}, "el-3-geth-lighthouse": {0, 0}, "el-5-geth-lighthouse": {1, 1}}
@@ -235,6 +236,11 @@ func TestE2cPerNode(t *testing.T) {
 	rd.logs.Nodes[4].Levels = map[string]int{"INFO": 10}
 	if c = removalCheck(rd); c.Status != statusMissing || !strings.Contains(c.Detail, "el-5-geth-lighthouse: no DEBUG lines") {
 		t.Errorf("el-5 without debug: %s %s", c.Status, c.Detail)
+	}
+	rd = mk(nil)
+	rd.logs.Nodes[4].Levels = map[string]int{"INFO": 10}
+	if c = removalCheck(rd); c.Status != statusMissing || !strings.Contains(c.Detail, "above 2×: el-3-geth-lighthouse") {
+		t.Errorf("el-5 without debug, el-3 above: %s %s", c.Status, c.Detail)
 	}
 	rd.logs.Nodes = rd.logs.Nodes[:3]
 	if c = removalCheck(rd); c.Status != statusMissing || !strings.Contains(c.Detail, "el-4-geth-lighthouse: not in logs.json") {
@@ -295,6 +301,95 @@ func TestE2Control(t *testing.T) {
 	}
 }
 
+// TestE2SingleKindControl judges a stock-only run against the control like a mixed run.
+func TestE2SingleKindControl(t *testing.T) {
+	stock := func() *runData {
+		return withMetrics(withLogs(runFor(genInventory(9, 0)), nil), "snapshots/t30m", 1795, 100, nil)
+	}
+	c := buildChecks(stock(), stock())[1]
+	got := map[string]check{}
+	flatten([]check{c}, 0, func(c check, _ int) { got[c.ID] = c })
+	if c.Status != statusPass {
+		t.Errorf("E2 = %s: %s", c.Status, renderTable([]check{c}))
+	}
+	for id, want := range map[string]string{
+		"E2a": "9 old nodes", "E2b": "on 9 old nodes, control 0 on 9", "E2d snapshots/t30m": "8 vs 8 old nodes",
+	} {
+		if !strings.Contains(got[id].Detail, want) {
+			t.Errorf("%s detail %q, want %q", id, got[id].Detail, want)
+		}
+	}
+	if s := got["E2c"].Status; s != statusInfo {
+		t.Errorf("E2c = %s %s", s, got["E2c"].Detail)
+	}
+	above := withLogs(runFor(genInventory(9, 0)), func(l *logsNode) {
+		if l.Name == "el-3-geth-lighthouse" {
+			l.RemovedByPeer = map[string]int{"el-2-geth-lighthouse": 6, "el-5-geth-lighthouse": 1}
+		}
+	})
+	withMetrics(above, "snapshots/t30m", 1795, 100, nil)
+	if c := buildChecks(above, stock())[1]; c.Status != statusPass || c.Sub[2].Status != statusInfo ||
+		!strings.Contains(c.Sub[2].Detail, "above 2×: el-3-geth-lighthouse") {
+		t.Errorf("E2 with el-3 above 2× = %s: %s", c.Status, renderTable([]check{c}))
+	}
+	if c := buildChecks(stock(), nil)[1]; c.Status != statusNeedsControl {
+		t.Errorf("E2 without control = %s: %s", c.Status, renderTable([]check{c}))
+	}
+}
+
+// TestE3cFromSamples: report re-judges E3c from heads.jsonl and falls back to the saved
+// heads.json check when the samples cannot be read.
+func TestE3cFromSamples(t *testing.T) {
+	inv := genInventory(1, 1)
+	sample := func(e float64, slot, block, fin uint64) headSample {
+		s := headSample{Elapsed: e}
+		for i, n := range inv.Nodes {
+			el := elSample{Name: n.Name, Latest: &blockRef{block, blockHash(block)}, Syncing: boolp(false), NotFinalized: fin == 0}
+			if fin > 0 {
+				el.Finalized = &blockRef{fin * 32, blockHash(fin * 32)}
+			}
+			s.ELs = append(s.ELs, el)
+			s.CLs = append(s.CLs, clSample{Name: clNodeName(i), HeadSlot: u64(slot), FinalizedEpoch: u64(fin)})
+		}
+		return s
+	}
+	dir := t.TempDir()
+	rd := runFor(inv)
+	if err := writeJSON(filepath.Join(dir, "inventory-check.json"), rd.inv); err != nil {
+		t.Fatal(err)
+	}
+	saved := headsResult{Check: check{ID: "E3c", Desc: "heads", Status: statusFail, Detail: "saved verdict"}}
+	if err := writeJSON(filepath.Join(dir, "heads.json"), saved); err != nil {
+		t.Fatal(err)
+	}
+	var lines []byte
+	for _, s := range []headSample{sample(1500, 125, 125, 0), sample(1512, 126, 126, 1), sample(2700, 225, 225, 5)} {
+		b, _ := json.Marshal(s)
+		lines = append(append(lines, b...), '\n')
+	}
+	jsonl := filepath.Join(dir, "heads.jsonl")
+	e3c := func() check {
+		t.Helper()
+		rd, err := loadRun(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return buildChecks(rd, nil)[2].Sub[2]
+	}
+	os.WriteFile(jsonl, lines, 0o644)
+	if c := e3c(); c.Status != statusPass {
+		t.Errorf("from heads.jsonl: %s", renderTable([]check{c}))
+	}
+	os.WriteFile(jsonl, lines[:len(lines)-20], 0o644)
+	if c := e3c(); c.Status != statusFail || c.Detail != "saved verdict" {
+		t.Errorf("truncated heads.jsonl: %s", renderTable([]check{c}))
+	}
+	os.Remove(jsonl)
+	if c := e3c(); c.Status != statusFail || c.Detail != "saved verdict" {
+		t.Errorf("no heads.jsonl: %s", renderTable([]check{c}))
+	}
+}
+
 func TestE3aSnapshots(t *testing.T) {
 	rd := runFor(testInventory())
 	rd.subdirs = []string{".", "snapshots/t10m", "snapshots/t30m"}
@@ -323,15 +418,15 @@ func TestControlRun(t *testing.T) {
 	small := withMetrics(withLogs(runFor(genInventory(4, 0)), nil), "snapshots/t30m", 1790, 100, nil)
 	same := withMetrics(withLogs(runFor(genInventory(9, 0)), nil), "snapshots/t30m", 1790, 100, nil)
 	withMetrics(run, ".", 1800, 100, nil)
-	if c := e2Check(run, small, false); c.Status != statusMissing || !strings.Contains(c.Detail, "control has 4 nodes, run 9") {
+	if c := e2Check(run, small); c.Status != statusMissing || !strings.Contains(c.Detail, "control has 4 nodes, run 9") {
 		t.Errorf("E2 with a 4-node control = %s %s", c.Status, c.Detail)
 	}
 	both := withMetrics(withLogs(runFor(genInventory(3, 1)), nil), "snapshots/t30m", 1790, 100, nil)
-	if c := e2Check(run, both, false); c.Status != statusMissing || !strings.HasPrefix(c.Detail, "control has 4 nodes, run 9; control has 1 NEW nodes") {
+	if c := e2Check(run, both); c.Status != statusMissing || !strings.HasPrefix(c.Detail, "control has 4 nodes, run 9; control has 1 NEW nodes") {
 		t.Errorf("E2 with a 4-node mixed control = %s %s", c.Status, c.Detail)
 	}
 	withMetrics(same, ".", 1800, 100, nil)
-	if c := e2Check(run, same, false); c.Status != statusPass {
+	if c := e2Check(run, same); c.Status != statusPass {
 		t.Errorf("E2 with a 9-node control = %s %s", c.Status, renderTable([]check{c}))
 	}
 

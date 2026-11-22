@@ -35,6 +35,7 @@ type logsNode struct {
 	BadPacket         int            `json:"bad_packet"`
 	BadPacketErrs     map[string]int `json:"bad_packet_errs,omitempty"`
 	Removed           map[string]int `json:"removed_by_kind"`
+	RemovedByPeer     map[string]int `json:"removed_by_peer"`
 	Templates         map[string]int `json:"templates"`
 	Reorgs            int            `json:"reorgs"`
 	ReorgsAfterWarmup int            `json:"reorgs_after_warmup"`
@@ -136,7 +137,7 @@ func logTemplate(msg string) string {
 
 func scanLog(path string, n node, inv *inventory, warmup time.Time, probes []string) logsNode {
 	ln := logsNode{Name: n.Name, Kind: n.Kind, Levels: map[string]int{}, Removed: map[string]int{},
-		Templates: map[string]int{}, BadPacketErrs: map[string]int{}}
+		RemovedByPeer: map[string]int{}, Templates: map[string]int{}, BadPacketErrs: map[string]int{}}
 	f, err := os.Open(path)
 	if err != nil {
 		ln.Error = err.Error()
@@ -180,7 +181,10 @@ func scanLog(path string, n node, inv *inventory, warmup time.Time, probes []str
 		case msg == "Removing p2p peer":
 			kind := kindUnknown
 			if im := logIDRe.FindStringSubmatch(rest); im != nil {
-				kind = inv.kindOf(im[1])
+				if i := inv.indexOf(im[1]); i >= 0 {
+					ln.RemovedByPeer[inv.Nodes[i].Name]++
+					kind = inv.Nodes[i].Kind
+				}
 			}
 			ln.Removed[kind]++
 		case msg == "Chain reorg detected" || msg == "Large chain reorg detected":

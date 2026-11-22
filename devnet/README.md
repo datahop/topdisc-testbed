@@ -154,12 +154,12 @@ name, or `-enclave`.
 | `heads` | `heads.jsonl`, `heads.json` | every 12 s for `-duration` (default 75 min, a full M4 run; start it at genesis): EL latest and finalized (number, hash), `eth_syncing`, CL head slot and finalized epoch; E3 heads |
 | `txs` | `txs.json` | 20 transfers (`-n`) from prefunded account 20 via one OLD and one NEW EL (not participant 0 when possible); per node the time from send to the first poll (every `-poll`, default 100 ms, watchers started before the first send) that shows the tx pending; with the default the figure is the poll period, an upper bound on propagation, and the inclusion block |
 | `metrics` | `metrics.json` | DV7 series from `/debug/metrics` (procload, goroutines, `p2p/*` and `discover/*` traffic, fork topic meters and `discover/regtopic/*` when present, `discover/v5/bad`), container memory from `docker stats` |
-| `logs` | `logs.json` | per EL: `Bad discv5 packet`, `Removing p2p peer` by removed peer kind, WARN/ERROR/CRIT message templates, reorgs (all and after `-warmup`, 10 min after genesis), topic registration and query lines; `Topic registration *` lines whose `id=` belongs to a host probe in `<run>/probes.json` (see Host probes; no file, nothing ignored) are not counted, and the number ignored is printed and kept per node |
+| `logs` | `logs.json` | per EL: `Bad discv5 packet`, `Removing p2p peer` by removed peer kind and, for inventory peers, by peer name (`removed_by_peer`), WARN/ERROR/CRIT message templates, reorgs (all and after `-warmup`, 10 min after genesis), topic registration and query lines; `Topic registration *` lines whose `id=` belongs to a host probe in `<run>/probes.json` (see Host probes; no file, nothing ignored) are not counted, and the number ignored is printed and kept per node |
 | `tables` | `tables.json`, `tables-crawl/` | E1(a,b): `bin/crawl -sample-full -no-td -sample 2m -duration 6m` from 31400, seeded with every ENR, then `tools/crawl_tables.py`; each node's live table entries as old, new or other (not in the inventory), and its NEW count against the 99 % binomial band, p = N_new/(N−1) for an OLD node and (N_new−1)/(N−1) for a NEW one |
 | `crawl-reach` | `crawl-reach.json`, `crawl-reach/` | E1(c): stock `bin/devp2p-v1.17.10 discv5 crawl` (`cmd/devp2p` of upstream go-ethereum v1.17.10, built by `build-tools.sh`) twice in parallel for 5 min, from 31410 seeded with the first OLD ENR and from 31411 with the first NEW ENR; nodes reached and time to full reach from `firstResponse` |
 | `topic` | `topic.json`, `topic-<seed>.log` | E4(a,b): a fork discv5 node on 31420 runs `TopicSearch` for `eth.DiscoveryTopic(chain id, genesis hash)` (from `eth_chainId` and block 0 of the first EL) for 10 min, seeded with the first NEW node, then the first OLD node (`-seed new\|old\|both\|enr:…`), one key per seed; refuses to run earlier than 20 min after genesis; a later run in the same dir adds its seeds |
 | `badpacket-control` | `badpacket-control.json` | E2 positive control: from 31430, a random packet to an OLD node (first OLD, or `-target`), then a handshake carrying a REGTOPIC; counts that node's `Bad discv5 packet` lines from the probe in `docker logs`, pass at exactly one with `unknown packet type 7`; refuses `d79-control` and `d79-mixed-*` |
-| `report` | `checks.json`, `summary.md` | merges the run dir and `snapshots/*/`, prints the E table |
+| `report` | `checks.json`, `summary.md` | merges the run dir and `snapshots/*/`, prints the E table; re-judges E3c from `heads.jsonl` when present (else uses `heads.json`); `-out` writes elsewhere, so a saved run can be re-reported without touching it |
 
 Thresholds in `report`. A check passes only on complete data: a node, log,
 metric or snapshot that is absent, unreadable or not comparable makes it
@@ -176,18 +176,26 @@ FAIL. `info` and `n/a` rows do not count towards the parent's status.
 | E2a, E4e | every OLD node has a readable log with 0 `Bad discv5 packet` lines, and a `discover/v5/bad` reading of 0 in every `metrics.json` of the run |
 | E2 | the control (`-control`) has no NEW nodes and the same node count as the run, else E2 is `missing` naming both counts |
 | E2b | the control has no NEW nodes; every OLD node's log (run and control) is readable; the run's OLD-node WARN/ERROR/CRIT templates ⊆ the control's (the control's participant 0 counts only when the run's participant 0 is OLD) |
-| E2c | per OLD node except participant 0, with DEBUG lines in its log: removals of NEW peers per NEW node ≤ 2 × removals of OLD peers per other OLD node; a node with fewer than 5 removals is listed as informational, not judged (all such: `info`) |
+| E2c | `info` only, never PASS or FAIL: every removal comes from geth's random eth-layer peer dropper, which never sees discovery. (A/B in a single-kind run) per OLD node except participant 0, with DEBUG lines in its log: removals of NEW peers per NEW node vs 2 × removals of OLD peers per other OLD node, nodes above 2× listed; a node with fewer than 5 removals is listed but not compared; an unreadable log, no DEBUG lines or no `removed_by_peer` (split) is `missing` |
 | E2d | the control has no NEW nodes; at every location with a `metrics.json` in the run or the control, both have one, both ages are within 60 s of the nominal `t<m>m` (or of each other for the run dir), and every OLD node except participant 0 has every series; then the medians of `system/cpu/procload/total`, memory, `p2p/ingress\|egress`, `discover/ingress\|egress` and goroutines are within ±25 % of the control's |
-| E3a | every snapshot dir has a `peers.json` (else `missing`); at every snapshot every EL answered `admin_peers`, every OLD node has ≥ 1 NEW peer and every NEW node ≥ 1 OLD peer |
+| E3a | (A/B in a single-kind run) every snapshot dir has a `peers.json` (else `missing`); at every snapshot every EL answered `admin_peers`, every OLD node has ≥ 1 NEW peer and every NEW node ≥ 1 OLD peer |
 | E3b | every tx shows pending (no `blockNumber`) on every other EL in a response completed within 10 s of its send, and is mined ≤ 2 blocks after the head at send; the sends are a burst, so only the maximum first poll hit is reported, as an upper bound |
 | E3c | every sample has one EL and one CL per inventory entry, and every node answered every assessed field at least once; per sample ≤ 2 distinct EL heads; one hash per block number; `eth_syncing` false from +600 s (missing without a sample there); finality (below); query errors at most max(1, 1 % of the samples) per node (listed as `info`), more fail |
-| E3c finality | judged from the first sample in which a CL reports finalized epoch ≥ 1 (before it, geth's "finalized block not found" means not finalized yet); no such sample by the end of the run fails ("never finalized"); after it, every CL's finalized epoch is monotone and ≥ current epoch − 3, and every EL's finalized block is monotone, unique per number and never lost (each EL gets one sample of grace after the first finality before "not found" counts as an error); `heads.json` records the first finalization and the syncing window |
+| E3c finality | judged from the first sample in which a CL reports finalized epoch ≥ 1 (before it, geth's "finalized block not found" means not finalized yet); no such sample by the end of the run fails ("never finalized"); after it, every CL's finalized epoch is monotone and ≥ the epoch of the CL's own head slot − 3, every CL's head slot is at most 32 slots (one epoch) behind the wall-clock slot (elapsed time since the beacon genesis / 12 s), so a stalled chain fails, and every EL's finalized block is monotone, unique per number and never lost (each EL gets one sample of grace after the first finality before "not found" counts as an error); `heads.json` records the first finalization and the syncing window |
 | E3d | every EL has a readable log with 0 `Chain reorg detected` after warm-up |
 | E4c | every NEW node has the four topic meters and `discover/regtopic/*` counters: `REGCONFIRMATION`, `TOPICNODES`, `REGTOPIC`, `TOPICQUERY` ingress > 0, `discover/regtopic/*` = 0 |
 | E4d | every NEW node has a readable log with ≥ 1 `Topic registration successful`, 0 failed, ≥ 1 `Topic query answered` with n > 0 |
 
-E2 shows "needs control" without `-control`; a single-kind run (the control)
-shows E1, E2 and E4 as n/a. E1 and E4 show "needs M3b" until the M3b files
+E2 shows "needs control" without `-control`. A single-kind run (the control)
+is split by inventory position: A = even 0-based positions (participant 0 in
+A, the extra node for an odd count), B = odd ones. A plays the OLD role and B
+the NEW role, so participant 0 is left out of E2c and E2d as in R1. E1a/E1b
+(from the entry IDs in `tables.json`), E2c (from `removed_by_peer`; an older
+`logs.json` without it makes E2c `missing`) and E3a (from the peer IDs in
+`peers.json`) judge A against B; E2a, E2b, E2d, E3b, the saved name-mismatch
+list and every collection command use the real kind; E1c, E3c and E3d have
+no kind. `checks.json` (`split`) and `summary.md` name both groups. E4 stays
+n/a. E1 and E4 show "needs M3b" until the M3b files
 (`tables.json`, `crawl-reach.json`, `topic.json`, in the run dir or a snapshot
 dir) exist. Each holds its data and a top-level `check` object
 `{id, desc, status, detail, sub}` with status PASS, FAIL, missing, n/a or
