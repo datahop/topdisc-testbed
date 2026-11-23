@@ -2,9 +2,9 @@
 
 A post-Merge devnet on one host that mixes TopDisc geth (NEW, the
 `datahop/go-ethereum` `topdisc` branch with `--discovery.topic`) and stock geth
-(OLD), each EL paired with a stock Lighthouse beacon node and validator client,
-to show that the two versions share discv5 tables and eth peering and that the
-old nodes are unaffected. It runs the Kurtosis
+(OLD), each EL paired with a stock Lighthouse beacon node and, by default, a
+validator client, to show that the two versions share discv5 tables and eth
+peering and that the old nodes are unaffected. It runs the Kurtosis
 [ethereum-package](https://github.com/ethpandaops/ethereum-package) from a
 pinned, unpatched local checkout on the host's Docker.
 
@@ -58,7 +58,7 @@ the Go module cache.
 ## Parameters
 
 ```sh
-devnet/gen-params.sh <run> <n_new> <n_old> <new|old> [old image]
+[VAL_NEW=k] [VAL_OLD=k] devnet/gen-params.sh <run> <n_new> <n_old> <new|old> [old image]
 ```
 
 writes `params/<run>.yaml`. The checked-in files:
@@ -75,10 +75,21 @@ EL (and CL) only participant 0's ENR, so participant 0 is the one bootnode.
 Without `--bootnodes=` geth falls back to the mainnet discv5 bootnodes, so
 participant 0 gets an explicit empty list. Every EL logs at debug; NEW nodes
 add `--discovery.topic`, `--log.vmodule=p2p/discover/topicindex/*=5` and
-`--identity=topdisc`. Each participant has 32 validators. Fulu is at genesis,
-and the package then requires one supernode or at least one node with 128 or
-more validators, so participant 0's beacon node is a supernode in every run.
+`--identity=topdisc`. By default each participant has 32 validators. Fulu is at
+genesis, and the package then requires one supernode or at least one node with
+128 or more validators, so participant 0's beacon node is a supernode in every
+run.
 No additional services.
+
+`VAL_NEW` and `VAL_OLD` give validators to only that many NEW and OLD
+participants (default: all), so one host fits more EL+CL pairs. Participant 0
+always validates and counts toward its kind. Each kind is then written as a
+group with `validator_count: 32` followed by one with `validator_count: 0`; the
+package starts no validator client for the latter. Each must be between 1 and
+the kind's count (0 when the count is 0); when either is set, the total must
+be at least 64 validators.
+The header line records them when set. Example, 60 pairs with 320 validators:
+`VAL_NEW=5 VAL_OLD=5 devnet/gen-params.sh mixed60 30 30 old`.
 
 ## Running
 
